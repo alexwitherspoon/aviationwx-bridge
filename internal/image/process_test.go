@@ -485,4 +485,3 @@ func BenchmarkProcessor_Process_NoResize(b *testing.B) {
 		}
 	}
 }
-

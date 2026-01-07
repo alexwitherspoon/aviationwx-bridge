@@ -312,4 +312,3 @@ func TestGetDiskStats_InvalidPath(t *testing.T) {
 			used, free, total)
 	}
 }
-

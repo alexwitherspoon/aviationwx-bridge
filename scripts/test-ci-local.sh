@@ -49,6 +49,19 @@ check_docker() {
     log_success "Docker is running"
 }
 
+# Run gofmt check (same as CI)
+run_gofmt_check() {
+    log_info "Running gofmt check..."
+    
+    if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+        log_error "Code is not formatted. Run 'gofmt -s -w .'"
+        gofmt -s -l .
+        return 1
+    fi
+    
+    log_success "Code is properly formatted"
+}
+
 # Run tests locally (without act, faster)
 run_tests_native() {
     log_info "Running tests natively (faster than act)..."
@@ -174,6 +187,9 @@ main() {
     echo ""
     
     case "$command" in
+        fmt)
+            run_gofmt_check
+            ;;
         test)
             run_tests_native
             ;;
@@ -198,6 +214,8 @@ main() {
             run_release_simulation
             ;;
         all)
+            run_gofmt_check
+            echo ""
             run_tests_native
             echo ""
             run_lint_native
@@ -208,16 +226,17 @@ main() {
             run_docker_build
             ;;
         *)
-            echo "Usage: $0 [test|lint|build|docker|act|release|all]"
+            echo "Usage: $0 [fmt|test|lint|build|docker|act|release|all]"
             echo ""
             echo "Commands:"
+            echo "  fmt      Check code formatting (gofmt -s)"
             echo "  test     Run Go tests natively"
             echo "  lint     Run golangci-lint"
             echo "  build    Build Go binaries for all platforms"
             echo "  docker   Build Docker image locally"
             echo "  act      Run full CI workflow via act"
             echo "  release  Simulate release workflow (dry run)"
-            echo "  all      Run test, lint, build, docker (default)"
+            echo "  all      Run fmt, test, lint, build, docker (default)"
             exit 1
             ;;
     esac

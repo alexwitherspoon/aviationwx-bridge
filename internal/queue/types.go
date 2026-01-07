@@ -185,4 +185,3 @@ func (d *defaultLogger) Debug(msg string, keysAndValues ...interface{}) {}
 func (d *defaultLogger) Info(msg string, keysAndValues ...interface{})  {}
 func (d *defaultLogger) Warn(msg string, keysAndValues ...interface{})  {}
 func (d *defaultLogger) Error(msg string, keysAndValues ...interface{}) {}
-

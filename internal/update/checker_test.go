@@ -163,4 +163,3 @@ func TestChecker_SetError(t *testing.T) {
 		t.Error("LastCheck should be set")
 	}
 }
-

@@ -326,4 +326,3 @@ func (m *Manager) GetTotalImageCount() int {
 	}
 	return total
 }
-

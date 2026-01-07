@@ -203,4 +203,3 @@ func (c *Checker) setResult(version, url string, updateAvailable bool) {
 	c.lastCheck = time.Now()
 	c.lastError = nil
 }
-

@@ -101,4 +101,3 @@ func (e *TimeoutError) Error() string {
 func (e *TimeoutError) Unwrap() error {
 	return e.Err
 }
-

@@ -790,23 +790,6 @@ func (q *Queue) getFreeSpace() (int64, error) {
 	return int64(stat.Bavail) * int64(stat.Bsize), nil
 }
 
-// hasSpaceForImage checks if there's enough space for an image of the given size
-// Requires at least 2x the image size as a safety margin
-func (q *Queue) hasSpaceForImage(sizeBytes int64) bool {
-	freeSpace, err := q.getFreeSpace()
-	if err != nil {
-		// If we can't check, be optimistic but log
-		q.logger.Warn("Could not check free space",
-			"camera", q.state.CameraID,
-			"error", err)
-		return true
-	}
-
-	// Require 2x image size as margin (for atomic write tmp file + final)
-	required := sizeBytes * 2
-	return freeSpace > required
-}
-
 // isNoSpaceError checks if an error is a "no space left on device" error
 func isNoSpaceError(err error) bool {
 	if err == nil {
@@ -821,4 +804,3 @@ func isNoSpaceError(err error) bool {
 	// Also check error message as fallback
 	return strings.Contains(err.Error(), "no space left")
 }
-

@@ -82,4 +82,3 @@ func TestCaptureError_Unwrap(t *testing.T) {
 		t.Errorf("Unwrap() = %v, want %v", unwrapped, originalErr)
 	}
 }
-

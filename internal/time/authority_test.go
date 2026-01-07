@@ -340,4 +340,3 @@ func TestDefaultAuthorityConfig(t *testing.T) {
 		t.Errorf("expected CameraRejectDriftSeconds 300, got %d", config.CameraRejectDriftSeconds)
 	}
 }
-

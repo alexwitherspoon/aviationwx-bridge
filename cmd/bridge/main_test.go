@@ -346,4 +346,3 @@ func TestConfigRoundTrip(t *testing.T) {
 			loaded.WebConsole.Password, original.WebConsole.Password)
 	}
 }
-

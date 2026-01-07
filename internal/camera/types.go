@@ -95,4 +95,3 @@ func (e *CaptureError) Error() string {
 func (e *CaptureError) Unwrap() error {
 	return e.Err
 }
-

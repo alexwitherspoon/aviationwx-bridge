@@ -31,30 +31,30 @@ const (
 // SystemStats holds current system resource statistics
 type SystemStats struct {
 	// CPU
-	CPUPercent     float64 `json:"cpu_percent"`
-	CPULevel       Level   `json:"cpu_level"`
-	NumGoroutines  int     `json:"num_goroutines"`
-	NumCPU         int     `json:"num_cpu"`
+	CPUPercent    float64 `json:"cpu_percent"`
+	CPULevel      Level   `json:"cpu_level"`
+	NumGoroutines int     `json:"num_goroutines"`
+	NumCPU        int     `json:"num_cpu"`
 
 	// Memory
-	MemUsedMB      float64 `json:"mem_used_mb"`
-	MemTotalMB     float64 `json:"mem_total_mb"`
-	MemPercent     float64 `json:"mem_percent"`
-	MemLevel       Level   `json:"mem_level"`
-	HeapAllocMB    float64 `json:"heap_alloc_mb"`
-	HeapSysMB      float64 `json:"heap_sys_mb"`
-	GCPauseMs      float64 `json:"gc_pause_ms"`
+	MemUsedMB   float64 `json:"mem_used_mb"`
+	MemTotalMB  float64 `json:"mem_total_mb"`
+	MemPercent  float64 `json:"mem_percent"`
+	MemLevel    Level   `json:"mem_level"`
+	HeapAllocMB float64 `json:"heap_alloc_mb"`
+	HeapSysMB   float64 `json:"heap_sys_mb"`
+	GCPauseMs   float64 `json:"gc_pause_ms"`
 
 	// Disk/Filesystem (for queue tmpfs)
-	DiskUsedMB     float64 `json:"disk_used_mb"`
-	DiskFreeMB     float64 `json:"disk_free_mb"`
-	DiskTotalMB    float64 `json:"disk_total_mb"`
-	DiskPercent    float64 `json:"disk_percent"`
-	DiskLevel      Level   `json:"disk_level"`
+	DiskUsedMB  float64 `json:"disk_used_mb"`
+	DiskFreeMB  float64 `json:"disk_free_mb"`
+	DiskTotalMB float64 `json:"disk_total_mb"`
+	DiskPercent float64 `json:"disk_percent"`
+	DiskLevel   Level   `json:"disk_level"`
 
 	// Overall
-	OverallLevel   Level   `json:"overall_level"`
-	Uptime         string  `json:"uptime"`
+	OverallLevel Level  `json:"overall_level"`
+	Uptime       string `json:"uptime"`
 }
 
 // SystemMonitor tracks system resource usage over time
@@ -166,7 +166,7 @@ func (m *SystemMonitor) getDiskStats() (usedMB, freeMB, totalMB float64) {
 	if m.queueBasePath == "" {
 		return 0, 0, 0
 	}
-	
+
 	// Use statfs to get filesystem stats
 	// This is implemented in the queue package, so we do a simple file-based check here
 	info, err := os.Stat(m.queueBasePath)
@@ -174,7 +174,7 @@ func (m *SystemMonitor) getDiskStats() (usedMB, freeMB, totalMB float64) {
 		return 0, 0, 0
 	}
 	_ = info // We need syscall for proper stats, handled by caller
-	
+
 	return 0, 0, 0 // Placeholder - actual values come from queue manager
 }
 
@@ -275,4 +275,3 @@ func worstLevel(levels ...Level) Level {
 	}
 	return worst
 }
-

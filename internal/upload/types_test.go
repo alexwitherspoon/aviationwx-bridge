@@ -134,4 +134,3 @@ func TestTimeoutError_WithoutUnderlying(t *testing.T) {
 		t.Error("TimeoutError.Error() returned empty string")
 	}
 }
-

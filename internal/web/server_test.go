@@ -1044,4 +1044,3 @@ func TestCameraToMap_WithRTSP(t *testing.T) {
 		t.Error("rtsp password not masked")
 	}
 }
-

@@ -386,22 +386,22 @@ func (b *Bridge) getStatus() interface{} {
 	if b.systemMonitor != nil {
 		sysStats := b.systemMonitor.GetStats()
 		result["system"] = map[string]interface{}{
-			"cpu_percent":     sysStats.CPUPercent,
-			"cpu_level":       sysStats.CPULevel,
-			"num_goroutines":  sysStats.NumGoroutines,
-			"num_cpu":         sysStats.NumCPU,
-			"mem_used_mb":     sysStats.MemUsedMB,
-			"mem_total_mb":    sysStats.MemTotalMB,
-			"mem_percent":     sysStats.MemPercent,
-			"mem_level":       sysStats.MemLevel,
-			"heap_alloc_mb":   sysStats.HeapAllocMB,
-			"disk_used_mb":    sysStats.DiskUsedMB,
-			"disk_free_mb":    sysStats.DiskFreeMB,
-			"disk_total_mb":   sysStats.DiskTotalMB,
-			"disk_percent":    sysStats.DiskPercent,
-			"disk_level":      sysStats.DiskLevel,
-			"overall_level":   sysStats.OverallLevel,
-			"uptime":          sysStats.Uptime,
+			"cpu_percent":    sysStats.CPUPercent,
+			"cpu_level":      sysStats.CPULevel,
+			"num_goroutines": sysStats.NumGoroutines,
+			"num_cpu":        sysStats.NumCPU,
+			"mem_used_mb":    sysStats.MemUsedMB,
+			"mem_total_mb":   sysStats.MemTotalMB,
+			"mem_percent":    sysStats.MemPercent,
+			"mem_level":      sysStats.MemLevel,
+			"heap_alloc_mb":  sysStats.HeapAllocMB,
+			"disk_used_mb":   sysStats.DiskUsedMB,
+			"disk_free_mb":   sysStats.DiskFreeMB,
+			"disk_total_mb":  sysStats.DiskTotalMB,
+			"disk_percent":   sysStats.DiskPercent,
+			"disk_level":     sysStats.DiskLevel,
+			"overall_level":  sysStats.OverallLevel,
+			"uptime":         sysStats.Uptime,
 		}
 	}
 

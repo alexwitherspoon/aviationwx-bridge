@@ -133,4 +133,3 @@ func TestTimeHealth_Start(t *testing.T) {
 	// Note: We can't easily test the periodic nature without waiting
 	// But we verify Start() doesn't panic and initial check happens
 }
-

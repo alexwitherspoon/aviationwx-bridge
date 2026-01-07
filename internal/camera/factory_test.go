@@ -79,4 +79,3 @@ func TestNewCamera(t *testing.T) {
 		})
 	}
 }
-

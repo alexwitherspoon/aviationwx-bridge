@@ -174,4 +174,3 @@ func TestPackageLevelFunctions(t *testing.T) {
 		t.Error("should contain error msg")
 	}
 }
-

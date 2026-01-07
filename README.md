@@ -26,12 +26,6 @@ Choose the path that matches your environment:
 One command installs everything:
 
 ```bash
-curl -fsSL https://get.aviationwx.org/bridge | sudo bash
-```
-
-Or directly from GitHub:
-
-```bash
 curl -fsSL https://raw.githubusercontent.com/alexwitherspoon/aviationwx-bridge/main/scripts/install.sh | sudo bash
 ```
 

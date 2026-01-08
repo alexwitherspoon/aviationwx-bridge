@@ -3,53 +3,95 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "**.MD"
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   test:
+    name: Test & Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache-dependency-path: go.sum
 
       - name: Install exiftool
         run: sudo apt-get update && sudo apt-get install -y libimage-exiftool-perl
 
-      - name: Install dependencies
+      - name: Download dependencies
         run: go mod download
 
-      - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out ./...
+      - name: Verify dependencies
+        run: go mod verify
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          file: coverage.out
-        continue-on-error: true
+      - name: Run go vet
+        run: go vet ./...
 
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
+      - name: Run gofmt check
+        run: |
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo "❌ Code is not formatted. Run 'gofmt -s -w .'"
+            gofmt -s -d .
+            exit 1
+          fi
+          echo "✓ Code is properly formatted"
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v3
         with:
           version: latest
 
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+        continue-on-error: true
+
+      - name: Check for required files
+        run: |
+          required_files=(
+            "cmd/bridge/main.go"
+            "configs/config.json.example"
+            "docker/Dockerfile"
+            "README.md"
+            "LICENSE"
+          )
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "❌ Required file missing: $file"
+              exit 1
+            fi
+          done
+          echo "✓ All required files present"
+
+      - name: Validate JSON config
+        run: |
+          if [ -f "configs/config.json.example" ]; then
+            python3 -m json.tool configs/config.json.example > /dev/null
+            echo "✓ config.json.example is valid JSON"
+          fi
+
   build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
-    needs: [test, lint]
+    needs: [test]
     strategy:
       matrix:
         include:
@@ -61,7 +103,8 @@ jobs:
             goarch: arm
             goarm: "7"
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -79,10 +122,12 @@ jobs:
           go build -ldflags="-w -s -X main.Version=dev -X main.GitCommit=${GIT_COMMIT}" -o bridge ./cmd/bridge
 
   docker:
+    name: Docker Build
     runs-on: ubuntu-latest
-    needs: [test, lint]
+    needs: [test]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

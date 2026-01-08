@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **CI/CD**: Consolidated and standardized GitHub Actions workflows
+  - Merged `test.yml` and `ci.yml` into single comprehensive CI workflow
+  - Standardized all workflows to Go 1.24 (eliminates tar cache warnings)
+  - Added exiftool installation to all test jobs
+  - Improved test reliability and reduced workflow setup costs
+- **Tests**: Fixed flaky `TestQueue_CapturePause` test
+  - Added explicit verification of queue state before assertions
+  - Added better error messages showing actual vs expected capacity
+  - Test now checks enqueue errors properly
+  - Runs consistently across different environments
+- **Tests**: Changed to fail-closed approach for missing dependencies
+  - Tests now **FAIL** (not skip) if exiftool is missing
+  - Ensures local development environment matches CI/CD requirements
+  - Better error messages with installation instructions
+
+### Added
+- **Documentation**: Added comprehensive local development setup guide (`docs/LOCAL_DEVELOPMENT.md`)
+  - Prerequisites and required tools
+  - Quick start instructions
+  - Testing commands and workflows
+  - Common issues and solutions
+  - Development workflow best practices
+- **Tooling**: Added local CI validation script (`scripts/test-local.sh`)
+  - Runs all the same checks as GitHub Actions CI
+  - Validates Go version, exiftool availability
+  - Runs linting, formatting, tests with race detection
+  - Provides coverage summary and build verification
+  - Color-coded output for easy issue identification
+
 ### Added
 - **System Resources Dashboard**: Real-time monitoring with color-coded health indicators
   - CPU usage with percentage and health level (green/yellow/red)

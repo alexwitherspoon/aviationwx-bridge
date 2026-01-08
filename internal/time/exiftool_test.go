@@ -7,18 +7,19 @@ import (
 	"time"
 )
 
-// skipIfNoExiftool skips the test if exiftool is not available
-func skipIfNoExiftool(t *testing.T) *ExifToolHelper {
+// requireExiftool requires exiftool to be available for the test
+// Tests will FAIL if exiftool is not installed (fail closed approach)
+func requireExiftool(t *testing.T) *ExifToolHelper {
 	t.Helper()
 	helper, err := DefaultExifToolHelper()
 	if err != nil {
-		t.Skipf("exiftool not available: %v", err)
+		t.Fatalf("exiftool is required but not available: %v\n\nInstall exiftool:\n  macOS: brew install exiftool\n  Ubuntu/Debian: sudo apt-get install libimage-exiftool-perl", err)
 	}
 	return helper
 }
 
 func TestExifToolHelper_NewExifToolHelper(t *testing.T) {
-	helper := skipIfNoExiftool(t)
+	helper := requireExiftool(t)
 
 	if helper == nil {
 		t.Fatal("Expected non-nil helper")
@@ -30,7 +31,7 @@ func TestExifToolHelper_NewExifToolHelper(t *testing.T) {
 }
 
 func TestExifToolHelper_IsAvailable(t *testing.T) {
-	helper := skipIfNoExiftool(t)
+	helper := requireExiftool(t)
 
 	if !helper.IsAvailable() {
 		t.Error("Expected exiftool to be available")
@@ -38,7 +39,7 @@ func TestExifToolHelper_IsAvailable(t *testing.T) {
 }
 
 func TestExifToolHelper_GetVersion(t *testing.T) {
-	helper := skipIfNoExiftool(t)
+	helper := requireExiftool(t)
 
 	version, err := helper.GetVersion()
 	if err != nil {
@@ -53,7 +54,7 @@ func TestExifToolHelper_GetVersion(t *testing.T) {
 }
 
 func TestExifToolHelper_ReadEXIF_NoFile(t *testing.T) {
-	helper := skipIfNoExiftool(t)
+	helper := requireExiftool(t)
 
 	// Note: exiftool may return an empty result rather than an error for nonexistent files
 	result, err := helper.ReadEXIF("/nonexistent/path/to/image.jpg")
@@ -70,7 +71,7 @@ func TestExifToolHelper_ReadEXIF_NoFile(t *testing.T) {
 }
 
 func TestExifToolHelper_ReadEXIF_ValidJPEG(t *testing.T) {
-	helper := skipIfNoExiftool(t)
+	helper := requireExiftool(t)
 
 	// Create a temp file with valid JPEG data
 	tmpFile, err := os.CreateTemp("", "exiftool-test-*.jpg")
@@ -103,7 +104,7 @@ func TestExifToolHelper_ReadEXIF_ValidJPEG(t *testing.T) {
 }
 
 func TestExifToolHelper_WriteEXIF(t *testing.T) {
-	helper := skipIfNoExiftool(t)
+	helper := requireExiftool(t)
 
 	// Create temp file
 	tmpFile, err := os.CreateTemp("", "exiftool-write-test-*.jpg")
@@ -164,7 +165,7 @@ func TestExifToolHelper_WriteEXIF(t *testing.T) {
 }
 
 func TestExifToolHelper_WriteEXIFToData(t *testing.T) {
-	helper := skipIfNoExiftool(t)
+	helper := requireExiftool(t)
 
 	jpegData := createTestJPEG(1024)
 
@@ -215,7 +216,7 @@ func TestExifToolHelper_WriteEXIFToData(t *testing.T) {
 }
 
 func TestExifToolHelper_ValidateEXIF(t *testing.T) {
-	helper := skipIfNoExiftool(t)
+	helper := requireExiftool(t)
 
 	// Create temp file with bridge-stamped EXIF
 	tmpFile, err := os.CreateTemp("", "exiftool-validate-*.jpg")
@@ -260,7 +261,7 @@ func TestExifToolHelper_ValidateEXIF(t *testing.T) {
 }
 
 func TestExifToolHelper_ValidateEXIF_Invalid(t *testing.T) {
-	helper := skipIfNoExiftool(t)
+	helper := requireExiftool(t)
 
 	// Create temp file with no EXIF
 	tmpFile, err := os.CreateTemp("", "exiftool-validate-invalid-*.jpg")
@@ -295,7 +296,7 @@ func TestExifToolHelper_ValidateEXIF_Invalid(t *testing.T) {
 }
 
 func TestExifToolHelper_ParseCameraTime(t *testing.T) {
-	helper := skipIfNoExiftool(t)
+	helper := requireExiftool(t)
 
 	tests := []struct {
 		name     string
@@ -425,7 +426,7 @@ func TestGetExifToolPath(t *testing.T) {
 }
 
 func TestExifToolHelper_Timeout(t *testing.T) {
-	helper := skipIfNoExiftool(t)
+	helper := requireExiftool(t)
 
 	// Set very short timeout
 	helper.SetTimeout(1 * time.Nanosecond)

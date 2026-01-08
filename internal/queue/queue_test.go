@@ -293,16 +293,28 @@ func TestQueue_CapturePause(t *testing.T) {
 		t.Fatalf("NewQueue failed: %v", err)
 	}
 
-	// Fill queue to critical level
+	// Fill queue to critical level (90% = 9 out of 10)
 	imageData := createTestJPEG(1024)
 	for i := 0; i < 9; i++ {
 		ts := time.Now().UTC().Add(time.Duration(i) * time.Millisecond)
-		_ = q.Enqueue(imageData, ts, "bridge_clock", "high")
+		err := q.Enqueue(imageData, ts, "bridge_clock", "high")
+		if err != nil {
+			t.Fatalf("Failed to enqueue image %d: %v", i, err)
+		}
+	}
+
+	// Verify we're at critical level
+	stats := q.GetStats()
+	if stats.ImageCount != 9 {
+		t.Fatalf("expected 9 images, got %d", stats.ImageCount)
+	}
+	if stats.CapacityPercent < 89.0 {
+		t.Fatalf("expected capacity >= 90%%, got %.1f%%", stats.CapacityPercent)
 	}
 
 	// Should be paused at critical level
 	if !q.IsCapturePaused() {
-		t.Error("expected capture to be paused at critical level")
+		t.Errorf("expected capture to be paused at critical level (%.1f%% capacity)", stats.CapacityPercent)
 	}
 
 	// Trying to enqueue should return error

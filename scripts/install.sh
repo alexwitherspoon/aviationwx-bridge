@@ -108,6 +108,9 @@ setup_data_dir() {
     log_info "Setting up data directory: ${DATA_DIR}"
     mkdir -p "${DATA_DIR}"
     chmod 755 "${DATA_DIR}"
+    
+    # Set ownership to uid:gid 1000:1000 (matches container's bridge user)
+    chown -R 1000:1000 "${DATA_DIR}"
 
     # Create environment file if it doesn't exist
     if [[ ! -f "${ENV_FILE}" ]]; then
@@ -129,6 +132,7 @@ setup_data_dir() {
 # AVIATIONWX_TMPFS_SIZE=200m
 EOF
         log_info "Created environment file: ${ENV_FILE}"
+        chown 1000:1000 "${ENV_FILE}"
     fi
 
     log_success "Data directory ready"

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Install**: Fixed permission denied error when saving config
+  - Set ownership of `/data/aviationwx` to uid:gid 1000:1000 (matches container user)
+  - Container runs as non-root user `bridge` but data directory was owned by root
+  - Fixes "permission denied" error when saving camera configuration via web UI
+
 ## [1.0.1] - 2026-01-18
 
 **Critical bugfix release** - v1.0.0 Docker images had incorrect architecture binaries

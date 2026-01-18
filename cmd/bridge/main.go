@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -36,6 +37,16 @@ type Bridge struct {
 	updateChecker *update.Checker
 	systemMonitor *health.SystemMonitor
 	log           *logger.Logger
+
+	// Preview cache
+	lastCaptures map[string]*CachedImage
+	captureMu    sync.RWMutex
+}
+
+// CachedImage holds a captured image with metadata
+type CachedImage struct {
+	Data       []byte
+	CapturedAt time.Time
 }
 
 func main() {
@@ -88,6 +99,7 @@ func main() {
 		updateChecker: updateChecker,
 		systemMonitor: health.NewSystemMonitor(queuePath),
 		log:           log,
+		lastCaptures:  make(map[string]*CachedImage),
 	}
 
 	// Initialize orchestrator
@@ -219,7 +231,7 @@ func (b *Bridge) addCamera(camConfig config.Camera) error {
 	}
 
 	// Add to orchestrator
-	if err := b.orchestrator.AddCamera(cam, schedConfig, interval); err != nil {
+	if err := b.orchestrator.AddCamera(cam, schedConfig, interval, b.updatePreviewCache); err != nil {
 		return fmt.Errorf("add to orchestrator: %w", err)
 	}
 
@@ -292,14 +304,67 @@ func (b *Bridge) handleConfigChange(newCfg *config.Config) error {
 		return fmt.Errorf("save config: %w", err)
 	}
 
+	// Build maps of old and new cameras
+	oldCameras := make(map[string]config.Camera)
+	for _, cam := range b.config.Cameras {
+		oldCameras[cam.ID] = cam
+	}
+	
+	newCameras := make(map[string]config.Camera)
+	for _, cam := range newCfg.Cameras {
+		newCameras[cam.ID] = cam
+	}
+
+	// Find cameras to add (in new but not in old, or enabled when was disabled)
+	var camerasToAdd []config.Camera
+	for id, newCam := range newCameras {
+		oldCam, existed := oldCameras[id]
+		if !existed {
+			// Brand new camera
+			if newCam.Enabled {
+				camerasToAdd = append(camerasToAdd, newCam)
+			}
+		} else if !oldCam.Enabled && newCam.Enabled {
+			// Camera was disabled, now enabled
+			camerasToAdd = append(camerasToAdd, newCam)
+		}
+	}
+
+	// Clean up preview cache for deleted cameras
+	b.captureMu.Lock()
+	for cameraID := range b.lastCaptures {
+		if _, exists := newCameras[cameraID]; !exists {
+			delete(b.lastCaptures, cameraID)
+			b.log.Debug("Preview cache cleaned up", "camera", cameraID)
+		}
+	}
+	b.captureMu.Unlock()
+
 	// Update internal config reference
 	b.config = newCfg
 
 	// Update web server config
 	b.webServer.UpdateConfig(newCfg)
 
-	// TODO: Hot-reload cameras (for now, requires restart)
-	b.log.Info("Config saved. Some changes may require restart to take effect.")
+	// Add new cameras to orchestrator
+	if b.orchestrator != nil && len(camerasToAdd) > 0 {
+		for _, camConfig := range camerasToAdd {
+			if err := b.addCamera(camConfig); err != nil {
+				b.log.Error("Failed to add camera during hot-reload", 
+					"camera", camConfig.ID, "error", err)
+				// Continue with other cameras
+			} else {
+				b.log.Info("Camera added via hot-reload", "camera", camConfig.ID)
+			}
+		}
+		// Start any newly added workers
+		if err := b.orchestrator.Start(); err != nil {
+			b.log.Warn("Failed to start new workers", "error", err)
+		}
+	}
+
+	// TODO: Handle camera deletion and updates (requires stopping workers)
+	b.log.Info("Config saved. Camera deletions and updates require restart.")
 
 	return nil
 }
@@ -446,46 +511,35 @@ func (b *Bridge) testUpload(uploadConfig config.Upload) error {
 	return uploader.TestConnection()
 }
 
+// updatePreviewCache updates the cached preview image for a camera
+func (b *Bridge) updatePreviewCache(cameraID string, imageData []byte, captureTime time.Time) {
+	b.captureMu.Lock()
+	defer b.captureMu.Unlock()
+
+	b.lastCaptures[cameraID] = &CachedImage{
+		Data:       imageData,
+		CapturedAt: captureTime,
+	}
+
+	b.log.Debug("Preview cache updated", "camera", cameraID, "size", len(imageData))
+}
+
 // getCameraImage returns the latest captured image for a camera
 func (b *Bridge) getCameraImage(cameraID string) ([]byte, error) {
-	// Find the camera config
-	var camConfig *config.Camera
-	for i := range b.config.Cameras {
-		if b.config.Cameras[i].ID == cameraID {
-			camConfig = &b.config.Cameras[i]
-			break
-		}
+	// Check cache first
+	b.captureMu.RLock()
+	cached, ok := b.lastCaptures[cameraID]
+	b.captureMu.RUnlock()
+
+	if ok && cached != nil {
+		// Return cached image
+		b.log.Debug("Returning cached preview", "camera", cameraID, "age", time.Since(cached.CapturedAt))
+		return cached.Data, nil
 	}
 
-	if camConfig == nil {
-		return nil, fmt.Errorf("camera not found: %s", cameraID)
-	}
-
-	// If orchestrator is running, try to peek at queue
-	// For now, just capture a fresh image
-	cam, err := b.createCamera(*camConfig)
-	if err != nil {
-		return nil, fmt.Errorf("create camera: %w", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	imageData, err := cam.Capture(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("capture: %w", err)
-	}
-
-	// Apply image processing if configured
-	if camConfig.Image != nil && camConfig.Image.NeedsProcessing() {
-		processor := image.NewProcessor(camConfig.Image)
-		imageData, err = processor.Process(imageData)
-		if err != nil {
-			return nil, fmt.Errorf("process image: %w", err)
-		}
-	}
-
-	return imageData, nil
+	// No cache available - return empty instead of capturing
+	// Fresh captures will populate cache within 60 seconds
+	return nil, fmt.Errorf("no preview available yet")
 }
 
 // bridgeLogger wraps logger.Logger to implement scheduler.Logger

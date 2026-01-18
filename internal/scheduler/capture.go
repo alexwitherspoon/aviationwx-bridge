@@ -24,6 +24,7 @@ type CaptureWorker struct {
 	cancel     context.CancelFunc
 	mu         sync.RWMutex
 	logger     Logger
+	onCapture  func(cameraID string, imageData []byte, captureTime time.Time)
 
 	// Statistics
 	capturesTotal   int64
@@ -41,6 +42,7 @@ type CaptureWorkerConfig struct {
 	ExifHelper   *timepkg.ExifToolHelper
 	IntervalSecs int // Capture interval in seconds (1-1800, default 60)
 	Logger       Logger
+	OnCapture    func(cameraID string, imageData []byte, captureTime time.Time) // Called after successful capture and processing
 }
 
 // NewCaptureWorker creates a new capture worker for a camera
@@ -70,6 +72,7 @@ func NewCaptureWorker(cfg CaptureWorkerConfig) *CaptureWorker {
 		ctx:        ctx,
 		cancel:     cancel,
 		logger:     logger,
+		onCapture:  cfg.OnCapture,
 		state: &CameraState{
 			CameraID:    cfg.Camera.ID(),
 			NextAttempt: time.Now(),
@@ -271,6 +274,11 @@ func (w *CaptureWorker) capture() {
 		"camera", w.camera.ID(),
 		"observation_time", observation.Time.Format(time.RFC3339),
 		"source", observation.Source)
+
+	// Notify callback with processed image (before EXIF stamping for cleaner preview)
+	if w.onCapture != nil {
+		w.onCapture(w.camera.ID(), imageData, observation.Time)
+	}
 }
 
 func (w *CaptureWorker) handleCaptureError(err error) {

@@ -125,7 +125,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 }
 
 // AddCamera adds a camera to the orchestrator
-func (o *Orchestrator) AddCamera(cam camera.Camera, config CameraConfig, intervalSecs int) error {
+func (o *Orchestrator) AddCamera(cam camera.Camera, config CameraConfig, intervalSecs int, onCapture func(cameraID string, imageData []byte, captureTime time.Time)) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -147,6 +147,7 @@ func (o *Orchestrator) AddCamera(cam camera.Camera, config CameraConfig, interva
 		ExifHelper:   o.exifHelper,
 		IntervalSecs: intervalSecs,
 		Logger:       o.logger,
+		OnCapture:    onCapture,
 	}
 
 	worker := NewCaptureWorker(workerConfig)

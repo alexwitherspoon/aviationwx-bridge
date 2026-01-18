@@ -237,7 +237,10 @@ function updateCameraOverview() {
     container.innerHTML = cameras.map(cam => `
         <div class="camera-overview-item">
             <div class="camera-preview">
-                <span>No Preview</span>
+                <img src="/api/cameras/${cam.id}/preview?t=${Date.now()}" 
+                     alt="${escapeHtml(cam.name)}"
+                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+                <span style="display:none">No Preview</span>
             </div>
             <div class="camera-info">
                 <div class="camera-name">${escapeHtml(cam.name)}</div>
@@ -280,7 +283,10 @@ function updateCameraList() {
             </div>
             <div class="camera-card-body">
                 <div class="camera-card-preview">
-                    <span>Preview not available</span>
+                    <img src="/api/cameras/${cam.id}/preview?t=${Date.now()}" 
+                         alt="${escapeHtml(cam.name)}"
+                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+                    <span style="display:none">Preview not available</span>
                 </div>
                 <div class="camera-card-details">
                     <div class="detail-row">

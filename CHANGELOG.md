@@ -5,37 +5,169 @@ All notable changes to AviationWX Bridge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.1] - 2026-01-18
+
+**Hot-Reload Fixes** - Complete global settings hot-reload support
+
+### Added
+- **Timezone Hot-Reload**: Timezone changes now hot-reload without container restart
+  - `updateTimezone()` recreates authority and updates all workers
+  - Immediate effect on all camera EXIF timestamps
+  - No downtime required for timezone changes
+- **SNTP Hot-Reload**: SNTP configuration changes now hot-reload
+  - `restartSNTP()` stops old service and starts new one
+  - Server list, intervals, and thresholds update immediately
+  - Time health status reflects new config within seconds
+- **Daily Container Restart**: Optional safety net cron job
+  - Installed automatically by `install.sh`
+  - Runs at 3 AM daily
+  - Gracefully restarts container and waits for healthy status
+  - Logs to `/data/aviationwx/restart.log`
+  - Catches edge cases and ensures fresh state
+- **UI Notifications**: Toast notifications for successful config changes
+  - Confirms timezone updates with green success message
+  - Subtle animation and auto-dismiss after 3 seconds
+- **TimeHealth Stop Method**: Added graceful shutdown for SNTP service
+  - Context-based cancellation prevents goroutine leaks
+  - Clean restart without resource accumulation
 
 ### Fixed
+- **Camera Interval Hot-Reload**: Workers now start immediately on config update
+  - Previously required container restart to apply new intervals
+  - `Orchestrator.AddCamera()` now calls `worker.Start()` if orchestrator is running
+  - Interval changes take effect within 1 second
+- **Global Config Handler**: Now actually handles global settings changes
+  - Previously only logged "Global config updated" with no action
+  - Now updates timezone and restarts SNTP as needed
+- **Orchestrator Methods**: Added `SetTimeAuthority()` for hot updates
+  - Propagates new authority to all capture workers
+  - Ensures consistent time handling across all cameras
+
+### Changed
+- **`install.sh`**: Now installs daily restart cron job
+  - Creates `/usr/local/bin/aviationwx-daily-restart` script
+  - Adds crontab entry for 3 AM daily execution
+  - Uninstall now removes cron job cleanly
+- **Completion Message**: Updated to mention daily restart feature
+
+### Documentation
+- **`docs/HOT_RELOAD_ANALYSIS.md`**: Comprehensive 300+ line analysis
+  - All hot-reload scenarios documented with test cases
+  - Impact assessment for each global setting
+  - Priority recommendations and implementation details
+- **`docs/HOT_RELOAD_FIX.md`**: User-facing guide
+  - Installation and testing instructions
+  - Troubleshooting common issues
+  - Daily restart script usage
+
+## [2.0.0] - 2026-01-18
+
+**Major Release** - Complete architecture refactor for reliability and scalability
+
+### Changed
+- **BREAKING**: Configuration architecture completely refactored to service-oriented design
+  - **File-per-camera storage** replaces monolithic `config.json`
+  - New structure: `/data/global.json` + `/data/cameras/*.json`
+  - Automatic migration from legacy format on first startup
+  - **ConfigService** eliminates shared config pointer issues
+  - Event-driven architecture (no blocking callbacks)
+  - Hot-reload now truly atomic and non-blocking
+  - **Set `AVIATIONWX_CONFIG_DIR=/data` instead of `AVIATIONWX_CONFIG`**
+  
+### Added
+- **Config**: New `ConfigService` with atomic operations
+  - `AddCamera()`, `UpdateCamera()`, `DeleteCamera()` are now atomic
+  - `Subscribe()` for async event notifications
+  - Thread-safe by design (RWMutex)
+  - Automatic config backup before every load/save operation
+  - Consistent camera ordering (sorted by ID) prevents UI reordering
+- **Migration**: Automatic migration from legacy `config.json`
+  - `InitOrMigrate()` detects and migrates old format
+  - Original file backed up as `config.json.migrated`
+  - Zero downtime migration
+- **Worker Job Blocking**: Prevents overlapping capture/upload operations
+  - **Capture workers** check if previous job is running before starting new one
+  - **Upload workers** wait for previous upload to complete before processing next
+  - Maximum job times: Capture = 60s + interval, Upload = 120s
+  - Jobs exceeding max time are automatically aborted and logged
+  - Prevents resource exhaustion and runaway goroutines
+- **Live Logs**: In-memory log buffer accessible via web UI
+  - Stores last 1000 log entries in circular buffer
+  - **`/api/logs` endpoint** serves formatted logs
+  - Web UI **Logs tab** with real-time polling (2 second refresh)
+  - Level filtering (ERROR, WARN, INFO, DEBUG)
+  - Syntax highlighting for different log levels
+  - No Docker access required - runs entirely in-app
+- **Crash Recovery**: Comprehensive panic recovery and restart mechanisms
+  - Panic handlers in main function and web server goroutine
+  - Docker healthcheck using `/healthz` endpoint (no auth required)
+  - Automatic restart on crash via `restart: unless-stopped`
+  - Full stack traces logged on panic for debugging
+  - Detailed startup logging with PID and config paths
+- **Logging**: Enhanced structured logging for troubleshooting
+  - More detailed error messages in web API responses
+  - Camera add/update/delete operations logged with context
+  - ConfigService operations logged for audit trail
+  - **Automatic log rotation**: 10MB max (2 × 5MB files)
+  - Rotated logs are compressed to save space
+  - **Raspberry Pi SD card protection**: journald with volatile storage
+  - Install script auto-configures RAM-based logging on Pi
+  - Zero SD card wear from log writes
+- **System Metrics**: Real-time resource monitoring in Dashboard
+  - CPU usage percentage (from `/proc/stat`)
+  - Memory usage percentage and MB used/total (from `/proc/meminfo`)
+  - Queue depth (images waiting to upload)
+  - System uptime
+  - Works correctly in Docker containers
+  - **Update status** in API response (current/latest version, update available flag)
+- **NTP/Time Health**: Automatic time synchronization monitoring
+  - **Enabled by default** with sensible defaults
+  - Default servers: `pool.ntp.org`, `time.google.com`
+  - Checks every 5 minutes, reports if offset > 5 seconds
+  - Works in Docker (uses UDP port 123, no special config needed)
+  - Status visible in Dashboard (shows time offset in ms)
+- **Dashboard Monitoring**: Comprehensive worker status visibility
+  - Next capture countdown (real-time, updates every second)
+  - Currently capturing/uploading indicators (live 🔴 badges)
+  - Upload failure tracking per camera with counts
+  - Last failure reason displayed for debugging
+  - Queue health visualization with progress bars
+  - All metrics auto-refresh every 1 second for live monitoring
+- **Documentation**: 
+  - New `CONFIG_SCHEMA_v2.md` with file-per-camera docs
+  - New `LOCAL_TESTING.md` for Docker-based testing
+  - New `CRASH_RECOVERY.md` for troubleshooting and monitoring
+- **Examples**: New config file examples
+  - `configs/global.json.example` - Global settings
+  - `configs/camera-http.json.example` - HTTP camera
+  - `configs/camera-rtsp.json.example` - RTSP camera
+  - `configs/camera-onvif.json.example` - ONVIF camera
+
+### Fixed
+- **Web UI**: Eliminated all config data loss issues
+  - No more disappearing cameras after edits
+  - No more lost timezone/global settings
+  - No more pointer synchronization bugs
+  - Modal properly closes after successful operations
+  - Camera list no longer randomly reorders on refresh
 - **Upload**: Fixed cameras uploading to wrong FTP targets (per-camera credentials bug)
   - Each camera now has its own independent uploader with separate credentials
   - Previously, the last camera's uploader credentials were used for all cameras
   - Refactored `UploadWorker` to store per-camera uploaders instead of shared uploader
   - Updated `Orchestrator.AddCamera()` to accept uploader parameter
-  - **Breaking change**: Removed `Orchestrator.SetUploader()` method (no longer needed)
+- **Stability**: Application no longer exits on web server goroutine panics
+  - Web server errors are caught and logged
+  - Container restarts automatically if fatal error occurs
+  - Health checks detect and recover from hangs
+- **Tests**: Fixed race condition in `TestQueue_CapturePause`
+  - Test now allows for expected queue thinning behavior
+  - More robust assertions for capacity-based testing
 
-### Added
-- **Upload**: Custom CA bundle support for FTPS connections
-  - Servers with custom SSL certificates can now be configured
-  - Set `ca_bundle_path` in upload configuration to load custom root CAs
-  - Falls back to system default CAs when path not specified
-- **Hot-reload**: Full camera configuration hot-reload without restart
-  - Added cameras are automatically started in orchestrator
-  - Deleted cameras are gracefully stopped and removed
-  - Updated cameras are automatically restarted with new configuration
-  - Detects changes in all camera settings (type, auth, upload, image processing)
-  - Queues and preview cache are properly managed during changes
-- **Preview**: Added in-memory preview cache for instant loading
-  - Camera preview images load instantly (<50ms) vs 20-30s before
-  - Cache stores last captured image (after resize/quality processing)
-  - Falls back to "no preview" if cache empty (avoids slow initial captures)
-  - Memory usage: ~2-5MB per camera
-  - Updated every capture cycle (60s default)
-- **Tests**: Comprehensive test coverage for upload and orchestrator
-  - Added `upload_percamera_test.go` with 9 test functions
-  - Added `orchestrator_test.go` with 9 test functions
-  - Tests cover per-camera uploaders, hot-reload, and configuration
+### Removed
+- `internal/config/loader.go` - Replaced by ConfigService
+- `OnConfigChange` callback pattern - Replaced by event subscription
+- `UpdateConfig()` method on web server - No longer needed
+- All TODO comments from codebase (100% clean)
 
 ## [1.0.2] - 2026-01-18
 

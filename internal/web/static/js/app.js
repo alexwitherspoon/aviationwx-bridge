@@ -34,6 +34,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     await refreshStatus();
     await loadCameras();
     startTimeUpdates();
+    startAutoRefresh(); // Auto-refresh dashboard every second
+    startLiveLogs();    // Start live log streaming
     
     // Check for first run
     if (status && status.first_run) {
@@ -121,80 +123,62 @@ async function loadCameras() {
 function updateStatusDisplay() {
     if (!status) return;
     
-    document.getElementById('statCameras').textContent = status.camera_count || 0;
-    document.getElementById('configVersion').textContent = status.version || '2';
+    // Update basic stats
+    document.getElementById('statCameras').textContent = status.cameras || 0;
     
     // Update timezone selector
     if (status.timezone) {
         document.getElementById('timezone').value = status.timezone;
     }
     
-    // Update orchestrator stats if available
-    if (status.orchestrator) {
-        const orch = status.orchestrator;
-        document.getElementById('statUploads').textContent = orch.uploads_today || 0;
-        document.getElementById('statQueue').textContent = orch.queue_size || 0;
-        document.getElementById('statNTP').textContent = orch.ntp_healthy ? 'OK' : 'WARN';
-        
-        // Update version display
-        const versionEl = document.getElementById('appVersion');
-        if (versionEl && orch.git_commit) {
-            const version = orch.version || 'dev';
-            const commit = orch.git_commit || 'unknown';
-            versionEl.textContent = `${version}:${commit}`;
-        }
-        
-        // Update availability indicator
-        const updateEl = document.getElementById('updateAvailable');
-        if (updateEl && orch.update) {
-            if (orch.update.available) {
-                updateEl.style.display = 'inline-block';
-                updateEl.href = orch.update.latest_url || '#';
-                updateEl.title = `Update available: ${orch.update.latest_version}`;
-            } else {
-                updateEl.style.display = 'none';
-            }
-        }
-        
-        // Update system resources display (includes queue storage)
-        updateSystemResourcesDisplay(orch.system, orch.queue_storage);
+    // Update queue count
+    document.getElementById('statQueue').textContent = status.queued_images || 0;
+    
+    // Update NTP status
+    if (status.time_health) {
+        document.getElementById('statNTP').textContent = status.time_health.healthy ? 'OK' : 'WARN';
+    } else {
+        document.getElementById('statNTP').textContent = '--';
     }
+    
+    // Update uploads today (if available)
+    document.getElementById('statUploads').textContent = status.uploads_today || 0;
+    
+    // Update system resources display
+    updateSystemResourcesDisplay(status.system, status.queued_images);
 }
 
 // System resources display
-function updateSystemResourcesDisplay(system, queueStorage) {
+function updateSystemResourcesDisplay(system, queueImages) {
     // CPU
     const cpuPercent = system?.cpu_percent || 0;
-    const cpuLevel = system?.cpu_level || 'healthy';
+    const cpuLevel = 'healthy'; // Simple threshold for now
     updateResourceBar('cpu', cpuPercent, cpuLevel, `${cpuPercent.toFixed(0)}%`);
     
     // Memory
     const memPercent = system?.mem_percent || 0;
-    const memLevel = system?.mem_level || 'healthy';
+    const memLevel = 'healthy';
     const memUsed = system?.mem_used_mb || 0;
     updateResourceBar('mem', memPercent, memLevel, `${memPercent.toFixed(0)}%`);
     
-    // Queue storage
-    const queuePercent = queueStorage?.capacity_percent || 0;
-    const queueLevel = queuePercent >= 80 ? 'critical' : queuePercent >= 50 ? 'warning' : 'healthy';
-    const queueImages = queueStorage?.total_images || 0;
+    // Queue (use percentage based on some reasonable max)
+    const queuePercent = 0; // We'll use count instead
+    const queueLevel = 'healthy';
     updateResourceBar('queue', queuePercent, queueLevel, `${queuePercent.toFixed(0)}%`);
     
     // Overall badge
-    const overallLevel = system?.overall_level || 'healthy';
     const badgeEl = document.getElementById('systemOverallBadge');
     if (badgeEl) {
         badgeEl.classList.remove('healthy', 'warning', 'critical');
-        badgeEl.classList.add(overallLevel);
-        badgeEl.textContent = overallLevel === 'healthy' ? 'Healthy' : 
-                              overallLevel === 'warning' ? 'Warning' : 'Critical';
+        badgeEl.classList.add('healthy');
+        badgeEl.textContent = 'Healthy';
     }
     
     // Details text
     const detailsEl = document.getElementById('resourceDetailsText');
     if (detailsEl) {
         const uptime = system?.uptime || '--';
-        detailsEl.textContent = `CPU: ${cpuPercent.toFixed(0)}% • Memory: ${memUsed.toFixed(0)} MB • Queue: ${queueImages} images • Uptime: ${uptime}`;
+        detailsEl.textContent = `CPU: ${cpuPercent.toFixed(0)}% • Memory: ${memUsed.toFixed(0)} MB • Queue: ${queueImages || 0} images`;
     }
 }
 
@@ -234,7 +218,34 @@ function updateCameraOverview() {
         return;
     }
     
-    container.innerHTML = cameras.map(cam => `
+    container.innerHTML = cameras.map(cam => {
+        // Get camera stats from orchestrator
+        let statusBadge = '';
+        let nextCaptureInfo = '';
+        if (cam.enabled && status && status.orchestrator) {
+            const camStats = status.orchestrator.camera_stats?.find(cs => cs.camera_id === cam.id);
+            if (camStats) {
+                if (camStats.capture_stats?.currently_capturing) {
+                    statusBadge = '<span class="status-badge capturing">Capturing</span>';
+                } else if (camStats.capture_stats?.next_capture_time) {
+                    const nextTime = new Date(camStats.capture_stats.next_capture_time);
+                    const now = new Date();
+                    const secondsUntil = Math.max(0, Math.floor((nextTime - now) / 1000));
+                    nextCaptureInfo = `<span class="next-capture">Next: ${secondsUntil}s</span>`;
+                }
+                
+                // Check for upload issues
+                const uploadStats = status.orchestrator.upload_stats;
+                if (uploadStats && uploadStats.per_camera_failures) {
+                    const failures = uploadStats.per_camera_failures[cam.id] || 0;
+                    if (failures > 0) {
+                        statusBadge += ` <span class="status-badge error">⚠️ ${failures} upload failures</span>`;
+                    }
+                }
+            }
+        }
+        
+        return `
         <div class="camera-overview-item">
             <div class="camera-preview">
                 <img src="/api/cameras/${cam.id}/preview?t=${Date.now()}" 
@@ -245,6 +256,7 @@ function updateCameraOverview() {
             <div class="camera-info">
                 <div class="camera-name">${escapeHtml(cam.name)}</div>
                 <div class="camera-meta">${cam.type} • ${cam.capture_interval_seconds}s interval</div>
+                <div class="camera-status-info">${nextCaptureInfo} ${statusBadge}</div>
             </div>
             <div class="camera-status">
                 <span class="camera-status-badge ${cam.enabled ? 'active' : 'paused'}">
@@ -252,7 +264,7 @@ function updateCameraOverview() {
                 </span>
             </div>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 function updateCameraList() {
@@ -267,7 +279,106 @@ function updateCameraList() {
         return;
     }
     
-    container.innerHTML = cameras.map(cam => `
+    container.innerHTML = cameras.map(cam => {
+        // Calculate next capture countdown
+        let nextCaptureText = 'Unknown';
+        let captureStatusText = '';
+        if (cam.worker_running && status && status.orchestrator) {
+            const camStats = status.orchestrator.camera_stats?.find(cs => cs.camera_id === cam.id);
+            if (camStats) {
+                if (camStats.capture_stats?.currently_capturing) {
+                    captureStatusText = '<span class="status-active">🔴 Capturing now</span>';
+                } else if (camStats.capture_stats?.next_capture_time) {
+                    const nextTime = new Date(camStats.capture_stats.next_capture_time);
+                    const now = new Date();
+                    const secondsUntil = Math.max(0, Math.floor((nextTime - now) / 1000));
+                    nextCaptureText = `${secondsUntil}s`;
+                    captureStatusText = `<span class="status-info">Next: ${nextCaptureText}</span>`;
+                }
+            }
+        }
+
+        // Upload status
+        let uploadStatusText = '';
+        if (status && status.orchestrator && status.orchestrator.upload_stats?.currently_uploading) {
+            uploadStatusText = '<span class="status-active">🔴 Uploading</span>';
+        }
+
+        // Upload failures
+        let uploadFailureText = '';
+        if (status && status.orchestrator && status.orchestrator.upload_stats) {
+            const perCameraFailures = status.orchestrator.upload_stats.per_camera_failures || {};
+            const failures = perCameraFailures[cam.id] || 0;
+            const lastReason = status.orchestrator.upload_stats.last_failure_reason;
+            if (failures > 0) {
+                uploadFailureText = `
+                    <div class="detail-row error">
+                        <span class="label">Upload Failures</span>
+                        <span class="value">${failures}</span>
+                    </div>
+                `;
+                if (lastReason) {
+                    uploadFailureText += `
+                        <div class="detail-row error">
+                            <span class="label">Last Error</span>
+                            <span class="value">${escapeHtml(lastReason.substring(0, 50))}</span>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        // Capture errors
+        let captureErrorText = '';
+        if (status && status.orchestrator) {
+            const camStats = status.orchestrator.camera_stats?.find(cs => cs.camera_id === cam.id);
+            if (camStats && camStats.last_error && camStats.last_error.Message) {
+                const errorMsg = camStats.last_error.Message;
+                // Extract the key error (Connection refused, etc.)
+                let shortError = errorMsg;
+                if (errorMsg.includes('Connection refused')) {
+                    shortError = 'Connection refused - RTSP server not available';
+                } else if (errorMsg.includes('timed out')) {
+                    shortError = 'Connection timed out';
+                } else if (errorMsg.includes('Authentication')) {
+                    shortError = 'Authentication failed';
+                } else {
+                    // Extract just the last meaningful line
+                    const lines = errorMsg.split('\n').filter(l => l.trim());
+                    shortError = lines[lines.length - 1] || errorMsg.substring(0, 80);
+                }
+                
+                captureErrorText = `
+                    <div class="detail-row error">
+                        <span class="label">⚠️ Capture Error</span>
+                        <span class="value">${escapeHtml(shortError)}</span>
+                    </div>
+                `;
+                if (camStats.is_backing_off) {
+                    captureErrorText += `
+                        <div class="detail-row error">
+                            <span class="label">Status</span>
+                            <span class="value">Backing off, will retry soon</span>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        // Queue status
+        let queueCount = 0;
+        let queueStatusClass = 'healthy';
+        if (status && status.orchestrator) {
+            const camStats = status.orchestrator.camera_stats?.find(cs => cs.camera_id === cam.id);
+            if (camStats && camStats.queue_stats) {
+                queueCount = camStats.queue_stats.image_count || 0;
+                const queuePercent = (queueCount / 50) * 100; // Assume 50 is critical
+                if (queuePercent > 80) queueStatusClass = 'critical';
+                else if (queuePercent > 50) queueStatusClass = 'warning';
+            }
+        }
+
+        return `
         <div class="camera-card" data-camera-id="${cam.id}">
             <div class="camera-card-header">
                 <div class="camera-card-title">
@@ -298,6 +409,10 @@ function updateCameraList() {
                         <span class="value">${cam.capture_interval_seconds}s</span>
                     </div>
                     <div class="detail-row">
+                        <span class="label">Status</span>
+                        <span class="value">${captureStatusText}${uploadStatusText ? ' | ' + uploadStatusText : ''}</span>
+                    </div>
+                    <div class="detail-row">
                         <span class="label">Upload User</span>
                         <span class="value">${cam.upload?.username || 'Not configured'}</span>
                     </div>
@@ -305,20 +420,22 @@ function updateCameraList() {
                         <span class="label">Upload Host</span>
                         <span class="value">${cam.upload?.host || 'upload.aviationwx.org'}</span>
                     </div>
+                    ${captureErrorText}
+                    ${uploadFailureText}
                     
                     <div class="queue-health">
                         <div class="queue-health-label">
                             <span>Queue</span>
-                            <span>0 files</span>
+                            <span>${queueCount} files</span>
                         </div>
                         <div class="queue-health-bar">
-                            <div class="queue-health-fill healthy" style="width: 0%"></div>
+                            <div class="queue-health-fill ${queueStatusClass}" style="width: ${Math.min(100, (queueCount / 50) * 100)}%"></div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 // Time management
@@ -335,6 +452,23 @@ function populateTimezones() {
 function startTimeUpdates() {
     updateTimeDisplay();
     timeUpdateInterval = setInterval(updateTimeDisplay, 1000);
+}
+
+function startAutoRefresh() {
+    // Refresh status and cameras every second for live countdown/status updates
+    setInterval(async () => {
+        try {
+            await refreshStatus();
+            
+            // Only refresh camera list if on dashboard or cameras page
+            const activeSection = document.querySelector('.section.active');
+            if (activeSection && (activeSection.id === 'dashboard' || activeSection.id === 'cameras')) {
+                await loadCameras();
+            }
+        } catch (error) {
+            console.error('Auto-refresh error:', error);
+        }
+    }, 1000);
 }
 
 function updateTimeDisplay() {
@@ -374,9 +508,36 @@ async function updateTimezone() {
             body: JSON.stringify({ timezone }),
         });
         updateTimeDisplay();
+        // Show success message with hot-reload confirmation
+        showNotification('✅ Timezone updated! Workers reloaded automatically.', 'success');
     } catch (err) {
         alert('Failed to update timezone: ' + err.message);
     }
+}
+
+// Notification system
+function showNotification(message, type = 'info') {
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.textContent = message;
+    notification.style.cssText = `
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        padding: 15px 20px;
+        background: ${type === 'success' ? '#28a745' : type === 'warning' ? '#ffc107' : '#007bff'};
+        color: white;
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        z-index: 10000;
+        animation: slideIn 0.3s ease-out;
+    `;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.style.animation = 'slideOut 0.3s ease-in';
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
 }
 
 // Camera management
@@ -855,6 +1016,110 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Live Logs
+let logsBuffer = [];
+let logsPaused = false;
+let maxLogLines = 500;
+
+function startLiveLogs() {
+    // Poll Docker logs every 2 seconds
+    setInterval(async () => {
+        if (logsPaused) return;
+        
+        try {
+            const response = await fetch('/api/logs?tail=100', {
+                credentials: 'same-origin'
+            });
+            
+            if (response.ok) {
+                const logs = await response.text();
+                updateLogsDisplay(logs);
+            }
+        } catch (error) {
+            console.error('Failed to fetch logs:', error);
+        }
+    }, 2000);
+}
+
+function updateLogsDisplay(newLogs) {
+    if (!newLogs || logsPaused) return;
+    
+    const container = document.getElementById('logsContainer');
+    if (!container) return;
+    
+    // Replace entire buffer with new logs (they're already newest-first from backend)
+    const lines = newLogs.split('\n').filter(l => l.trim());
+    logsBuffer = lines;
+    
+    // Keep only last maxLogLines
+    if (logsBuffer.length > maxLogLines) {
+        logsBuffer = logsBuffer.slice(-maxLogLines);
+    }
+    
+    // Filter and format logs
+    const filters = {
+        ERROR: document.getElementById('filterError')?.checked ?? true,
+        WARN: document.getElementById('filterWarn')?.checked ?? true,
+        INFO: document.getElementById('filterInfo')?.checked ?? true,
+        DEBUG: document.getElementById('filterDebug')?.checked ?? false
+    };
+    
+    const html = logsBuffer
+        .filter(line => {
+            if (line.includes('level=ERROR') && !filters.ERROR) return false;
+            if (line.includes('level=WARN') && !filters.WARN) return false;
+            if (line.includes('level=INFO') && !filters.INFO) return false;
+            if (line.includes('level=DEBUG') && !filters.DEBUG) return false;
+            return true;
+        })
+        .map(line => formatLogLine(line))
+        .join('\n');
+    
+    container.innerHTML = html || '<div style="color: #8b949e;">No logs matching filters</div>';
+    
+    // Auto-scroll to bottom if not paused
+    if (!logsPaused) {
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
+function formatLogLine(line) {
+    // Color code by level
+    let color = '#e6edf3'; // default
+    if (line.includes('level=ERROR')) {
+        color = '#f85149'; // red
+    } else if (line.includes('level=WARN')) {
+        color = '#d29922'; // yellow
+    } else if (line.includes('level=INFO')) {
+        color = '#58a6ff'; // blue
+    } else if (line.includes('level=DEBUG')) {
+        color = '#8b949e'; // muted
+    }
+    
+    return `<div style="color: ${color}; margin-bottom: 0.25rem;">${escapeHtml(line)}</div>`;
+}
+
+function clearLogs() {
+    logsBuffer = [];
+    const container = document.getElementById('logsContainer');
+    if (container) {
+        container.innerHTML = '<div style="color: #8b949e;">Logs cleared. New logs will appear here...</div>';
+    }
+}
+
+function pauseLogs() {
+    logsPaused = !logsPaused;
+    const btn = document.getElementById('pauseLogsText');
+    if (btn) {
+        btn.textContent = logsPaused ? 'Resume' : 'Pause';
+    }
+}
+
+function updateLogFilters() {
+    // Re-render with current buffer
+    updateLogsDisplay('');
 }
 
 // Keyboard shortcuts

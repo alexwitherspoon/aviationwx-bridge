@@ -103,6 +103,53 @@ install_docker() {
     log_success "Docker installed successfully"
 }
 
+# Configure Docker logging for SD card protection (Raspberry Pi)
+configure_docker_logging() {
+    log_info "Configuring Docker logging for SD card protection..."
+    
+    # Check if running on Raspberry Pi
+    if [[ $OS == "raspbian" ]] || grep -qi "raspberry" /proc/cpuinfo 2>/dev/null; then
+        log_info "Raspberry Pi detected - configuring journald with volatile storage"
+        
+        # Configure journald for volatile (RAM) storage
+        if [[ ! -f /etc/systemd/journald.conf.d/aviationwx.conf ]]; then
+            mkdir -p /etc/systemd/journald.conf.d
+            cat > /etc/systemd/journald.conf.d/aviationwx.conf << 'EOF'
+# AviationWX Bridge - Journald volatile storage
+# Stores logs in RAM to prevent SD card wear
+[Journal]
+Storage=volatile
+RuntimeMaxUse=20M
+EOF
+            systemctl restart systemd-journald
+            log_success "Configured journald for volatile storage (20MB RAM)"
+        else
+            log_info "Journald already configured"
+        fi
+        
+        # Configure Docker to use journald
+        if [[ ! -f /etc/docker/daemon.json ]]; then
+            mkdir -p /etc/docker
+            cat > /etc/docker/daemon.json << 'EOF'
+{
+  "log-driver": "journald",
+  "log-opts": {
+    "tag": "{{.Name}}"
+  }
+}
+EOF
+            systemctl restart docker
+            log_success "Configured Docker to use journald logging"
+        else
+            log_warn "Docker daemon.json exists - not overwriting"
+            log_info "To enable journald logging, add to /etc/docker/daemon.json:"
+            log_info '  {"log-driver": "journald", "log-opts": {"tag": "{{.Name}}"}}'
+        fi
+    else
+        log_info "Not a Raspberry Pi - using default Docker logging"
+    fi
+}
+
 # Create data directory and environment file
 setup_data_dir() {
     log_info "Setting up data directory: ${DATA_DIR}"
@@ -252,6 +299,78 @@ start_container() {
     echo "${version}" > "${DATA_DIR}/current-version"
 }
 
+# Install daily restart cron
+install_daily_restart() {
+    log_info "Installing daily restart cron job..."
+    
+    # Copy the daily restart script
+    cat > /usr/local/bin/aviationwx-daily-restart << 'EOFSCRIPT'
+#!/bin/bash
+# AviationWX Bridge - Daily Container Restart
+# This gracefully restarts the container and waits for healthy status
+
+set -euo pipefail
+
+SCRIPT_DIR="/data/aviationwx"
+LOG_FILE="${SCRIPT_DIR}/restart.log"
+
+# Ensure log directory exists
+mkdir -p "${SCRIPT_DIR}"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${LOG_FILE}"
+}
+
+log "Starting daily container restart"
+
+# Get container ID
+CONTAINER_ID=$(docker ps -q -f name=aviationwx-bridge)
+
+if [ -z "${CONTAINER_ID}" ]; then
+    log "ERROR: Container not running"
+    exit 1
+fi
+
+# Restart container
+log "Restarting container ${CONTAINER_ID}"
+if ! docker restart aviationwx-bridge; then
+    log "ERROR: Restart failed"
+    exit 1
+fi
+
+log "Container restarted, waiting for healthy status..."
+
+# Wait for healthy status (max 60 seconds)
+for i in {1..60}; do
+    HEALTH=$(docker inspect --format='{{.State.Health.Status}}' aviationwx-bridge 2>/dev/null || echo "unknown")
+    
+    if [ "${HEALTH}" = "healthy" ]; then
+        log "✅ Container is healthy after ${i} seconds"
+        exit 0
+    fi
+    
+    sleep 1
+done
+
+log "⚠️  WARNING: Container health check did not pass after 60 seconds"
+log "Container status: $(docker inspect --format='{{.State.Health.Status}}' aviationwx-bridge 2>/dev/null || echo 'unknown')"
+exit 1
+EOFSCRIPT
+
+    chmod +x /usr/local/bin/aviationwx-daily-restart
+    
+    # Install cron job (3 AM daily)
+    CRON_ENTRY="0 3 * * * /usr/local/bin/aviationwx-daily-restart >> ${DATA_DIR}/restart.log 2>&1"
+    
+    # Check if cron entry already exists
+    if ! crontab -l 2>/dev/null | grep -q "aviationwx-daily-restart"; then
+        (crontab -l 2>/dev/null; echo "${CRON_ENTRY}") | crontab -
+        log_info "Daily restart cron job installed (runs at 3 AM)"
+    else
+        log_info "Daily restart cron job already installed"
+    fi
+}
+
 # Get device IP
 get_ip() {
     hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost"
@@ -272,6 +391,7 @@ print_complete() {
     echo -e "${GREEN}║${NC}                                                               ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  Updates are checked every 6 hours.                           ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  Critical updates apply automatically after 24 hours.         ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}  Container restarts daily at 3 AM for stability.              ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}                                                               ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  ${BLUE}Next steps:${NC}                                                  ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  1. Open the web console                                      ${GREEN}║${NC}"
@@ -297,9 +417,11 @@ main() {
     check_root
     detect_os
     install_docker
+    configure_docker_logging
     setup_data_dir
     install_supervisor
     start_container
+    install_daily_restart
     print_complete
 }
 
@@ -318,6 +440,10 @@ uninstall() {
     rm -f /etc/systemd/system/aviationwx-supervisor.timer
     rm -f /usr/local/bin/aviationwx-supervisor
     systemctl daemon-reload
+
+    # Remove daily restart cron
+    crontab -l 2>/dev/null | grep -v "aviationwx-daily-restart" | crontab - 2>/dev/null || true
+    rm -f /usr/local/bin/aviationwx-daily-restart
 
     log_warn "Data directory preserved at ${DATA_DIR}"
     log_warn "To remove data: sudo rm -rf ${DATA_DIR}"

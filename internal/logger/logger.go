@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 )
 
 // Logger wraps slog for compatibility with existing interfaces
@@ -13,7 +14,11 @@ type Logger struct {
 	slog   *slog.Logger
 	level  slog.Level
 	format string
+	buffer *Buffer
 }
+
+// Global log buffer for web UI access
+var globalBuffer *Buffer
 
 // Config holds logger configuration
 type Config struct {
@@ -47,6 +52,11 @@ func ConfigFromEnv() Config {
 
 // New creates a new logger with the given configuration
 func New(cfg Config) *Logger {
+	// Initialize global buffer if not already done
+	if globalBuffer == nil {
+		globalBuffer = NewBuffer(1000) // Keep last 1000 log entries
+	}
+
 	// Parse level
 	var level slog.Level
 	switch strings.ToLower(cfg.Level) {
@@ -95,27 +105,53 @@ func New(cfg Config) *Logger {
 		slog:   slog.New(handler),
 		level:  level,
 		format: cfg.Format,
+		buffer: globalBuffer,
 	}
 }
 
 // Debug logs a debug message
 func (l *Logger) Debug(msg string, keysAndValues ...interface{}) {
 	l.slog.Debug(msg, keysAndValues...)
+	l.addToBuffer("DEBUG", msg, keysAndValues...)
 }
 
 // Info logs an info message
 func (l *Logger) Info(msg string, keysAndValues ...interface{}) {
 	l.slog.Info(msg, keysAndValues...)
+	l.addToBuffer("INFO", msg, keysAndValues...)
 }
 
 // Warn logs a warning message
 func (l *Logger) Warn(msg string, keysAndValues ...interface{}) {
 	l.slog.Warn(msg, keysAndValues...)
+	l.addToBuffer("WARN", msg, keysAndValues...)
 }
 
 // Error logs an error message
 func (l *Logger) Error(msg string, keysAndValues ...interface{}) {
 	l.slog.Error(msg, keysAndValues...)
+	l.addToBuffer("ERROR", msg, keysAndValues...)
+}
+
+// addToBuffer adds a log entry to the in-memory buffer
+func (l *Logger) addToBuffer(level, msg string, keysAndValues ...interface{}) {
+	if l.buffer == nil {
+		return
+	}
+
+	attrs := make(map[string]interface{})
+	for i := 0; i < len(keysAndValues)-1; i += 2 {
+		if key, ok := keysAndValues[i].(string); ok {
+			attrs[key] = keysAndValues[i+1]
+		}
+	}
+
+	l.buffer.Add(LogEntry{
+		Timestamp: time.Now(),
+		Level:     level,
+		Message:   msg,
+		Attrs:     attrs,
+	})
 }
 
 // With returns a new logger with additional context
@@ -124,6 +160,7 @@ func (l *Logger) With(keysAndValues ...interface{}) *Logger {
 		slog:   l.slog.With(keysAndValues...),
 		level:  l.level,
 		format: l.format,
+		buffer: l.buffer,
 	}
 }
 
@@ -150,6 +187,14 @@ func SetDefault(logger *Logger) {
 // Default returns the default logger
 func Default() *Logger {
 	return defaultLogger
+}
+
+// GetRecentLogs returns the last N log entries from the global buffer
+func GetRecentLogs(n int) []LogEntry {
+	if globalBuffer == nil {
+		return nil
+	}
+	return globalBuffer.GetLast(n)
 }
 
 // Package-level convenience functions

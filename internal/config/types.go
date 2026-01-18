@@ -174,10 +174,21 @@ type DegradedMode struct {
 // SNTP represents SNTP time health check settings
 type SNTP struct {
 	Enabled              bool     `json:"enabled,omitempty"`                // Default: true
-	Servers              []string `json:"servers,omitempty"`                // Default: pool.ntp.org
+	Servers              []string `json:"servers,omitempty"`                // Default: pool.ntp.org, time.google.com
 	CheckIntervalSeconds int      `json:"check_interval_seconds,omitempty"` // Default: 300
 	MaxOffsetSeconds     int      `json:"max_offset_seconds,omitempty"`     // Default: 5
 	TimeoutSeconds       int      `json:"timeout_seconds,omitempty"`        // Default: 5
+}
+
+// DefaultSNTP returns default SNTP settings
+func DefaultSNTP() SNTP {
+	return SNTP{
+		Enabled:              true,
+		Servers:              []string{"pool.ntp.org", "time.google.com"},
+		CheckIntervalSeconds: 300, // 5 minutes
+		MaxOffsetSeconds:     5,
+		TimeoutSeconds:       5,
+	}
 }
 
 // WebConsole represents web console settings

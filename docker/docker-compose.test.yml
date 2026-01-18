@@ -1,0 +1,19 @@
+# Docker Compose override for local testing
+# Usage: docker compose -f docker-compose.yml -f docker-compose.test.yml up
+#
+# This override ensures test containers don't conflict with production:
+# - Uses different port (1230 vs 1229)
+# - Uses separate data directory (data-test/)
+# - Uses different container name
+# - Prevents accidental data loss during testing
+
+services:
+  bridge:
+    container_name: aviationwx-bridge-test
+    ports:
+      - "1230:1229"  # Test on port 1230 instead of 1229
+    volumes:
+      - ./data-test:/data:rw  # Separate test data directory
+    environment:
+      - AVIATIONWX_CONFIG_DIR=/data
+      - AVIATIONWX_QUEUE_PATH=/dev/shm/aviationwx

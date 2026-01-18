@@ -83,7 +83,11 @@ func (c *HTTPCamera) Capture(ctx context.Context) ([]byte, error) {
 			Err:      err,
 		}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			return
+		}
+	}()
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		return nil, &AuthError{

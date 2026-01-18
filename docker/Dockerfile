@@ -72,6 +72,10 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:1229/healthz || exit 1
 
 # Environment variables for configuration
+# AVIATIONWX_CONFIG_DIR: Base directory for config files (v2.0+)
+# AVIATIONWX_CONFIG: Legacy config path for auto-migration
+# AVIATIONWX_QUEUE_PATH: Queue storage location
+ENV AVIATIONWX_CONFIG_DIR=/data
 ENV AVIATIONWX_CONFIG=/data/config.json
 ENV AVIATIONWX_QUEUE_PATH=/dev/shm/aviationwx
 

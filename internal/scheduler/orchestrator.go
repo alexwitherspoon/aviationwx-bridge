@@ -167,6 +167,12 @@ func (o *Orchestrator) AddCamera(cam camera.Camera, config CameraConfig, interva
 	// Add queue with camera-specific uploader
 	o.uploadWorker.AddQueue(cameraID, q, config, uploader)
 
+	// If orchestrator has already been started, start this worker immediately
+	if !o.startTime.IsZero() {
+		worker.Start()
+		o.logger.Info("Capture worker started (hot-reload)", "camera", cameraID)
+	}
+
 	o.logger.Info("Camera added",
 		"camera", cameraID,
 		"interval_secs", intervalSecs)
@@ -221,6 +227,21 @@ func (o *Orchestrator) SetTimeHealth(timeHealth *timepkg.TimeHealth) {
 		worker.authority = authority
 	}
 	o.mu.Unlock()
+}
+
+// SetTimeAuthority updates the time authority for all workers
+func (o *Orchestrator) SetTimeAuthority(authority *timepkg.Authority) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	o.authority = authority
+
+	// Update all capture workers
+	for _, worker := range o.captureWorkers {
+		worker.authority = authority
+	}
+
+	o.logger.Info("Time authority updated for all workers")
 }
 
 // Start starts all workers
@@ -333,21 +354,21 @@ func (o *Orchestrator) GetStatus() OrchestratorStatus {
 
 // OrchestratorStatus represents the full system status
 type OrchestratorStatus struct {
-	Running          bool
-	Uptime           time.Duration
-	CameraCount      int
-	CameraStats      []CameraStatus
-	UploadStats      UploadStats
-	GlobalQueueStats queue.GlobalQueueStats
-	TimeInfo         timepkg.TimeInfo
+	Running          bool                   `json:"running"`
+	Uptime           time.Duration          `json:"uptime"`
+	CameraCount      int                    `json:"camera_count"`
+	CameraStats      []CameraStatus         `json:"camera_stats"`
+	UploadStats      UploadStats            `json:"upload_stats"`
+	GlobalQueueStats queue.GlobalQueueStats `json:"global_queue_stats"`
+	TimeInfo         timepkg.TimeInfo       `json:"time_info"`
 }
 
 // CameraStatus represents status for a single camera
 type CameraStatus struct {
-	CameraID     string
-	CaptureStats CaptureStats
-	QueueStats   queue.QueueStats
-	LastSuccess  time.Time
-	LastError    error
-	IsBackingOff bool
+	CameraID     string           `json:"camera_id"`
+	CaptureStats CaptureStats     `json:"capture_stats"`
+	QueueStats   queue.QueueStats `json:"queue_stats"`
+	LastSuccess  time.Time        `json:"last_success"`
+	LastError    error            `json:"last_error,omitempty"`
+	IsBackingOff bool             `json:"is_backing_off"`
 }

@@ -564,6 +564,60 @@ select.form-control {
     color: var(--color-error);
 }
 
+/* Status indicators for capture/upload */
+.status-active {
+    color: var(--color-error);
+    font-weight: 600;
+    animation: pulse 1.5s infinite;
+}
+
+.status-info {
+    color: var(--color-info);
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 0.125rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+}
+
+.status-badge.capturing {
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--color-error);
+}
+
+.status-badge.error {
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--color-error);
+}
+
+.next-capture {
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+}
+
+.camera-status-info {
+    margin-top: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.detail-row.error {
+    color: var(--color-error);
+    background: rgba(248, 81, 73, 0.1);
+    padding: 0.5rem;
+    border-radius: var(--radius-sm);
+    margin-top: 0.5rem;
+}
+
+.detail-row.error .label {
+    font-weight: 600;
+}
+
 /* Camera List */
 .camera-list {
     display: grid;
@@ -1035,6 +1089,28 @@ select.form-control {
     }
 }
 
+/* Notification animations */
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+}
 
 
 

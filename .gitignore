@@ -1,6 +1,8 @@
 # Sensitive configuration files (DO NOT COMMIT)
 config.json
 configs/config.json
+global.json
+cameras/
 *.secrets.env
 secrets.env
 
@@ -68,6 +70,11 @@ coverage.xml
 # Docker
 docker-compose.override.yml
 
+# Docker runtime data (production and test)
+docker/data/
+docker/data-test/
+docker/data/  # Runtime configuration and state - do not commit
+
 # Environment variables (local overrides only)
 .env.local
 .env.*.local
@@ -102,6 +109,7 @@ docs/*EXECUTION*.md
 docs/*FIXES*.md
 docs/*SUMMARY*.md
 docs/*REVIEW*.md
+docs/*ARCHITECTURE*.md
 
 # Keep public documentation (README, LOCAL_SETUP, DEPLOYMENT, API, etc.)
 !docs/README.md
@@ -110,6 +118,7 @@ docs/*REVIEW*.md
 !docs/API.md
 !docs/CONFIG_SCHEMA.md
 !docs/QUEUE_STORAGE.md
+
 
 
 

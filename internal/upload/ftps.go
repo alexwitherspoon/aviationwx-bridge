@@ -70,7 +70,11 @@ func (c *FTPSClient) Upload(remotePath string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			return
+		}
+	}()
 
 	// Ensure directory exists
 	dir := filepath.Dir(remotePath)
@@ -116,7 +120,11 @@ func (c *FTPSClient) TestConnection() error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			return
+		}
+	}()
 
 	// Test by reading current directory
 	_, err = conn.ReadDir(".")

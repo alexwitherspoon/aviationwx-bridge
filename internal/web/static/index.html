@@ -25,6 +25,7 @@
                 <a href="#dashboard" class="nav-link active" data-section="dashboard">Dashboard</a>
                 <a href="#cameras" class="nav-link" data-section="cameras">Cameras</a>
                 <a href="#settings" class="nav-link" data-section="settings">Settings</a>
+                <a href="#logs" class="nav-link" data-section="logs">Logs</a>
             </div>
             <div class="nav-status">
                 <span class="status-dot" id="statusDot"></span>
@@ -229,6 +230,61 @@
                         <div class="info-row">
                             <span>Queue Path</span>
                             <code>/dev/shm/aviationwx</code>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Logs Section -->
+            <section id="logs" class="section">
+                <div class="section-header">
+                    <h1>Live Logs</h1>
+                    <div class="section-actions">
+                        <button class="btn" onclick="clearLogs()">Clear</button>
+                        <button class="btn btn-primary" onclick="pauseLogs()">
+                            <span id="pauseLogsText">Pause</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-body" style="padding: 0;">
+                        <div id="logsContainer" style="background: #0d1117; color: #e6edf3; font-family: 'JetBrains Mono', monospace; font-size: 13px; padding: 1rem; height: 600px; overflow-y: auto; border-radius: 8px;">
+                            <div style="color: #8b949e; margin-bottom: 1rem;">
+                                Connecting to live logs...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Log Filters</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="filterError" checked onchange="updateLogFilters()">
+                                Show ERROR
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="filterWarn" checked onchange="updateLogFilters()">
+                                Show WARN
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="filterInfo" checked onchange="updateLogFilters()">
+                                Show INFO
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="filterDebug" onchange="updateLogFilters()">
+                                Show DEBUG
+                            </label>
                         </div>
                     </div>
                 </div>

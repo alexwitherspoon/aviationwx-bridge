@@ -31,14 +31,16 @@ type UploadWorker struct {
 	retryDelay        time.Duration // Delay before single retry
 
 	// Statistics
-	uploadsTotal    int64
-	uploadsSuccess  int64
-	uploadsFailed   int64
-	uploadsRetried  int64
-	authFailures    int64
-	lastUploadTime  time.Time
-	lastSuccessTime time.Time
-	lastFailureTime time.Time
+	uploadsTotal       int64
+	uploadsSuccess     int64
+	uploadsFailed      int64
+	uploadsRetried     int64
+	authFailures       int64
+	lastUploadTime     time.Time
+	lastSuccessTime    time.Time
+	lastFailureTime    time.Time
+	lastFailureReason  string
+	currentlyUploading bool
 
 	// Per-camera failure tracking (for fail2ban awareness)
 	cameraFailures map[string]*uploadFailureState
@@ -162,31 +164,46 @@ func (w *UploadWorker) GetStats() UploadStats {
 	}
 
 	return UploadStats{
-		UploadsTotal:     w.uploadsTotal,
-		UploadsSuccess:   w.uploadsSuccess,
-		UploadsFailed:    w.uploadsFailed,
-		UploadsRetried:   w.uploadsRetried,
-		AuthFailures:     w.authFailures,
-		QueuedImages:     queuedTotal,
-		LastUploadTime:   w.lastUploadTime,
-		LastSuccessTime:  w.lastSuccessTime,
-		LastFailureTime:  w.lastFailureTime,
-		UploadRatePerMin: uploadRate,
+		UploadsTotal:       w.uploadsTotal,
+		UploadsSuccess:     w.uploadsSuccess,
+		UploadsFailed:      w.uploadsFailed,
+		UploadsRetried:     w.uploadsRetried,
+		AuthFailures:       w.authFailures,
+		QueuedImages:       queuedTotal,
+		LastUploadTime:     w.lastUploadTime,
+		LastSuccessTime:    w.lastSuccessTime,
+		LastFailureTime:    w.lastFailureTime,
+		LastFailureReason:  w.lastFailureReason,
+		UploadRatePerMin:   uploadRate,
+		PerCameraFailures:  w.copyFailureStats(),
+		CurrentlyUploading: w.currentlyUploading,
 	}
+}
+
+// copyFailureStats creates a copy of per-camera failure counts (caller must hold lock)
+func (w *UploadWorker) copyFailureStats() map[string]int64 {
+	copy := make(map[string]int64, len(w.cameraFailures))
+	for id, state := range w.cameraFailures {
+		copy[id] = int64(state.consecutiveFailures)
+	}
+	return copy
 }
 
 // UploadStats provides upload statistics
 type UploadStats struct {
-	UploadsTotal     int64
-	UploadsSuccess   int64
-	UploadsFailed    int64
-	UploadsRetried   int64
-	AuthFailures     int64
-	QueuedImages     int
-	LastUploadTime   time.Time
-	LastSuccessTime  time.Time
-	LastFailureTime  time.Time
-	UploadRatePerMin float64
+	UploadsTotal       int64            `json:"uploads_total"`
+	UploadsSuccess     int64            `json:"uploads_success"`
+	UploadsFailed      int64            `json:"uploads_failed"`
+	UploadsRetried     int64            `json:"uploads_retried"`
+	AuthFailures       int64            `json:"auth_failures"`
+	QueuedImages       int              `json:"queued_images"`
+	LastUploadTime     time.Time        `json:"last_upload_time"`
+	LastSuccessTime    time.Time        `json:"last_success_time"`
+	LastFailureTime    time.Time        `json:"last_failure_time"`
+	LastFailureReason  string           `json:"last_failure_reason"`
+	UploadRatePerMin   float64          `json:"upload_rate_per_min"`
+	PerCameraFailures  map[string]int64 `json:"per_camera_failures"` // Track failures per camera
+	CurrentlyUploading bool             `json:"currently_uploading"`
 }
 
 func (w *UploadWorker) run() {
@@ -201,6 +218,17 @@ func (w *UploadWorker) run() {
 			w.logger.Info("Upload worker stopped")
 			return
 		default:
+		}
+
+		// Check if previous upload is still running
+		w.mu.RLock()
+		isUploading := w.currentlyUploading
+		w.mu.RUnlock()
+
+		if isUploading {
+			// Previous upload still in progress, wait a bit
+			time.Sleep(time.Second)
+			continue
 		}
 
 		// Rate limiting (fail2ban protection)
@@ -279,65 +307,105 @@ func (w *UploadWorker) uploadWithRetry(cameraID string, uploader upload.Client, 
 	w.mu.Lock()
 	w.uploadsTotal++
 	w.lastUploadTime = time.Now()
+	w.currentlyUploading = true
 	w.mu.Unlock()
 
-	// Read image data from file
-	imageData, err := readImageFile(img.FilePath)
-	if err != nil {
-		w.logger.Error("Failed to read image file",
+	// Maximum upload time: 120 seconds (generous for slow connections)
+	maxUploadTime := 120 * time.Second
+	uploadDeadline := time.After(maxUploadTime)
+
+	// Channel for upload result
+	type uploadResult struct {
+		success bool
+		err     error
+	}
+	resultCh := make(chan uploadResult, 1)
+
+	// Ensure we clear the flag when done
+	defer func() {
+		w.mu.Lock()
+		w.currentlyUploading = false
+		w.mu.Unlock()
+	}()
+
+	// Run upload in goroutine with timeout protection
+	go func() {
+		// Read image data from file
+		imageData, err := readImageFile(img.FilePath)
+		if err != nil {
+			w.logger.Error("Failed to read image file",
+				"camera", cameraID,
+				"path", img.FilePath,
+				"error", err)
+			resultCh <- uploadResult{false, err}
+			return
+		}
+
+		// First attempt
+		err = uploader.Upload(remotePath, imageData)
+		if err == nil {
+			w.logger.Debug("Upload successful",
+				"camera", cameraID,
+				"path", remotePath,
+				"size", len(imageData))
+			resultCh <- uploadResult{true, nil}
+			return
+		}
+
+		// First attempt failed - analyze error
+		w.logger.Warn("Upload failed, will retry once",
 			"camera", cameraID,
-			"path", img.FilePath,
 			"error", err)
+
+		// Check if auth error (fail2ban sensitive)
+		if w.isAuthError(err) {
+			resultCh <- uploadResult{false, err}
+			return
+		}
+
+		// Wait before retry
+		time.Sleep(w.retryDelay)
+
+		// Second (and final) attempt
+		w.mu.Lock()
+		w.uploadsRetried++
+		w.mu.Unlock()
+
+		err = uploader.Upload(remotePath, imageData)
+		if err == nil {
+			w.logger.Info("Upload succeeded on retry",
+				"camera", cameraID,
+				"path", remotePath)
+			resultCh <- uploadResult{true, nil}
+			return
+		}
+
+		w.logger.Error("Upload failed after retry",
+			"camera", cameraID,
+			"error", err)
+		resultCh <- uploadResult{false, err}
+	}()
+
+	// Wait for result or timeout
+	select {
+	case result := <-resultCh:
+		if result.success {
+			w.recordSuccess()
+			return true
+		}
+		w.recordFailure(cameraID, result.err)
+		if w.isAuthError(result.err) {
+			w.handleAuthFailure(cameraID)
+		}
+		return false
+
+	case <-uploadDeadline:
+		w.logger.Error("Upload exceeded maximum time",
+			"camera", cameraID,
+			"max_time", maxUploadTime)
+		w.recordFailure(cameraID, fmt.Errorf("upload timeout after %v", maxUploadTime))
 		return false
 	}
-
-	// First attempt
-	err = uploader.Upload(remotePath, imageData)
-	if err == nil {
-		w.recordSuccess()
-		w.logger.Debug("Upload successful",
-			"camera", cameraID,
-			"path", remotePath,
-			"size", len(imageData))
-		return true
-	}
-
-	// First attempt failed - analyze error
-	w.logger.Warn("Upload failed, will retry once",
-		"camera", cameraID,
-		"error", err)
-
-	// Check if auth error (fail2ban sensitive)
-	if w.isAuthError(err) {
-		w.handleAuthFailure(cameraID)
-		return false // Don't retry auth errors
-	}
-
-	// Wait before retry
-	time.Sleep(w.retryDelay)
-
-	// Second (and final) attempt
-	w.mu.Lock()
-	w.uploadsRetried++
-	w.mu.Unlock()
-
-	err = uploader.Upload(remotePath, imageData)
-	if err == nil {
-		w.recordSuccess()
-		w.logger.Info("Upload succeeded on retry",
-			"camera", cameraID,
-			"path", remotePath)
-		return true
-	}
-
-	// Second attempt also failed
-	w.recordFailure(cameraID, err)
-	w.logger.Error("Upload failed after retry, skipping file",
-		"camera", cameraID,
-		"path", remotePath,
-		"error", err)
-
-	return false // File stays in queue for next round
 }
 
 func (w *UploadWorker) buildRemotePath(basePath, cameraID string, timestamp time.Time) string {
@@ -402,6 +470,7 @@ func (w *UploadWorker) recordFailure(cameraID string, err error) {
 
 	w.uploadsFailed++
 	w.lastFailureTime = time.Now()
+	w.lastFailureReason = err.Error()
 
 	failState := w.cameraFailures[cameraID]
 	failState.lastFailure = time.Now()

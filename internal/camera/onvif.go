@@ -140,7 +140,11 @@ func (c *ONVIFCamera) Capture(ctx context.Context) ([]byte, error) {
 					Err:      retryErr,
 				}
 			}
-			defer retryResp.Body.Close()
+			defer func() {
+				if err := retryResp.Body.Close(); err != nil {
+					return
+				}
+			}()
 
 			if retryResp.StatusCode == http.StatusUnauthorized {
 				c.snapshotURI = ""
@@ -183,7 +187,11 @@ func (c *ONVIFCamera) Capture(ctx context.Context) ([]byte, error) {
 			Err:      err,
 		}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			return
+		}
+	}()
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		// Auth failed, clear snapshot URI cache

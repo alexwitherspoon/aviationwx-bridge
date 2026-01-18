@@ -1,0 +1,20 @@
+{
+  "id": "kord-west",
+  "name": "KORD West Runway",
+  "type": "http",
+  "enabled": true,
+  "snapshot_url": "http://192.168.1.100/cgi-bin/snapshot.cgi",
+  "auth": {
+    "type": "basic",
+    "username": "admin",
+    "password": "camera_password"
+  },
+  "capture_interval_seconds": 60,
+  "upload": {
+    "host": "upload.aviationwx.org",
+    "port": 2121,
+    "username": "your-ftp-username",
+    "password": "your-ftp-password",
+    "tls": true
+  }
+}

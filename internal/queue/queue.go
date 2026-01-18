@@ -179,7 +179,7 @@ func (q *Queue) writeImageWithRetry(filePath string, imageData []byte) (bool, er
 	if err == nil {
 		// Write succeeded, finalize
 		if renameErr := os.Rename(tmpPath, filePath); renameErr != nil {
-			os.Remove(tmpPath)
+			_ = os.Remove(tmpPath) // Best effort cleanup
 			return false, fmt.Errorf("rename to final: %w", renameErr)
 		}
 		return true, nil
@@ -195,7 +195,7 @@ func (q *Queue) writeImageWithRetry(filePath string, imageData []byte) (bool, er
 		"camera", q.state.CameraID)
 
 	// Remove failed temp file if it exists
-	os.Remove(tmpPath)
+	_ = os.Remove(tmpPath) // Best effort cleanup
 
 	// Emergency thin - keep only 30% of files
 	q.emergencyThinLocked(0.3)
@@ -213,7 +213,7 @@ func (q *Queue) writeImageWithRetry(filePath string, imageData []byte) (bool, er
 
 	// Write succeeded after retry
 	if err := os.Rename(tmpPath, filePath); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // Best effort cleanup
 		return false, fmt.Errorf("rename to final: %w", err)
 	}
 

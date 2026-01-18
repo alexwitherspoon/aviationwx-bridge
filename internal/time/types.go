@@ -1,6 +1,7 @@
 package time
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -14,6 +15,10 @@ type TimeHealth struct {
 	maxOffset     time.Duration
 	servers       []string
 	mu            sync.RWMutex
+
+	// Context cancellation for clean shutdown
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // Config represents time health configuration
@@ -49,6 +54,8 @@ func NewTimeHealth(config Config) *TimeHealth {
 		servers = []string{"pool.ntp.org"} // Default NTP server
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	return &TimeHealth{
 		healthy:       false, // Start as unhealthy until first check
 		offset:        0,
@@ -56,6 +63,8 @@ func NewTimeHealth(config Config) *TimeHealth {
 		checkInterval: checkInterval,
 		maxOffset:     maxOffset,
 		servers:       servers,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 }
 
@@ -98,8 +107,20 @@ func (th *TimeHealth) run() {
 	ticker := time.NewTicker(th.checkInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		th.check()
+	for {
+		select {
+		case <-th.ctx.Done():
+			return
+		case <-ticker.C:
+			th.check()
+		}
+	}
+}
+
+// Stop gracefully stops the time health checker
+func (th *TimeHealth) Stop() {
+	if th.cancel != nil {
+		th.cancel()
 	}
 }
 

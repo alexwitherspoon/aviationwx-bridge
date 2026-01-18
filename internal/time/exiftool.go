@@ -181,10 +181,12 @@ func (h *ExifToolHelper) WriteEXIFToData(imageData []byte, opts ExifWriteOptions
 
 	// Write image data
 	if _, err := tmpFile.Write(imageData); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return nil, fmt.Errorf("write temp file: %w", err)
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		return nil, fmt.Errorf("close temp file: %w", err)
+	}
 
 	// Write EXIF
 	if err := h.WriteEXIF(tmpPath, opts); err != nil {

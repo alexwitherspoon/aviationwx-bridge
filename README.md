@@ -175,6 +175,7 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 - **Low Memory**: Optimized for Raspberry Pi Zero 2 W (512MB RAM)
 - **NTP Health**: Automatic time validation and drift detection
 - **Auto Updates**: Critical security updates with automatic rollback (Path A)
+- **Hot-Reload**: Camera, timezone, and SNTP config changes apply instantly (no restart)
 
 ---
 

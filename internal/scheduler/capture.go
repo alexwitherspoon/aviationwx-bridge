@@ -27,10 +27,13 @@ type CaptureWorker struct {
 	onCapture  func(cameraID string, imageData []byte, captureTime time.Time)
 
 	// Statistics
-	capturesTotal   int64
-	capturesFailed  int64
-	exifReadFailed  int64
-	exifWriteFailed int64
+	capturesTotal      int64
+	capturesFailed     int64
+	exifReadFailed     int64
+	exifWriteFailed    int64
+	nextCaptureTime    time.Time
+	currentlyCapturing bool
+	lastCaptureTime    time.Time
 }
 
 // CaptureWorkerConfig configures a capture worker
@@ -102,30 +105,41 @@ func (w *CaptureWorker) GetStats() CaptureStats {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return CaptureStats{
-		CameraID:        w.camera.ID(),
-		CapturesTotal:   w.capturesTotal,
-		CapturesFailed:  w.capturesFailed,
-		ExifReadFailed:  w.exifReadFailed,
-		ExifWriteFailed: w.exifWriteFailed,
-		Interval:        w.interval,
-		QueuePaused:     w.queue.IsCapturePaused(),
+		CameraID:           w.camera.ID(),
+		CapturesTotal:      w.capturesTotal,
+		CapturesFailed:     w.capturesFailed,
+		ExifReadFailed:     w.exifReadFailed,
+		ExifWriteFailed:    w.exifWriteFailed,
+		Interval:           w.interval,
+		QueuePaused:        w.queue.IsCapturePaused(),
+		NextCaptureTime:    w.nextCaptureTime,
+		CurrentlyCapturing: w.currentlyCapturing,
+		LastCaptureTime:    w.lastCaptureTime,
 	}
 }
 
 // CaptureStats provides capture statistics
 type CaptureStats struct {
-	CameraID        string
-	CapturesTotal   int64
-	CapturesFailed  int64
-	ExifReadFailed  int64
-	ExifWriteFailed int64
-	Interval        time.Duration
-	QueuePaused     bool
+	CameraID           string        `json:"camera_id"`
+	CapturesTotal      int64         `json:"captures_total"`
+	CapturesFailed     int64         `json:"captures_failed"`
+	ExifReadFailed     int64         `json:"exif_read_failed"`
+	ExifWriteFailed    int64         `json:"exif_write_failed"`
+	Interval           time.Duration `json:"interval"`
+	QueuePaused        bool          `json:"queue_paused"`
+	NextCaptureTime    time.Time     `json:"next_capture_time"`
+	CurrentlyCapturing bool          `json:"currently_capturing"`
+	LastCaptureTime    time.Time     `json:"last_capture_time"`
 }
 
 func (w *CaptureWorker) run() {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
+
+	// Set initial next capture time
+	w.mu.Lock()
+	w.nextCaptureTime = time.Now().Add(w.interval)
+	w.mu.Unlock()
 
 	// Initial capture
 	w.capture()
@@ -137,6 +151,23 @@ func (w *CaptureWorker) run() {
 			return
 
 		case <-ticker.C:
+			// Check if previous capture is still running
+			w.mu.RLock()
+			isCapturing := w.currentlyCapturing
+			w.mu.RUnlock()
+
+			if isCapturing {
+				w.logger.Warn("Skipping capture - previous job still running",
+					"camera", w.camera.ID(),
+					"interval", w.interval)
+				continue
+			}
+
+			// Update next capture time for display
+			w.mu.Lock()
+			w.nextCaptureTime = time.Now().Add(w.interval)
+			w.mu.Unlock()
+
 			// Check if queue has paused capture due to pressure
 			if w.queue.IsCapturePaused() {
 				w.logger.Debug("Capture paused due to queue pressure",
@@ -164,18 +195,42 @@ func (w *CaptureWorker) run() {
 func (w *CaptureWorker) capture() {
 	w.mu.Lock()
 	w.capturesTotal++
+	w.currentlyCapturing = true
+	captureInterval := w.interval
 	w.mu.Unlock()
+
+	// Calculate maximum job time: 60s + interval
+	maxJobTime := 60*time.Second + captureInterval
+
+	// Create a timeout context for the entire capture job
+	jobCtx, jobCancel := context.WithTimeout(w.ctx, maxJobTime)
+	defer jobCancel()
+
+	// Ensure we clear the flag when done
+	defer func() {
+		w.mu.Lock()
+		w.currentlyCapturing = false
+		w.lastCaptureTime = time.Now()
+		w.mu.Unlock()
+	}()
 
 	// Record capture start time (bridge clock) for time authority
 	captureStartUTC := time.Now().UTC()
 
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(w.ctx, 30*time.Second)
+	// Create context with timeout for camera capture (30s is reasonable for most cameras)
+	ctx, cancel := context.WithTimeout(jobCtx, 30*time.Second)
 	defer cancel()
 
 	// Capture image from camera
 	imageData, err := w.camera.Capture(ctx)
 	if err != nil {
+		// Check if we hit the job timeout
+		if jobCtx.Err() == context.DeadlineExceeded {
+			w.logger.Error("Capture job exceeded maximum time",
+				"camera", w.camera.ID(),
+				"max_time", maxJobTime,
+				"error", err)
+		}
 		w.handleCaptureError(err)
 		return
 	}

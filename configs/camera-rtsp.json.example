@@ -1,0 +1,24 @@
+{
+  "id": "kord-east",
+  "name": "KORD East Runway (RTSP Stream)",
+  "type": "rtsp",
+  "enabled": true,
+  "rtsp": {
+    "url": "rtsp://192.168.1.101:554/stream1",
+    "username": "admin",
+    "password": "camera_password"
+  },
+  "capture_interval_seconds": 60,
+  "image": {
+    "max_width": 1280,
+    "max_height": 720,
+    "quality": 80
+  },
+  "upload": {
+    "host": "upload.aviationwx.org",
+    "port": 2121,
+    "username": "your-ftp-username",
+    "password": "your-ftp-password",
+    "tls": true
+  }
+}

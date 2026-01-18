@@ -9,11 +9,11 @@ services:
       args:
         - GIT_COMMIT=${GIT_COMMIT:-dev}
     container_name: aviationwx-bridge
-    restart: unless-stopped
+    restart: unless-stopped  # Auto-restart on crash
     ports:
       - "1229:1229"  # Web console
     volumes:
-      - ./data:/data  # Persistent config and data
+      - ./data:/data  # Persistent config (new structure: global.json + cameras/)
     tmpfs:
       # RAM-based image queue (default: 200MB)
       # Adjust based on camera count and resolution:
@@ -22,10 +22,28 @@ services:
       #   4 cameras @ 4K: 300m or higher
       # See DEPLOYMENT.md for sizing guidance
       - /dev/shm:size=${AVIATIONWX_TMPFS_SIZE:-200m}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"     # Max size per log file (2 files = 10MB total)
+        max-file: "2"      # Keep 2 log files (current + 1 rotated)
+        compress: "true"   # Compress rotated logs to save space
     environment:
+      # New config structure (v2.0+): file-per-camera
+      - AVIATIONWX_CONFIG_DIR=/data
+      # Legacy config path (for automatic migration)
       - AVIATIONWX_CONFIG=/data/config.json
       - AVIATIONWX_QUEUE_PATH=/dev/shm/aviationwx
+      # Logging
+      - AVIATIONWX_LOG_LEVEL=${AVIATIONWX_LOG_LEVEL:-info}
       # exiftool is used for EXIF reading/writing (included in Docker image)
+    # Health check to detect crashes
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:1229/healthz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
     # Uncomment for production hardening:
     # security_opt:
     #   - no-new-privileges:true

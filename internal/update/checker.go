@@ -144,7 +144,11 @@ func (c *Checker) checkNow() error {
 		c.setError(err)
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			return
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		// No releases yet

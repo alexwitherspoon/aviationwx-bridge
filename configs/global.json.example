@@ -1,0 +1,50 @@
+{
+  "version": 2,
+  "timezone": "America/Chicago",
+  "web_console": {
+    "enabled": true,
+    "port": 1229,
+    "password": "aviationwx"
+  },
+  "global": {
+    "capture_timeout_seconds": 30,
+    "rtsp_timeout_seconds": 10,
+    "backoff": {
+      "initial_seconds": 5,
+      "max_seconds": 300,
+      "multiplier": 2.0,
+      "jitter": true
+    },
+    "degraded_mode": {
+      "enabled": true,
+      "failure_threshold": 3,
+      "concurrency_limit": 1,
+      "slow_interval_multiplier": 2.0
+    },
+    "time_authority": {
+      "camera_tolerance_seconds": 5,
+      "camera_warn_drift_seconds": 30,
+      "camera_reject_drift_seconds": 300
+    }
+  },
+  "queue": {
+    "base_path": "/dev/shm/aviationwx",
+    "max_total_size_mb": 100,
+    "max_heap_mb": 400,
+    "defaults": {
+      "max_files": 100,
+      "max_size_mb": 50,
+      "max_age_seconds": 3600
+    }
+  },
+  "sntp": {
+    "enabled": true,
+    "servers": [
+      "pool.ntp.org",
+      "time.google.com"
+    ],
+    "check_interval_seconds": 300,
+    "max_offset_seconds": 5,
+    "timeout_seconds": 5
+  }
+}

@@ -69,9 +69,13 @@ jobs:
           required_files=(
             "cmd/bridge/main.go"
             "configs/config.json.example"
+            "configs/global.json.example"
             "docker/Dockerfile"
+            "docker/docker-compose.yml"
             "README.md"
             "LICENSE"
+            "docs/CONFIG_SCHEMA_v2.md"
+            "docs/LOCAL_TESTING.md"
           )
           for file in "${required_files[@]}"; do
             if [ ! -f "$file" ]; then
@@ -81,12 +85,24 @@ jobs:
           done
           echo "✓ All required files present"
 
-      - name: Validate JSON config
+      - name: Validate JSON configs
         run: |
+          # Legacy config format
           if [ -f "configs/config.json.example" ]; then
             python3 -m json.tool configs/config.json.example > /dev/null
             echo "✓ config.json.example is valid JSON"
           fi
+          # New config format (v2.0+)
+          if [ -f "configs/global.json.example" ]; then
+            python3 -m json.tool configs/global.json.example > /dev/null
+            echo "✓ global.json.example is valid JSON"
+          fi
+          for camera_config in configs/camera-*.json.example; do
+            if [ -f "$camera_config" ]; then
+              python3 -m json.tool "$camera_config" > /dev/null
+              echo "✓ $(basename $camera_config) is valid JSON"
+            fi
+          done
 
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})

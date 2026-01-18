@@ -185,27 +185,100 @@ EOF
     log_success "Data directory ready"
 }
 
-# Install supervisor script
-install_supervisor() {
-    log_info "Installing update supervisor..."
+# Install host scripts
+install_host_scripts() {
+    log_info "Installing host management scripts..."
 
-    # Download supervisor script
-    curl -fsSL \
-        "https://raw.githubusercontent.com/${REPO}/main/scripts/supervisor.sh" \
-        -o /usr/local/bin/aviationwx-supervisor
-    chmod +x /usr/local/bin/aviationwx-supervisor
+    local scripts=(
+        "aviationwx"
+        "aviationwx-supervisor.sh"
+        "aviationwx-watchdog.sh"
+        "aviationwx-recovery.sh"
+        "aviationwx-container-start.sh"
+    )
 
-    # Create systemd service
-    cat > /etc/systemd/system/aviationwx-supervisor.service << 'EOF'
+    # Download all scripts
+    for script in "${scripts[@]}"; do
+        log_info "Downloading ${script}..."
+        curl -fsSL \
+            "https://raw.githubusercontent.com/${REPO}/main/scripts/${script}" \
+            -o "/usr/local/bin/${script}"
+        chmod +x "/usr/local/bin/${script}"
+    done
+
+    # Create initial host version file
+    echo "2.0" > "${DATA_DIR}/host-version.txt"
+
+    log_success "Host scripts installed"
+}
+
+# Setup systemd services
+setup_systemd() {
+    log_info "Setting up systemd services..."
+
+    # Boot-time update service
+    cat > /etc/systemd/system/aviationwx-boot-update.service << 'EOF'
 [Unit]
-Description=AviationWX Bridge Update Supervisor
+Description=AviationWX Bridge Boot-Time Update
 After=docker.service network-online.target
 Requires=docker.service
 Wants=network-online.target
+Before=aviationwx-container.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/aviationwx-supervisor check
+ExecStart=/usr/local/bin/aviationwx-supervisor.sh boot-update
+TimeoutStartSec=300
+StandardOutput=journal
+StandardError=journal
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Container start service
+    cat > /etc/systemd/system/aviationwx-container.service << 'EOF'
+[Unit]
+Description=AviationWX Bridge Container
+After=aviationwx-boot-update.service docker.service
+Requires=docker.service
+BindsTo=aviationwx-boot-update.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aviationwx-container-start.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Daily update timer
+    cat > /etc/systemd/system/aviationwx-daily-update.timer << 'EOF'
+[Unit]
+Description=AviationWX Bridge Daily Update Check
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    cat > /etc/systemd/system/aviationwx-daily-update.service << 'EOF'
+[Unit]
+Description=AviationWX Bridge Daily Update
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aviationwx-supervisor.sh daily-update
 TimeoutStartSec=300
 StandardOutput=journal
 StandardError=journal
@@ -214,27 +287,43 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-    # Create systemd timer (runs every 6 hours)
-    cat > /etc/systemd/system/aviationwx-supervisor.timer << 'EOF'
+    # Watchdog timer
+    cat > /etc/systemd/system/aviationwx-watchdog.timer << 'EOF'
 [Unit]
-Description=AviationWX Bridge Update Check Timer
+Description=AviationWX Bridge Watchdog Timer
 
 [Timer]
-OnBootSec=5min
-OnUnitActiveSec=6h
-RandomizedDelaySec=30min
+OnBootSec=2min
+OnUnitActiveSec=1min
 Persistent=true
 
 [Install]
 WantedBy=timers.target
 EOF
 
-    # Enable timer
-    systemctl daemon-reload
-    systemctl enable aviationwx-supervisor.timer
-    systemctl start aviationwx-supervisor.timer
+    cat > /etc/systemd/system/aviationwx-watchdog.service << 'EOF'
+[Unit]
+Description=AviationWX Bridge Watchdog
+After=docker.service
 
-    log_success "Supervisor installed and timer enabled"
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aviationwx-watchdog.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Reload and enable
+    systemctl daemon-reload
+    systemctl enable aviationwx-boot-update.service
+    systemctl enable aviationwx-container.service
+    systemctl enable aviationwx-daily-update.timer
+    systemctl enable aviationwx-watchdog.timer
+
+    log_success "Systemd services configured and enabled"
 }
 
 # Load environment overrides if present
@@ -251,31 +340,16 @@ get_tmpfs_size() {
     echo "${AVIATIONWX_TMPFS_SIZE:-${DEFAULT_TMPFS_SIZE}}"
 }
 
-# Pull and start the container
-start_container() {
-    load_environment
-    local tmpfs_size
-    tmpfs_size=$(get_tmpfs_size)
-
-    log_info "Pulling latest AviationWX Bridge image..."
-    docker pull "${IMAGE_NAME}:latest"
-
-    # Stop existing container if present
-    if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        log_info "Stopping existing container..."
-        docker stop "${CONTAINER_NAME}" 2>/dev/null || true
-        docker rm "${CONTAINER_NAME}" 2>/dev/null || true
-    fi
-
-    log_info "Starting AviationWX Bridge (tmpfs: ${tmpfs_size})..."
-    docker run -d \
-        --name "${CONTAINER_NAME}" \
-        --restart=unless-stopped \
-        -p "${WEB_PORT}:${WEB_PORT}" \
-        -v "${DATA_DIR}:/data" \
-        --tmpfs /dev/shm:size="${tmpfs_size}" \
-        "${IMAGE_NAME}:latest"
-
+# Initial bootstrap - run boot-update and start container
+bootstrap_container() {
+    log_info "Running initial boot-update..."
+    
+    # Initialize last-known-good to latest
+    echo "latest" > "${DATA_DIR}/last-known-good.txt"
+    
+    # Run boot-update
+    /usr/local/bin/aviationwx-supervisor.sh boot-update
+    
     # Wait for container to be healthy
     log_info "Waiting for bridge to start..."
     local attempts=0
@@ -283,7 +357,7 @@ start_container() {
     while [[ $attempts -lt $max_attempts ]]; do
         if curl -sf "http://localhost:${WEB_PORT}/healthz" > /dev/null 2>&1; then
             log_success "Bridge is running and healthy"
-            break
+            return 0
         fi
         sleep 2
         ((attempts++))
@@ -292,83 +366,13 @@ start_container() {
     if [[ $attempts -ge $max_attempts ]]; then
         log_warn "Health check timed out, but container may still be starting"
     fi
-
-    # Record initial version
-    local version
-    version=$(docker inspect "${CONTAINER_NAME}" --format '{{.Config.Image}}' | cut -d: -f2)
-    echo "${version}" > "${DATA_DIR}/current-version"
 }
 
-# Install daily restart cron
-install_daily_restart() {
-    log_info "Installing daily restart cron job..."
-    
-    # Copy the daily restart script
-    cat > /usr/local/bin/aviationwx-daily-restart << 'EOFSCRIPT'
-#!/bin/bash
-# AviationWX Bridge - Daily Container Restart
-# This gracefully restarts the container and waits for healthy status
-
-set -euo pipefail
-
-SCRIPT_DIR="/data/aviationwx"
-LOG_FILE="${SCRIPT_DIR}/restart.log"
-
-# Ensure log directory exists
-mkdir -p "${SCRIPT_DIR}"
-
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${LOG_FILE}"
-}
-
-log "Starting daily container restart"
-
-# Get container ID
-CONTAINER_ID=$(docker ps -q -f name=aviationwx-bridge)
-
-if [ -z "${CONTAINER_ID}" ]; then
-    log "ERROR: Container not running"
-    exit 1
-fi
-
-# Restart container
-log "Restarting container ${CONTAINER_ID}"
-if ! docker restart aviationwx-bridge; then
-    log "ERROR: Restart failed"
-    exit 1
-fi
-
-log "Container restarted, waiting for healthy status..."
-
-# Wait for healthy status (max 60 seconds)
-for i in {1..60}; do
-    HEALTH=$(docker inspect --format='{{.State.Health.Status}}' aviationwx-bridge 2>/dev/null || echo "unknown")
-    
-    if [ "${HEALTH}" = "healthy" ]; then
-        log "✅ Container is healthy after ${i} seconds"
-        exit 0
-    fi
-    
-    sleep 1
-done
-
-log "⚠️  WARNING: Container health check did not pass after 60 seconds"
-log "Container status: $(docker inspect --format='{{.State.Health.Status}}' aviationwx-bridge 2>/dev/null || echo 'unknown')"
-exit 1
-EOFSCRIPT
-
-    chmod +x /usr/local/bin/aviationwx-daily-restart
-    
-    # Install cron job (3 AM daily)
-    CRON_ENTRY="0 3 * * * /usr/local/bin/aviationwx-daily-restart >> ${DATA_DIR}/restart.log 2>&1"
-    
-    # Check if cron entry already exists
-    if ! crontab -l 2>/dev/null | grep -q "aviationwx-daily-restart"; then
-        (crontab -l 2>/dev/null; echo "${CRON_ENTRY}") | crontab -
-        log_info "Daily restart cron job installed (runs at 3 AM)"
-    else
-        log_info "Daily restart cron job already installed"
-    fi
+# Remove old daily restart (replaced by watchdog)
+remove_daily_restart() {
+    # Remove cron job if exists
+    crontab -l 2>/dev/null | grep -v "aviationwx-daily-restart" | crontab - 2>/dev/null || true
+    rm -f /usr/local/bin/aviationwx-daily-restart
 }
 
 # Get device IP
@@ -389,9 +393,8 @@ print_complete() {
     echo -e "${GREEN}║${NC}  Web Console: ${BLUE}http://${ip}:${WEB_PORT}${NC}                          ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  Password:    ${YELLOW}aviationwx${NC} (change this!)                      ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}                                                               ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}  Updates are checked every 6 hours.                           ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}  Critical updates apply automatically after 24 hours.         ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}  Container restarts daily at 3 AM for stability.              ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}  Updates are checked daily.                                    ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}  Watchdog monitors host health every minute.                   ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}                                                               ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  ${BLUE}Next steps:${NC}                                                  ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  1. Open the web console                                      ${GREEN}║${NC}"
@@ -419,9 +422,10 @@ main() {
     install_docker
     configure_docker_logging
     setup_data_dir
-    install_supervisor
-    start_container
-    install_daily_restart
+    install_host_scripts
+    setup_systemd
+    bootstrap_container
+    remove_daily_restart
     print_complete
 }
 
@@ -433,17 +437,29 @@ uninstall() {
     docker stop "${CONTAINER_NAME}" 2>/dev/null || true
     docker rm "${CONTAINER_NAME}" 2>/dev/null || true
 
-    # Remove supervisor
-    systemctl stop aviationwx-supervisor.timer 2>/dev/null || true
-    systemctl disable aviationwx-supervisor.timer 2>/dev/null || true
-    rm -f /etc/systemd/system/aviationwx-supervisor.service
-    rm -f /etc/systemd/system/aviationwx-supervisor.timer
-    rm -f /usr/local/bin/aviationwx-supervisor
+    # Stop and disable systemd services
+    systemctl stop aviationwx-watchdog.timer 2>/dev/null || true
+    systemctl stop aviationwx-daily-update.timer 2>/dev/null || true
+    systemctl disable aviationwx-boot-update.service 2>/dev/null || true
+    systemctl disable aviationwx-container.service 2>/dev/null || true
+    systemctl disable aviationwx-daily-update.timer 2>/dev/null || true
+    systemctl disable aviationwx-watchdog.timer 2>/dev/null || true
+    
+    # Remove systemd files
+    rm -f /etc/systemd/system/aviationwx-boot-update.service
+    rm -f /etc/systemd/system/aviationwx-container.service
+    rm -f /etc/systemd/system/aviationwx-daily-update.service
+    rm -f /etc/systemd/system/aviationwx-daily-update.timer
+    rm -f /etc/systemd/system/aviationwx-watchdog.service
+    rm -f /etc/systemd/system/aviationwx-watchdog.timer
     systemctl daemon-reload
 
-    # Remove daily restart cron
-    crontab -l 2>/dev/null | grep -v "aviationwx-daily-restart" | crontab - 2>/dev/null || true
-    rm -f /usr/local/bin/aviationwx-daily-restart
+    # Remove scripts
+    rm -f /usr/local/bin/aviationwx
+    rm -f /usr/local/bin/aviationwx-supervisor.sh
+    rm -f /usr/local/bin/aviationwx-watchdog.sh
+    rm -f /usr/local/bin/aviationwx-recovery.sh
+    rm -f /usr/local/bin/aviationwx-container-start.sh
 
     log_warn "Data directory preserved at ${DATA_DIR}"
     log_warn "To remove data: sudo rm -rf ${DATA_DIR}"

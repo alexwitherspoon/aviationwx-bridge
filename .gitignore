@@ -110,6 +110,7 @@ docs/*FIXES*.md
 docs/*SUMMARY*.md
 docs/*REVIEW*.md
 docs/*ARCHITECTURE*.md
+!docs/DEFENSIVE_ARCHITECTURE_V2.md
 
 # Keep public documentation (README, LOCAL_SETUP, DEPLOYMENT, API, etc.)
 !docs/README.md

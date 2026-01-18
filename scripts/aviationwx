@@ -1,0 +1,199 @@
+#!/bin/bash
+# AviationWX Bridge - User CLI
+# Version: 2.0
+
+set -euo pipefail
+
+readonly VERSION="2.0"
+readonly CONTAINER_NAME="aviationwx-bridge"
+readonly DATA_DIR="/data/aviationwx"
+
+# ============================================================================
+# UTILITIES
+# ============================================================================
+
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo "Error: This command requires root privileges"
+        echo "Try: sudo aviationwx $*"
+        exit 1
+    fi
+}
+
+# ============================================================================
+# COMMANDS
+# ============================================================================
+
+cmd_status() {
+    echo "=== AviationWX Bridge Status ==="
+    echo
+    
+    # Host scripts version
+    echo "Host Scripts:"
+    if [ -f "${DATA_DIR}/host-version.txt" ]; then
+        echo "  Version: $(cat "${DATA_DIR}/host-version.txt")"
+    else
+        echo "  Version: unknown (legacy)"
+    fi
+    echo
+    
+    # Container status
+    echo "Container:"
+    if docker ps --filter "name=$CONTAINER_NAME" --format '{{.Names}}' | grep -q "$CONTAINER_NAME"; then
+        local image
+        image=$(docker inspect "$CONTAINER_NAME" --format='{{.Config.Image}}')
+        local status
+        status=$(docker inspect "$CONTAINER_NAME" --format='{{.State.Status}}')
+        local health
+        health=$(docker inspect "$CONTAINER_NAME" --format='{{.State.Health.Status}}' 2>/dev/null || echo "none")
+        local uptime
+        uptime=$(docker inspect "$CONTAINER_NAME" --format='{{.State.StartedAt}}' | xargs -I {} date -d {} +"%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "unknown")
+        
+        echo "  Status: $status"
+        echo "  Health: $health"
+        echo "  Image: $image"
+        echo "  Started: $uptime"
+    else
+        echo "  Status: not running"
+    fi
+    echo
+    
+    # Update info
+    echo "Updates:"
+    echo "  Channel: $(jq -r '.update_channel // "latest"' "${DATA_DIR}/global.json" 2>/dev/null || echo "latest")"
+    echo "  Last Known Good: $(cat "${DATA_DIR}/last-known-good.txt" 2>/dev/null || echo "unknown")"
+    echo
+    
+    # Watchdog state
+    echo "Watchdog:"
+    if [ -f "${DATA_DIR}/watchdog-state.json" ]; then
+        local ntp_fails
+        ntp_fails=$(jq -r '.ntp_failures // 0' "${DATA_DIR}/watchdog-state.json")
+        local net_fails
+        net_fails=$(jq -r '.network_failures // 0' "${DATA_DIR}/watchdog-state.json")
+        local docker_fails
+        docker_fails=$(jq -r '.docker_failures // 0' "${DATA_DIR}/watchdog-state.json")
+        
+        echo "  NTP failures: $ntp_fails"
+        echo "  Network failures: $net_fails"
+        echo "  Docker failures: $docker_fails"
+    else
+        echo "  State: not initialized"
+    fi
+}
+
+cmd_logs() {
+    local service="${1:-bridge}"
+    local lines="${2:-50}"
+    
+    case "$service" in
+        bridge|container)
+            if docker ps --filter "name=$CONTAINER_NAME" --format '{{.Names}}' | grep -q "$CONTAINER_NAME"; then
+                docker logs -f --tail="$lines" "$CONTAINER_NAME"
+            else
+                echo "Container not running"
+                exit 1
+            fi
+            ;;
+        supervisor)
+            if [ -f "${DATA_DIR}/supervisor.log" ]; then
+                tail -f -n "$lines" "${DATA_DIR}/supervisor.log"
+            else
+                echo "No supervisor log found"
+                exit 1
+            fi
+            ;;
+        watchdog)
+            if [ -f "${DATA_DIR}/watchdog.log" ]; then
+                tail -f -n "$lines" "${DATA_DIR}/watchdog.log"
+            else
+                echo "No watchdog log found"
+                exit 1
+            fi
+            ;;
+        *)
+            echo "Unknown service: $service"
+            echo "Available: bridge, supervisor, watchdog"
+            exit 1
+            ;;
+    esac
+}
+
+cmd_restart() {
+    check_root
+    echo "Restarting bridge..."
+    docker restart "$CONTAINER_NAME"
+    echo "Bridge restarted"
+}
+
+cmd_update() {
+    check_root
+    echo "Forcing update check..."
+    /usr/local/bin/aviationwx-supervisor.sh force-update
+}
+
+cmd_recovery() {
+    check_root
+    exec /usr/local/bin/aviationwx-recovery.sh
+}
+
+# ============================================================================
+# HELP
+# ============================================================================
+
+usage() {
+    cat <<EOF
+AviationWX Bridge CLI - v$VERSION
+
+Usage: aviationwx COMMAND [OPTIONS]
+
+Commands:
+  status                Show system status
+  logs [service] [N]    Show logs (default: bridge, last 50 lines)
+                        Services: bridge, supervisor, watchdog
+  restart               Restart bridge container (requires root)
+  update                Force update check (requires root)
+  recovery              Emergency recovery tool (requires root)
+
+Examples:
+  aviationwx status
+  aviationwx logs bridge 100
+  sudo aviationwx restart
+  sudo aviationwx update
+  sudo aviationwx recovery
+
+EOF
+}
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+main() {
+    case "${1:-}" in
+        status)
+            cmd_status
+            ;;
+        logs)
+            cmd_logs "${2:-bridge}" "${3:-50}"
+            ;;
+        restart)
+            cmd_restart
+            ;;
+        update)
+            cmd_update
+            ;;
+        recovery)
+            cmd_recovery
+            ;;
+        -h|--help|help)
+            usage
+            ;;
+        *)
+            usage
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

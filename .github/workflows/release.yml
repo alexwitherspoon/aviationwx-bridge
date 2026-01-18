@@ -169,14 +169,21 @@ jobs:
       - name: Prepare release assets
         run: |
           cd dist
-          # Flatten directory structure - artifacts are in subdirectories
-          find . -mindepth 2 -type f -name 'aviationwx-bridge-*' -exec mv {} . \;
+          ls -R
+          echo "---"
+          # Move binaries from subdirectories to root
+          for dir in */; do
+            if [ -f "${dir}aviationwx-bridge-"* ]; then
+              mv "${dir}"aviationwx-bridge-* .
+            fi
+          done
           # Remove empty subdirectories
-          find . -mindepth 1 -type d -empty -delete
-          # Make binaries executable and create checksums
-          chmod +x aviationwx-bridge-* 2>/dev/null || true
-          sha256sum aviationwx-bridge-* > checksums.txt
+          rm -rf */
+          # List final structure
           ls -lh
+          # Make binaries executable and create checksums
+          chmod +x aviationwx-bridge-*
+          sha256sum aviationwx-bridge-* > checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v1

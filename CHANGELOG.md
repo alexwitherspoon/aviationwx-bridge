@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-01-18
+
+**Bugfix release** - Permissions and port configuration
+
 ### Added
 - **Web UI**: Added upload server port configuration field
   - Users can now specify custom FTPS port when adding/editing cameras
@@ -19,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Set ownership of `/data/aviationwx` to uid:gid 1000:1000 (matches container user)
   - Container runs as non-root user `bridge` but data directory was owned by root
   - Fixes "permission denied" error when saving camera configuration via web UI
+- **Config**: Updated tests and config loader for new default port 2121
 
 ## [1.0.1] - 2026-01-18
 

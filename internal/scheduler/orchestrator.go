@@ -8,6 +8,7 @@ import (
 
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/camera"
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/queue"
+	"github.com/alexwitherspoon/aviationwx-bridge/internal/resource"
 	timepkg "github.com/alexwitherspoon/aviationwx-bridge/internal/time"
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/upload"
 )
@@ -15,11 +16,12 @@ import (
 // Orchestrator manages capture workers, upload worker, and queues
 type Orchestrator struct {
 	// Components
-	queueManager   *queue.Manager
-	captureWorkers map[string]*CaptureWorker
-	uploadWorker   *UploadWorker
-	authority      *timepkg.Authority
-	exifHelper     *timepkg.ExifToolHelper
+	queueManager    *queue.Manager
+	captureWorkers  map[string]*CaptureWorker
+	uploadWorker    *UploadWorker
+	authority       *timepkg.Authority
+	exifHelper      *timepkg.ExifToolHelper
+	resourceLimiter *resource.Limiter
 
 	// Configuration
 	config OrchestratorConfig
@@ -47,6 +49,9 @@ type OrchestratorConfig struct {
 	// Upload settings
 	MinUploadInterval time.Duration // Default: 1 second
 	AuthBackoffSecs   int           // Default: 60
+
+	// Resource management
+	ResourceLimiter *resource.Limiter // Optional: limits concurrent CPU-intensive work
 
 	// Logger
 	Logger Logger
@@ -112,15 +117,23 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		logger.Info("exiftool available", "version", version)
 	}
 
+	// Use provided resource limiter or create a default one
+	resourceLimiter := config.ResourceLimiter
+	if resourceLimiter == nil {
+		resourceLimiter = resource.DefaultLimiter()
+		logger.Info("Using default resource limiter")
+	}
+
 	return &Orchestrator{
-		queueManager:   queueManager,
-		captureWorkers: make(map[string]*CaptureWorker),
-		authority:      authority,
-		exifHelper:     exifHelper,
-		config:         config,
-		ctx:            ctx,
-		cancel:         cancel,
-		logger:         logger,
+		queueManager:    queueManager,
+		captureWorkers:  make(map[string]*CaptureWorker),
+		authority:       authority,
+		exifHelper:      exifHelper,
+		resourceLimiter: resourceLimiter,
+		config:          config,
+		ctx:             ctx,
+		cancel:          cancel,
+		logger:          logger,
 	}, nil
 }
 
@@ -140,14 +153,15 @@ func (o *Orchestrator) AddCamera(cam camera.Camera, config CameraConfig, interva
 
 	// Create capture worker
 	workerConfig := CaptureWorkerConfig{
-		Camera:       cam,
-		CameraConfig: config,
-		Queue:        q,
-		Authority:    o.authority,
-		ExifHelper:   o.exifHelper,
-		IntervalSecs: intervalSecs,
-		Logger:       o.logger,
-		OnCapture:    onCapture,
+		Camera:          cam,
+		CameraConfig:    config,
+		Queue:           q,
+		Authority:       o.authority,
+		ExifHelper:      o.exifHelper,
+		ResourceLimiter: o.resourceLimiter,
+		IntervalSecs:    intervalSecs,
+		Logger:          o.logger,
+		OnCapture:       onCapture,
 	}
 
 	worker := NewCaptureWorker(workerConfig)

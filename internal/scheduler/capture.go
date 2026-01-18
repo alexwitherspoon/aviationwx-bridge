@@ -8,23 +8,25 @@ import (
 
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/camera"
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/queue"
+	"github.com/alexwitherspoon/aviationwx-bridge/internal/resource"
 	timepkg "github.com/alexwitherspoon/aviationwx-bridge/internal/time"
 )
 
 // CaptureWorker handles image capture for a single camera
 type CaptureWorker struct {
-	camera     camera.Camera
-	config     CameraConfig
-	queue      *queue.Queue
-	authority  *timepkg.Authority
-	exifHelper *timepkg.ExifToolHelper
-	state      *CameraState
-	interval   time.Duration
-	ctx        context.Context
-	cancel     context.CancelFunc
-	mu         sync.RWMutex
-	logger     Logger
-	onCapture  func(cameraID string, imageData []byte, captureTime time.Time)
+	camera          camera.Camera
+	config          CameraConfig
+	queue           *queue.Queue
+	authority       *timepkg.Authority
+	exifHelper      *timepkg.ExifToolHelper
+	resourceLimiter *resource.Limiter
+	state           *CameraState
+	interval        time.Duration
+	ctx             context.Context
+	cancel          context.CancelFunc
+	mu              sync.RWMutex
+	logger          Logger
+	onCapture       func(cameraID string, imageData []byte, captureTime time.Time)
 
 	// Statistics
 	capturesTotal      int64
@@ -38,14 +40,15 @@ type CaptureWorker struct {
 
 // CaptureWorkerConfig configures a capture worker
 type CaptureWorkerConfig struct {
-	Camera       camera.Camera
-	CameraConfig CameraConfig
-	Queue        *queue.Queue
-	Authority    *timepkg.Authority
-	ExifHelper   *timepkg.ExifToolHelper
-	IntervalSecs int // Capture interval in seconds (1-1800, default 60)
-	Logger       Logger
-	OnCapture    func(cameraID string, imageData []byte, captureTime time.Time) // Called after successful capture and processing
+	Camera          camera.Camera
+	CameraConfig    CameraConfig
+	Queue           *queue.Queue
+	Authority       *timepkg.Authority
+	ExifHelper      *timepkg.ExifToolHelper
+	ResourceLimiter *resource.Limiter // Optional: limits concurrent CPU-intensive work
+	IntervalSecs    int               // Capture interval in seconds (1-1800, default 60)
+	Logger          Logger
+	OnCapture       func(cameraID string, imageData []byte, captureTime time.Time) // Called after successful capture and processing
 }
 
 // NewCaptureWorker creates a new capture worker for a camera
@@ -66,16 +69,17 @@ func NewCaptureWorker(cfg CaptureWorkerConfig) *CaptureWorker {
 	}
 
 	return &CaptureWorker{
-		camera:     cfg.Camera,
-		config:     cfg.CameraConfig,
-		queue:      cfg.Queue,
-		authority:  cfg.Authority,
-		exifHelper: cfg.ExifHelper,
-		interval:   interval,
-		ctx:        ctx,
-		cancel:     cancel,
-		logger:     logger,
-		onCapture:  cfg.OnCapture,
+		camera:          cfg.Camera,
+		config:          cfg.CameraConfig,
+		queue:           cfg.Queue,
+		authority:       cfg.Authority,
+		exifHelper:      cfg.ExifHelper,
+		resourceLimiter: cfg.ResourceLimiter,
+		interval:        interval,
+		ctx:             ctx,
+		cancel:          cancel,
+		logger:          logger,
+		onCapture:       cfg.OnCapture,
 		state: &CameraState{
 			CameraID:    cfg.Camera.ID(),
 			NextAttempt: time.Now(),
@@ -214,6 +218,21 @@ func (w *CaptureWorker) capture() {
 		w.mu.Unlock()
 	}()
 
+	// Adaptive throttling: delay if system is under pressure
+	// This protects the web UI by slowing down background work
+	if w.resourceLimiter != nil {
+		if delay := w.resourceLimiter.GetThrottleDelay(); delay > 0 {
+			w.logger.Debug("Throttling capture due to system pressure",
+				"camera", w.camera.ID(),
+				"delay", delay)
+			select {
+			case <-time.After(delay):
+			case <-jobCtx.Done():
+				return
+			}
+		}
+	}
+
 	// Record capture start time (bridge clock) for time authority
 	captureStartUTC := time.Now().UTC()
 
@@ -236,20 +255,19 @@ func (w *CaptureWorker) capture() {
 	}
 
 	// Try to read camera EXIF timestamp (via exiftool)
+	// Use resource limiter to serialize exiftool operations
 	var cameraTime *time.Time
 	if w.exifHelper != nil {
-		// Write to temp file for exiftool to read
-		tmpFile, err := os.CreateTemp("", "aviationwx-capture-*.jpg")
-		if err == nil {
-			tmpPath := tmpFile.Name()
-			_, _ = tmpFile.Write(imageData)
-			tmpFile.Close()
-			defer os.Remove(tmpPath)
-
-			result, err := w.exifHelper.ReadEXIF(tmpPath)
-			if err == nil && result.Success {
-				cameraTime, _ = w.exifHelper.ParseCameraTime(result)
+		if w.resourceLimiter != nil {
+			if err := w.resourceLimiter.AcquireExifOperation(jobCtx); err != nil {
+				w.logger.Debug("Skipping EXIF read due to context cancellation",
+					"camera", w.camera.ID())
+			} else {
+				defer w.resourceLimiter.ReleaseExifOperation()
+				cameraTime = w.readCameraEXIF(imageData)
 			}
+		} else {
+			cameraTime = w.readCameraEXIF(imageData)
 		}
 	}
 
@@ -274,14 +292,36 @@ func (w *CaptureWorker) capture() {
 	}
 
 	// Apply image processing if configured (resize/quality)
+	// Use resource limiter to limit concurrent CPU-intensive work
 	if w.config.ImageProcessor != nil {
-		processedData, err := w.config.ImageProcessor.Process(imageData)
-		if err != nil {
-			w.logger.Warn("Image processing failed, using original",
-				"camera", w.camera.ID(),
-				"error", err)
+		if w.resourceLimiter != nil {
+			if err := w.resourceLimiter.AcquireImageProcessing(jobCtx); err != nil {
+				w.logger.Warn("Image processing skipped due to context cancellation",
+					"camera", w.camera.ID())
+			} else {
+				// Yield to let pending web requests through before heavy CPU work
+				resource.YieldToHigherPriority()
+
+				processedData, err := w.config.ImageProcessor.Process(imageData)
+				w.resourceLimiter.ReleaseImageProcessing()
+
+				if err != nil {
+					w.logger.Warn("Image processing failed, using original",
+						"camera", w.camera.ID(),
+						"error", err)
+				} else {
+					imageData = processedData
+				}
+			}
 		} else {
-			imageData = processedData
+			processedData, err := w.config.ImageProcessor.Process(imageData)
+			if err != nil {
+				w.logger.Warn("Image processing failed, using original",
+					"camera", w.camera.ID(),
+					"error", err)
+			} else {
+				imageData = processedData
+			}
 		}
 	}
 
@@ -334,6 +374,30 @@ func (w *CaptureWorker) capture() {
 	if w.onCapture != nil {
 		w.onCapture(w.camera.ID(), imageData, observation.Time)
 	}
+}
+
+// readCameraEXIF reads EXIF timestamp from image data via exiftool
+func (w *CaptureWorker) readCameraEXIF(imageData []byte) *time.Time {
+	// Write to temp file for exiftool to read
+	tmpFile, err := os.CreateTemp("", "aviationwx-capture-*.jpg")
+	if err != nil {
+		return nil
+	}
+	tmpPath := tmpFile.Name()
+	_, _ = tmpFile.Write(imageData)
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
+
+	result, err := w.exifHelper.ReadEXIF(tmpPath)
+	if err != nil || !result.Success {
+		w.mu.Lock()
+		w.exifReadFailed++
+		w.mu.Unlock()
+		return nil
+	}
+
+	cameraTime, _ := w.exifHelper.ParseCameraTime(result)
+	return cameraTime
 }
 
 func (w *CaptureWorker) handleCaptureError(err error) {

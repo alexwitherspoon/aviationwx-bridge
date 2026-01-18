@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"sync"
 	"syscall"
@@ -15,6 +16,7 @@ import (
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/config"
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/image"
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/logger"
+	"github.com/alexwitherspoon/aviationwx-bridge/internal/resource"
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/scheduler"
 	timehealth "github.com/alexwitherspoon/aviationwx-bridge/internal/time"
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/update"
@@ -22,6 +24,20 @@ import (
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/web"
 	"github.com/alexwitherspoon/aviationwx-bridge/pkg/health"
 )
+
+func init() {
+	// Resource management for Pi Zero 2 W (512MB RAM)
+	// Set soft memory limit to trigger more aggressive GC before OOM
+	// Leave ~150MB for OS and other processes
+	debug.SetMemoryLimit(350 * 1024 * 1024) // 350MB
+
+	// Reserve one CPU core for web UI responsiveness on multi-core systems
+	// Pi Zero 2 W has 4 cores, so we use 3 for background work
+	numCPU := runtime.NumCPU()
+	if numCPU > 2 {
+		runtime.GOMAXPROCS(numCPU - 1)
+	}
+}
 
 // Build info set at compile time via ldflags
 var (
@@ -31,13 +47,14 @@ var (
 
 // Bridge is the main application coordinating all services
 type Bridge struct {
-	configService *config.Service
-	orchestrator  *scheduler.Orchestrator
-	webServer     *web.Server
-	updateChecker *update.Checker
-	systemMonitor *health.SystemMonitor
-	timeHealth    *timehealth.TimeHealth
-	log           *logger.Logger
+	configService   *config.Service
+	orchestrator    *scheduler.Orchestrator
+	webServer       *web.Server
+	updateChecker   *update.Checker
+	systemMonitor   *health.SystemMonitor
+	timeHealth      *timehealth.TimeHealth
+	resourceLimiter *resource.Limiter
+	log             *logger.Logger
 
 	// Preview cache (in-memory only)
 	lastCaptures map[string]*CachedImage
@@ -138,12 +155,27 @@ func main() {
 		log.Info("Time health monitoring disabled (SNTP not configured)")
 	}
 
+	// Create resource limiter for background work throttling
+	resourceLimiter := resource.NewLimiter(resource.Config{
+		MaxConcurrentImageProcessing: 2,   // Limit concurrent image decode/resize/encode
+		MaxConcurrentExifOperations:  1,   // Serialize exiftool calls (heavy subprocess)
+		MemoryPressureThresholdMB:    200, // Start throttling above 200MB heap
+		GoroutinePressureThreshold:   100, // Start throttling above 100 goroutines
+		MaxThrottleDelay:             2 * time.Second,
+	})
+	log.Info("Resource limiter initialized",
+		"max_image_processing", 2,
+		"max_exif_operations", 1,
+		"num_cpu", runtime.NumCPU(),
+		"gomaxprocs", runtime.GOMAXPROCS(0))
+
 	// Create bridge
 	bridge := &Bridge{
 		configService:      configService,
 		updateChecker:      updateChecker,
 		systemMonitor:      health.NewSystemMonitor(queuePath),
 		timeHealth:         timeHealth,
+		resourceLimiter:    resourceLimiter,
 		log:                log,
 		lastCaptures:       make(map[string]*CachedImage),
 		cameraWorkerStatus: make(map[string]*CameraWorkerStatus),
@@ -236,6 +268,7 @@ func (b *Bridge) initOrchestrator() error {
 		QueueBasePath:   queuePath,
 		QueueMaxTotalMB: 100,
 		QueueMaxHeapMB:  400,
+		ResourceLimiter: b.resourceLimiter,
 		Logger:          b.log,
 	})
 	if err != nil {

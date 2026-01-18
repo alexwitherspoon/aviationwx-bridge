@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"runtime"
 
 	// Import image decoders
 	_ "image/gif"
@@ -114,6 +115,9 @@ func (p *Processor) resize(img image.Image) image.Image {
 // resizeImage performs bilinear interpolation resize
 // This is a simple implementation - for better quality, consider using
 // golang.org/x/image/draw or similar
+//
+// Includes cooperative yielding via runtime.Gosched() every 50 rows to allow
+// web handlers and other goroutines to run on resource-constrained devices.
 func resizeImage(src image.Image, width, height int) image.Image {
 	bounds := src.Bounds()
 	srcW := bounds.Dx()
@@ -122,6 +126,12 @@ func resizeImage(src image.Image, width, height int) image.Image {
 	dst := image.NewRGBA(image.Rect(0, 0, width, height))
 
 	for y := 0; y < height; y++ {
+		// Cooperative yielding: allow web handlers to run during resize
+		// This prevents the resize loop from starving the admin UI
+		if y%50 == 0 && y > 0 {
+			runtime.Gosched()
+		}
+
 		for x := 0; x < width; x++ {
 			// Map destination coordinates to source
 			srcX := float64(x) * float64(srcW) / float64(width)

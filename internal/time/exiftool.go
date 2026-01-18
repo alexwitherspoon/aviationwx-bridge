@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -16,6 +17,8 @@ import (
 type ExifToolHelper struct {
 	exiftoolPath string
 	timeout      time.Duration
+	useNice      bool // Run exiftool with nice for lower CPU priority
+	niceLevel    int  // Nice level (default: 19 = lowest priority)
 }
 
 // ExifReadResult is the result from reading EXIF via exiftool
@@ -57,9 +60,15 @@ func NewExifToolHelper() (*ExifToolHelper, error) {
 		return nil, fmt.Errorf("exiftool not found in PATH: %w", err)
 	}
 
+	// Enable nice on Linux to run exiftool at lower priority
+	// This protects the web UI from exiftool CPU spikes
+	useNice := runtime.GOOS == "linux"
+
 	return &ExifToolHelper{
 		exiftoolPath: exiftoolPath,
 		timeout:      10 * time.Second,
+		useNice:      useNice,
+		niceLevel:    19, // Lowest priority
 	}, nil
 }
 
@@ -68,13 +77,33 @@ func (h *ExifToolHelper) SetTimeout(d time.Duration) {
 	h.timeout = d
 }
 
+// SetNice enables or disables nice for exiftool subprocess
+func (h *ExifToolHelper) SetNice(enabled bool, level int) {
+	h.useNice = enabled
+	if level >= -20 && level <= 19 {
+		h.niceLevel = level
+	}
+}
+
+// createCommand creates an exec.Cmd for exiftool, optionally wrapped with nice
+func (h *ExifToolHelper) createCommand(ctx context.Context, args ...string) *exec.Cmd {
+	if h.useNice {
+		// Prepend nice command
+		niceArgs := []string{"-n", fmt.Sprintf("%d", h.niceLevel), h.exiftoolPath}
+		niceArgs = append(niceArgs, args...)
+		return exec.CommandContext(ctx, "nice", niceArgs...)
+	}
+	return exec.CommandContext(ctx, h.exiftoolPath, args...)
+}
+
 // ReadEXIF reads EXIF data from an image file
 func (h *ExifToolHelper) ReadEXIF(imagePath string) (*ExifReadResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), h.timeout)
 	defer cancel()
 
 	// Use exiftool to extract relevant fields as JSON
-	cmd := exec.CommandContext(ctx, h.exiftoolPath,
+	// Wrapped with nice on Linux to run at lower priority
+	cmd := h.createCommand(ctx,
 		"-json",
 		"-DateTimeOriginal",
 		"-OffsetTimeOriginal",
@@ -156,7 +185,8 @@ func (h *ExifToolHelper) WriteEXIF(imagePath string, opts ExifWriteOptions) erro
 
 	args = append(args, imagePath)
 
-	cmd := exec.CommandContext(ctx, h.exiftoolPath, args...)
+	// Wrapped with nice on Linux to run at lower priority
+	cmd := h.createCommand(ctx, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -277,6 +307,7 @@ func (h *ExifToolHelper) IsAvailable() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
+	// Don't use nice for version check - it's quick
 	cmd := exec.CommandContext(ctx, h.exiftoolPath, "-ver")
 	return cmd.Run() == nil
 }
@@ -286,6 +317,7 @@ func (h *ExifToolHelper) GetVersion() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
+	// Don't use nice for version check - it's quick
 	cmd := exec.CommandContext(ctx, h.exiftoolPath, "-ver")
 	output, err := cmd.Output()
 	if err != nil {
@@ -309,11 +341,16 @@ func DefaultExifToolHelper() (*ExifToolHelper, error) {
 		"/opt/homebrew/bin/exiftool",
 	}
 
+	// Enable nice on Linux to run exiftool at lower priority
+	useNice := runtime.GOOS == "linux"
+
 	for _, path := range paths {
 		if _, err := os.Stat(path); err == nil {
 			return &ExifToolHelper{
 				exiftoolPath: path,
 				timeout:      10 * time.Second,
+				useNice:      useNice,
+				niceLevel:    19,
 			}, nil
 		}
 	}

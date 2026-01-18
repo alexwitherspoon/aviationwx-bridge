@@ -169,16 +169,21 @@ jobs:
       - name: Prepare release assets
         run: |
           cd dist
-          ls -R
-          echo "---"
+          # artifacts/download-artifact@v4 creates: artifact-name/artifact-name structure
           # Move binaries from subdirectories to root
           for dir in */; do
-            if [ -f "${dir}aviationwx-bridge-"* ]; then
-              mv "${dir}"aviationwx-bridge-* .
+            dirname="${dir%/}"
+            if [ -f "${dir}${dirname}" ]; then
+              echo "Moving ${dir}${dirname} to ./${dirname}"
+              mv "${dir}${dirname}" "./${dirname}.tmp"
             fi
           done
-          # Remove empty subdirectories
+          # Remove subdirectories
           rm -rf */
+          # Rename .tmp files back
+          for file in *.tmp; do
+            mv "$file" "${file%.tmp}"
+          done
           # List final structure
           ls -lh
           # Make binaries executable and create checksums

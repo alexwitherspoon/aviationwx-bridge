@@ -292,7 +292,7 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 		cam.Upload.Host = "upload.aviationwx.org"
 	}
 	if cam.Upload.Port == 0 {
-		cam.Upload.Port = 21
+		cam.Upload.Port = 2121
 	}
 	cam.Upload.TLS = true
 
@@ -300,7 +300,9 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 
 	// Notify of config change
 	if s.onConfigChange != nil {
-		if err := s.onConfigChange(s.config); err != nil {
+		// Make a copy of the config to pass to the handler
+		configCopy := s.copyConfig(s.config)
+		if err := s.onConfigChange(configCopy); err != nil {
 			// Rollback
 			s.config.Cameras = s.config.Cameras[:len(s.config.Cameras)-1]
 			http.Error(w, "Failed to apply: "+err.Error(), http.StatusInternalServerError)
@@ -371,10 +373,33 @@ func (s *Server) updateCamera(w http.ResponseWriter, r *http.Request, cameraID s
 		if cam.ID == cameraID {
 			// Preserve ID
 			update.ID = cameraID
+			
+			// Preserve existing password if new one is empty
+			if update.Upload != nil && update.Upload.Password == "" && cam.Upload != nil {
+				update.Upload.Password = cam.Upload.Password
+			}
+			
+			// Preserve auth password if new one is empty
+			if update.Auth != nil && update.Auth.Password == "" && cam.Auth != nil {
+				update.Auth.Password = cam.Auth.Password
+			}
+			
+			// Preserve RTSP password if new one is empty
+			if update.RTSP != nil && update.RTSP.Password == "" && cam.RTSP != nil {
+				update.RTSP.Password = cam.RTSP.Password
+			}
+			
+			// Preserve ONVIF password if new one is empty
+			if update.ONVIF != nil && update.ONVIF.Password == "" && cam.ONVIF != nil {
+				update.ONVIF.Password = cam.ONVIF.Password
+			}
+			
 			s.config.Cameras[i] = update
 
 			if s.onConfigChange != nil {
-				if err := s.onConfigChange(s.config); err != nil {
+				// Make a copy of the config to pass to the handler
+				configCopy := s.copyConfig(s.config)
+				if err := s.onConfigChange(configCopy); err != nil {
 					// Rollback
 					s.config.Cameras[i] = cam
 					http.Error(w, "Failed to apply: "+err.Error(), http.StatusInternalServerError)
@@ -401,7 +426,9 @@ func (s *Server) deleteCamera(w http.ResponseWriter, r *http.Request, cameraID s
 			s.config.Cameras = append(s.config.Cameras[:i], s.config.Cameras[i+1:]...)
 
 			if s.onConfigChange != nil {
-				if err := s.onConfigChange(s.config); err != nil {
+				// Make a copy of the config to pass to the handler
+				configCopy := s.copyConfig(s.config)
+				if err := s.onConfigChange(configCopy); err != nil {
 					// Rollback
 					s.config.Cameras = append(s.config.Cameras[:i], append([]config.Camera{cam}, s.config.Cameras[i:]...)...)
 					http.Error(w, "Failed to apply: "+err.Error(), http.StatusInternalServerError)
@@ -713,4 +740,22 @@ func (s *Server) validateConfig(cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+// copyConfig creates a deep copy of the config to prevent shared pointer issues
+func (s *Server) copyConfig(cfg *config.Config) *config.Config {
+	// Marshal to JSON and back to create a deep copy
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		// If marshal fails, return original (shouldn't happen)
+		return cfg
+	}
+	
+	var copy config.Config
+	if err := json.Unmarshal(data, &copy); err != nil {
+		// If unmarshal fails, return original (shouldn't happen)
+		return cfg
+	}
+	
+	return &copy
 }

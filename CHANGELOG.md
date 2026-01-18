@@ -7,17 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-01-18
+
+First production release of AviationWX Bridge! 🎉
+
+This release represents a complete, production-ready weather camera bridge for aviationwx.org with comprehensive features for camera management, image processing, queue management, and automatic updates.
+
 ### Fixed
 - **CI/CD**: Docker images now only publish after all tests pass
   - Merged `build.yml` into `ci.yml` with proper job dependencies
   - Added `publish` job that depends on `test`, `build`, and `docker` jobs
   - Prevents publishing broken images when tests fail on main branch
   - Manual workflow dispatch still available for emergency rebuilds
-- **Install**: Changed install script to use `:edge` tag instead of `:latest`
-  - The `:latest` tag is only created when a release is published
+- **Install**: Install script now uses `:edge` tag for pre-release testing
+  - The `:latest` tag is created when a release is published
   - The `:edge` tag is created on every push to main branch
-  - This allows installation to work before v1.0.0 release
-  - Supervisor continues to use versioned releases (e.g., `v1.0.0`) as designed
+  - Supervisor uses versioned releases (e.g., `v1.0.0`) as designed
 - **CI/CD**: Consolidated and standardized GitHub Actions workflows
   - Merged `test.yml` and `ci.yml` into single comprehensive CI workflow
   - Standardized all workflows to Go 1.24 (eliminates tar cache warnings)

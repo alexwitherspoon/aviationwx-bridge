@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Install**: Changed install script to use `:edge` tag instead of `:latest`
+  - The `:latest` tag is only created when a release is published
+  - The `:edge` tag is created on every push to main branch
+  - This allows installation to work before v1.0.0 release
+  - Supervisor continues to use versioned releases (e.g., `v1.0.0`) as designed
 - **CI/CD**: Consolidated and standardized GitHub Actions workflows
   - Merged `test.yml` and `ci.yml` into single comprehensive CI workflow
   - Standardized all workflows to Go 1.24 (eliminates tar cache warnings)

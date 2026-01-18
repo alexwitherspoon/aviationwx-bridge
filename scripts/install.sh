@@ -207,7 +207,7 @@ start_container() {
     tmpfs_size=$(get_tmpfs_size)
 
     log_info "Pulling latest AviationWX Bridge image..."
-    docker pull "${IMAGE_NAME}:latest"
+    docker pull "${IMAGE_NAME}:edge"
 
     # Stop existing container if present
     if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
@@ -223,7 +223,7 @@ start_container() {
         -p "${WEB_PORT}:${WEB_PORT}" \
         -v "${DATA_DIR}:/data" \
         --tmpfs /dev/shm:size="${tmpfs_size}" \
-        "${IMAGE_NAME}:latest"
+        "${IMAGE_NAME}:edge"
 
     # Wait for container to be healthy
     log_info "Waiting for bridge to start..."

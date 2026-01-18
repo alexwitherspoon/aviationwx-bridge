@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Release**: Fixed artifact preparation in release workflow
+  - Changed find command to use -mindepth 2 to handle artifact subdirectories
+  - Reordered operations to remove directories before creating checksums
+  - Added ls output for debugging
+
 ### Changed
 - **Install**: Install script now uses `:latest` tag for stable releases
   - Changed from `:edge` to `:latest` after v1.0.0 release

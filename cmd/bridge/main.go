@@ -627,12 +627,9 @@ func (b *Bridge) testUpload(uploadConfig config.Upload) error {
 		return fmt.Errorf("create uploader: %w", err)
 	}
 
-	// Create test file
-	testData := []byte("AviationWX Bridge connection test")
-	testFilename := fmt.Sprintf("test-%d.txt", time.Now().Unix())
-
-	if err := client.Upload(testFilename, testData); err != nil {
-		return fmt.Errorf("upload test file: %w", err)
+	// Test connection only (don't upload a file)
+	if err := client.TestConnection(); err != nil {
+		return fmt.Errorf("test connection: %w", err)
 	}
 
 	return nil

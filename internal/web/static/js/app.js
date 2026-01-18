@@ -904,17 +904,17 @@ async function testUpload() {
             method: 'POST',
             body: JSON.stringify({
                 host: document.getElementById('uploadHost').value || 'upload.aviationwx.org',
-                port: 21,
+                port: parseInt(document.getElementById('uploadPort').value) || 2121,
                 username: document.getElementById('uploadUser').value,
                 password: document.getElementById('uploadPass').value,
                 tls: true,
             }),
         });
         
-        if (result.success) {
+        if (result.status === 'ok') {
             resultDiv.innerHTML = '<div class="test-result success">✓ Connection successful!</div>';
         } else {
-            resultDiv.innerHTML = `<div class="test-result error">✗ ${result.error}</div>`;
+            resultDiv.innerHTML = `<div class="test-result error">✗ ${result.error || 'Connection failed'}</div>`;
         }
     } catch (err) {
         resultDiv.innerHTML = `<div class="test-result error">✗ ${err.message}</div>`;

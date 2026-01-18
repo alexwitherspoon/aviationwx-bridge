@@ -199,8 +199,8 @@ func TestDefaultUpload(t *testing.T) {
 	if upload.Host != "upload.aviationwx.org" {
 		t.Errorf("Host = %v, want upload.aviationwx.org", upload.Host)
 	}
-	if upload.Port != 21 {
-		t.Errorf("Port = %v, want 21", upload.Port)
+	if upload.Port != 2121 {
+		t.Errorf("Port = %v, want 2121", upload.Port)
 	}
 	if !upload.TLS {
 		t.Error("TLS should be true")

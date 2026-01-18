@@ -33,7 +33,7 @@ func Load(path string) (*Config, error) {
 func applyDefaults(c *Config) {
 	// Upload defaults
 	if c.Upload.Port == 0 {
-		c.Upload.Port = 21
+		c.Upload.Port = 2121
 	}
 	if !c.Upload.TLS {
 		c.Upload.TLS = true

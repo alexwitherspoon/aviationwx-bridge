@@ -65,7 +65,7 @@ type ImageProcessing struct {
 // Upload represents FTPS upload settings
 type Upload struct {
 	Host      string `json:"host"`                 // Default: upload.aviationwx.org
-	Port      int    `json:"port,omitempty"`       // Default: 21
+	Port      int    `json:"port,omitempty"`       // Default: 2121
 	Username  string `json:"username"`             // FTP username (provided by aviationwx.org)
 	Password  string `json:"password"`             // FTP password (provided by aviationwx.org)
 	TLS       bool   `json:"tls,omitempty"`        // Default: true

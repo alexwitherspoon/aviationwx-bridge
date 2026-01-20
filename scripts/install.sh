@@ -368,11 +368,70 @@ bootstrap_container() {
     fi
 }
 
-# Remove old daily restart (replaced by watchdog)
-remove_daily_restart() {
-    # Remove cron job if exists
-    crontab -l 2>/dev/null | grep -v "aviationwx-daily-restart" | crontab - 2>/dev/null || true
-    rm -f /usr/local/bin/aviationwx-daily-restart
+# Remove deprecated items from previous versions
+remove_deprecated_items() {
+    log_info "Cleaning up deprecated components..."
+    
+    # Deprecated scripts (removed in various versions)
+    local deprecated_scripts=(
+        "aviationwx-daily-restart"         # v2.0: Replaced by watchdog
+        "aviationwx-daily-restart.sh"      # v2.0: Alternative name
+        # Add future deprecated scripts here with version comment
+    )
+    
+    # Deprecated systemd services/timers
+    local deprecated_systemd=(
+        "aviationwx-daily-restart.service"
+        "aviationwx-daily-restart.timer"
+        # Add future deprecated services here with version comment
+    )
+    
+    # Deprecated cron patterns (will be removed from crontab)
+    local deprecated_cron_patterns=(
+        "aviationwx-daily-restart"
+        # Add future deprecated cron patterns here
+    )
+    
+    # Remove deprecated scripts
+    local removed_count=0
+    for script in "${deprecated_scripts[@]}"; do
+        if [[ -f "/usr/local/bin/${script}" ]]; then
+            log_info "Removing deprecated script: ${script}"
+            rm -f "/usr/local/bin/${script}"
+            ((removed_count++))
+        fi
+    done
+    
+    # Stop, disable, and remove deprecated systemd units
+    for unit in "${deprecated_systemd[@]}"; do
+        if systemctl list-unit-files | grep -q "^${unit}"; then
+            log_info "Removing deprecated systemd unit: ${unit}"
+            systemctl stop "${unit}" 2>/dev/null || true
+            systemctl disable "${unit}" 2>/dev/null || true
+            rm -f "/etc/systemd/system/${unit}"
+            ((removed_count++))
+        fi
+    done
+    
+    # Reload systemd if we removed any units
+    if [[ ${removed_count} -gt 0 ]]; then
+        systemctl daemon-reload
+    fi
+    
+    # Remove deprecated cron jobs
+    for pattern in "${deprecated_cron_patterns[@]}"; do
+        if crontab -l 2>/dev/null | grep -q "${pattern}"; then
+            log_info "Removing deprecated cron job: ${pattern}"
+            crontab -l 2>/dev/null | grep -v "${pattern}" | crontab - 2>/dev/null || true
+            ((removed_count++))
+        fi
+    done
+    
+    if [[ ${removed_count} -gt 0 ]]; then
+        log_success "Removed ${removed_count} deprecated component(s)"
+    else
+        log_info "No deprecated components found"
+    fi
 }
 
 # Get device IP
@@ -424,8 +483,8 @@ main() {
     setup_data_dir
     install_host_scripts
     setup_systemd
+    remove_deprecated_items
     bootstrap_container
-    remove_daily_restart
     print_complete
 }
 
@@ -437,29 +496,53 @@ uninstall() {
     docker stop "${CONTAINER_NAME}" 2>/dev/null || true
     docker rm "${CONTAINER_NAME}" 2>/dev/null || true
 
-    # Stop and disable systemd services
-    systemctl stop aviationwx-watchdog.timer 2>/dev/null || true
-    systemctl stop aviationwx-daily-update.timer 2>/dev/null || true
-    systemctl disable aviationwx-boot-update.service 2>/dev/null || true
-    systemctl disable aviationwx-container.service 2>/dev/null || true
-    systemctl disable aviationwx-daily-update.timer 2>/dev/null || true
-    systemctl disable aviationwx-watchdog.timer 2>/dev/null || true
+    # Current systemd services/timers
+    local current_systemd=(
+        "aviationwx-boot-update.service"
+        "aviationwx-container.service"
+        "aviationwx-daily-update.service"
+        "aviationwx-daily-update.timer"
+        "aviationwx-watchdog.service"
+        "aviationwx-watchdog.timer"
+    )
     
-    # Remove systemd files
-    rm -f /etc/systemd/system/aviationwx-boot-update.service
-    rm -f /etc/systemd/system/aviationwx-container.service
-    rm -f /etc/systemd/system/aviationwx-daily-update.service
-    rm -f /etc/systemd/system/aviationwx-daily-update.timer
-    rm -f /etc/systemd/system/aviationwx-watchdog.service
-    rm -f /etc/systemd/system/aviationwx-watchdog.timer
+    # Deprecated systemd services/timers (from older versions)
+    local deprecated_systemd=(
+        "aviationwx-daily-restart.service"
+        "aviationwx-daily-restart.timer"
+    )
+    
+    # Stop and disable all services (current + deprecated)
+    for unit in "${current_systemd[@]}" "${deprecated_systemd[@]}"; do
+        systemctl stop "${unit}" 2>/dev/null || true
+        systemctl disable "${unit}" 2>/dev/null || true
+        rm -f "/etc/systemd/system/${unit}"
+    done
+    
     systemctl daemon-reload
 
-    # Remove scripts
-    rm -f /usr/local/bin/aviationwx
-    rm -f /usr/local/bin/aviationwx-supervisor.sh
-    rm -f /usr/local/bin/aviationwx-watchdog.sh
-    rm -f /usr/local/bin/aviationwx-recovery.sh
-    rm -f /usr/local/bin/aviationwx-container-start.sh
+    # Current scripts
+    local current_scripts=(
+        "aviationwx"
+        "aviationwx-supervisor.sh"
+        "aviationwx-watchdog.sh"
+        "aviationwx-recovery.sh"
+        "aviationwx-container-start.sh"
+    )
+    
+    # Deprecated scripts (from older versions)
+    local deprecated_scripts=(
+        "aviationwx-daily-restart"
+        "aviationwx-daily-restart.sh"
+    )
+    
+    # Remove all scripts (current + deprecated)
+    for script in "${current_scripts[@]}" "${deprecated_scripts[@]}"; do
+        rm -f "/usr/local/bin/${script}"
+    done
+    
+    # Remove deprecated cron jobs
+    crontab -l 2>/dev/null | grep -v "aviationwx" | crontab - 2>/dev/null || true
 
     log_warn "Data directory preserved at ${DATA_DIR}"
     log_warn "To remove data: sudo rm -rf ${DATA_DIR}"

@@ -123,6 +123,25 @@ async function loadCameras() {
 function updateStatusDisplay() {
     if (!status) return;
     
+    // Update version display
+    if (status.version) {
+        const versionEl = document.getElementById('appVersion');
+        versionEl.textContent = `v${status.version}`;
+    }
+    
+    // Update available notification
+    if (status.update && status.update.update_available) {
+        const updateLink = document.getElementById('updateAvailable');
+        updateLink.style.display = 'inline-block';
+        updateLink.textContent = `⬆ Update to ${status.update.latest_version}`;
+        updateLink.onclick = (e) => {
+            e.preventDefault();
+            showUpdateDialog(status.update);
+        };
+    } else {
+        document.getElementById('updateAvailable').style.display = 'none';
+    }
+    
     // Update basic stats
     document.getElementById('statCameras').textContent = status.cameras || 0;
     
@@ -1196,6 +1215,53 @@ function smoothRefreshImage(img, cameraId) {
 window.addEventListener('beforeunload', () => {
     imageRefreshIntervals.forEach(interval => clearInterval(interval));
 });
+
+// Update Management
+function showUpdateDialog(updateInfo) {
+    const message = `
+        <div style="text-align: left; padding: 1rem;">
+            <p><strong>Current Version:</strong> ${updateInfo.current_version}</p>
+            <p><strong>Latest Version:</strong> ${updateInfo.latest_version}</p>
+            <p style="margin-top: 1.5rem;">This will trigger the supervisor script to pull and restart with the new version.</p>
+            <p><strong>⚠️ Warning:</strong> The bridge will be unavailable for 1-2 minutes during the update.</p>
+        </div>
+    `;
+    
+    if (confirm(`Update Available\n\n${message.replace(/<[^>]*>/g, '')}\n\nProceed with update?`)) {
+        triggerUpdate();
+    }
+}
+
+async function triggerUpdate() {
+    try {
+        showNotification('Triggering update... This will take 1-2 minutes.', 'info');
+        
+        const result = await api('/update', {
+            method: 'POST',
+        });
+        
+        if (result.status === 'ok') {
+            showNotification('Update triggered successfully! The bridge will restart shortly.', 'success');
+            
+            // Show countdown and wait for bridge to come back
+            let countdown = 120; // 2 minutes
+            const intervalId = setInterval(() => {
+                countdown--;
+                showNotification(`Waiting for bridge to restart... ${countdown}s remaining`, 'info');
+                
+                if (countdown <= 0) {
+                    clearInterval(intervalId);
+                    showNotification('Update complete! Refreshing page...', 'success');
+                    setTimeout(() => location.reload(), 2000);
+                }
+            }, 1000);
+        } else {
+            showNotification(`Update failed: ${result.error || 'Unknown error'}`, 'error');
+        }
+    } catch (err) {
+        showNotification(`Update trigger failed: ${err.message}`, 'error');
+    }
+}
 
 
 

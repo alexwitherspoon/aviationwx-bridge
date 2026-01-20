@@ -699,6 +699,16 @@ EOF
 main() {
     mkdir -p "$DATA_DIR"
     
+    # Check for manual update trigger from web UI
+    if [ -f "${DATA_DIR}/trigger-update" ]; then
+        log_event "INFO" "Manual update triggered via web UI"
+        rm -f "${DATA_DIR}/trigger-update"
+        rm -f "${DATA_DIR}/release-cache.json" # Force fresh check
+        unset BOOT_MODE
+        boot_update
+        exit 0
+    fi
+    
     case "${1:-}" in
         boot-update|daily-update)
             boot_update

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -68,6 +69,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/time", s.authMiddleware(s.handleTime))
 	s.mux.HandleFunc("/api/test/camera", s.authMiddleware(s.handleTestCamera))
 	s.mux.HandleFunc("/api/test/upload", s.authMiddleware(s.handleTestUpload))
+	s.mux.HandleFunc("/api/update", s.authMiddleware(s.handleUpdate))
 
 	// Health check (no auth)
 	s.mux.HandleFunc("/healthz", s.handleHealthz)
@@ -605,6 +607,35 @@ func (s *Server) buildHealthStatus() map[string]interface{} {
 	}
 
 	return health
+}
+
+func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.log.Info("Update triggered via web UI")
+
+	// Trigger update by touching a file that the supervisor script watches
+	updateTriggerFile := "/data/aviationwx/trigger-update"
+	
+	if err := os.WriteFile(updateTriggerFile, []byte("manual-trigger"), 0644); err != nil {
+		s.log.Error("Failed to create update trigger file", "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status": "error",
+			"error":  fmt.Sprintf("Failed to trigger update: %v", err),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "ok",
+		"message": "Update triggered successfully. The supervisor script will apply the update shortly.",
+	})
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {

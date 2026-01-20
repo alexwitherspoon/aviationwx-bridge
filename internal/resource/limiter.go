@@ -4,7 +4,10 @@ package resource
 
 import (
 	"context"
+	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,9 +68,17 @@ type Config struct {
 // DefaultConfig returns sensible defaults for Pi Zero 2 W
 func DefaultConfig() Config {
 	numCPU := runtime.NumCPU()
+	totalMemoryMB := getTotalMemoryMB()
+
+	// On devices with < 1GB RAM (like Pi Zero 2 W with 512MB),
+	// serialize image processing to prevent memory exhaustion
+	maxImageProcessing := 1
+	if totalMemoryMB >= 1024 {
+		maxImageProcessing = max(1, numCPU/2)
+	}
 
 	return Config{
-		MaxConcurrentImageProcessing: max(1, numCPU/2),
+		MaxConcurrentImageProcessing: maxImageProcessing,
 		MaxConcurrentExifOperations:  1,
 		MemoryPressureThresholdMB:    200,
 		GoroutinePressureThreshold:   100,
@@ -325,4 +336,30 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// getTotalMemoryMB returns the total system memory in MB by reading /proc/meminfo.
+// Returns 0 if unable to detect (will default to safe low-memory behavior).
+func getTotalMemoryMB() int {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+
+	// Parse MemTotal from /proc/meminfo
+	// Example line: "MemTotal:         416768 kB"
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "MemTotal:") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				memKB, err := strconv.ParseInt(fields[1], 10, 64)
+				if err == nil {
+					return int(memKB / 1024) // Convert KB to MB
+				}
+			}
+		}
+	}
+
+	return 0
 }

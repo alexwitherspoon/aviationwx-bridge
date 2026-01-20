@@ -351,3 +351,43 @@ func BenchmarkGetThrottleDelay(b *testing.B) {
 		l.GetThrottleDelay()
 	}
 }
+
+func TestGetTotalMemoryMB(t *testing.T) {
+	memMB := getTotalMemoryMB()
+	
+	// Should be able to detect memory on Linux (where /proc/meminfo exists)
+	// On non-Linux systems (macOS, Windows), will return 0
+	if memMB < 0 {
+		t.Errorf("expected non-negative memory, got %d", memMB)
+	}
+	
+	// If running on Linux, should detect some memory
+	// Pi Zero 2 W has ~416MB, Pi 4 has 1GB-8GB
+	t.Logf("Detected total memory: %d MB", memMB)
+}
+
+func TestDefaultConfig_LowMemory(t *testing.T) {
+	// Test the adaptive behavior
+	cfg := DefaultConfig()
+	
+	// Max image processing should be 1 or more
+	if cfg.MaxConcurrentImageProcessing < 1 {
+		t.Errorf("expected MaxConcurrentImageProcessing >= 1, got %d", cfg.MaxConcurrentImageProcessing)
+	}
+	
+	// Exif should always be serialized
+	if cfg.MaxConcurrentExifOperations != 1 {
+		t.Errorf("expected MaxConcurrentExifOperations=1, got %d", cfg.MaxConcurrentExifOperations)
+	}
+	
+	totalMem := getTotalMemoryMB()
+	t.Logf("Total memory: %d MB", totalMem)
+	t.Logf("Max concurrent image processing: %d", cfg.MaxConcurrentImageProcessing)
+	
+	// Verify the logic: < 1GB = serialize, >= 1GB = parallelize
+	if totalMem > 0 && totalMem < 1024 {
+		if cfg.MaxConcurrentImageProcessing != 1 {
+			t.Errorf("expected serialized processing on low-memory device, got %d", cfg.MaxConcurrentImageProcessing)
+		}
+	}
+}

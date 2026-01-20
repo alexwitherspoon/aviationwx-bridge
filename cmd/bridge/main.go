@@ -156,16 +156,13 @@ func main() {
 	}
 
 	// Create resource limiter for background work throttling
-	resourceLimiter := resource.NewLimiter(resource.Config{
-		MaxConcurrentImageProcessing: 2,   // Limit concurrent image decode/resize/encode
-		MaxConcurrentExifOperations:  1,   // Serialize exiftool calls (heavy subprocess)
-		MemoryPressureThresholdMB:    200, // Start throttling above 200MB heap
-		GoroutinePressureThreshold:   100, // Start throttling above 100 goroutines
-		MaxThrottleDelay:             2 * time.Second,
-	})
+	// On devices with < 1GB RAM, this will serialize image processing
+	resourceConfig := resource.DefaultConfig()
+	resourceLimiter := resource.NewLimiter(resourceConfig)
+	
 	log.Info("Resource limiter initialized",
-		"max_image_processing", 2,
-		"max_exif_operations", 1,
+		"max_image_processing", resourceConfig.MaxConcurrentImageProcessing,
+		"max_exif_operations", resourceConfig.MaxConcurrentExifOperations,
 		"num_cpu", runtime.NumCPU(),
 		"gomaxprocs", runtime.GOMAXPROCS(0))
 

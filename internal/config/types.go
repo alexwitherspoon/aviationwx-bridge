@@ -75,6 +75,7 @@ type Upload struct {
 	CABundlePath          string `json:"ca_bundle_path,omitempty"`
 	TimeoutConnectSeconds int    `json:"timeout_connect_seconds,omitempty"` // Default: 30
 	TimeoutUploadSeconds  int    `json:"timeout_upload_seconds,omitempty"`  // Default: 60
+	DisableEPSV           bool   `json:"disable_epsv,omitempty"`            // Default: false (use standard PASV if true)
 }
 
 // DefaultUpload returns default upload settings

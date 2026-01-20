@@ -17,6 +17,7 @@ func NewClientFromConfig(cfg config.Upload) (Client, error) {
 		CABundlePath:          cfg.CABundlePath,
 		TimeoutConnectSeconds: cfg.TimeoutConnectSeconds,
 		TimeoutUploadSeconds:  cfg.TimeoutUploadSeconds,
+		DisableEPSV:           cfg.DisableEPSV,
 	}
 
 	return NewFTPSClient(uploadConfig)

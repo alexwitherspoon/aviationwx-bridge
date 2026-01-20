@@ -143,30 +143,11 @@ func (c *FTPSClient) connect() (*goftp.Client, error) {
 	// Build FTP address
 	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
 
-	// Configure TLS with compatibility options for vsftpd
+	// Configure TLS - keep it simple and compatible
 	tlsConfig := &tls.Config{
 		ServerName:         c.config.Host,
 		InsecureSkipVerify: !c.config.TLSVerify,
-		
-		// Improved TLS settings for vsftpd compatibility
-		MinVersion:               tls.VersionTLS12, // Force TLS 1.2+
-		MaxVersion:               tls.VersionTLS13, // Allow TLS 1.3
-		PreferServerCipherSuites: true,             // Use server's cipher preference
-		
-		// Disable session resumption (common vsftpd issue)
-		// This prevents TLS session reuse errors (0x3030)
-		SessionTicketsDisabled: true,
-		ClientSessionCache:     nil, // Disable client-side session cache
-		
-		// Use modern cipher suites compatible with vsftpd
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-		},
+		MinVersion:         tls.VersionTLS12, // Modern TLS only
 	}
 
 	// Load custom CA bundle if provided
@@ -184,20 +165,21 @@ func (c *FTPSClient) connect() (*goftp.Client, error) {
 		tlsConfig.RootCAs = caCertPool
 	}
 
-	// Configure FTP client with extended timeouts and compatibility options
+	// Configure FTP client
+	// Key insight: EPSV (Extended Passive) can have issues with some servers
+	// When DisableEPSV=true, falls back to standard PASV mode
 	ftpConfig := goftp.Config{
 		User:     c.config.Username,
 		Password: c.config.Password,
-		
-		// Extended timeout for slow TLS handshakes on Pi Zero
-		Timeout: time.Duration(c.config.TimeoutConnectSeconds) * time.Second,
+		Timeout:  time.Duration(c.config.TimeoutConnectSeconds) * time.Second,
 		
 		TLSConfig: tlsConfig,
 		TLSMode:   goftp.TLSExplicit, // Use explicit TLS (FTPS)
 		
-		// Passive mode settings (critical for NAT/firewall)
-		DisableEPSV:     false,             // Try EPSV first
-		ActiveTransfers: false,             // Use passive mode (PASV/EPSV)
+		// EPSV vs PASV: Some servers (especially with forced data SSL) work
+		// better with standard PASV instead of Extended PASV
+		DisableEPSV:     c.config.DisableEPSV, // Configurable fallback to PASV
+		ActiveTransfers: false,                 // Always use passive mode
 	}
 
 	// Connect with timeout

@@ -27,6 +27,7 @@ type Config struct {
 	CABundlePath          string
 	TimeoutConnectSeconds int
 	TimeoutUploadSeconds  int
+	DisableEPSV           bool // Disable Extended Passive mode, use PASV instead
 }
 
 // Error types for upload operations

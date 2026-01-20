@@ -266,8 +266,9 @@ determine_target_version() {
                 now_epoch=$(date +%s)
                 local age_hours=$(( (now_epoch - published_epoch) / 3600 ))
                 
-                if [ $age_hours -lt $MIN_RELEASE_AGE_HOURS ]; then
-                    log_event "INFO" "Release too recent: $tag_name (${age_hours}h old)" >&2
+                # Allow override via environment variable for testing/emergency updates
+                if [ "${AVIATIONWX_SKIP_AGE_CHECK:-false}" != "true" ] && [ $age_hours -lt $MIN_RELEASE_AGE_HOURS ]; then
+                    log_event "INFO" "Release too recent: $tag_name (${age_hours}h old). Use 'force-update' or AVIATIONWX_SKIP_AGE_CHECK=true to override" >&2
                     return 1
                 fi
             fi

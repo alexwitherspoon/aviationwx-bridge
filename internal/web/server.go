@@ -619,7 +619,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger update by touching a file that the supervisor script watches
 	updateTriggerFile := "/data/aviationwx/trigger-update"
-	
+
 	if err := os.WriteFile(updateTriggerFile, []byte("manual-trigger"), 0644); err != nil {
 		s.log.Error("Failed to create update trigger file", "error", err)
 		w.Header().Set("Content-Type", "application/json")

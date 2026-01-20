@@ -305,6 +305,89 @@ version_less_than() {
 }
 
 # ============================================================================
+# IMAGE AVAILABILITY CHECK
+# ============================================================================
+
+check_image_exists() {
+    local image="$1"
+    local version="$2"
+    
+    # Try to get image manifest (lightweight check)
+    if docker manifest inspect "${image}:${version}" &>/dev/null; then
+        return 0
+    fi
+    
+    return 1
+}
+
+check_release_workflow_status() {
+    local version="$1"
+    
+    # Only check for version tags (not 'edge' or 'latest')
+    if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        return 1
+    fi
+    
+    # Try to check GitHub Actions status (requires gh CLI or API)
+    # Fallback: check if release exists
+    local release_exists
+    release_exists=$(curl -sf --max-time 5 \
+        "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${version}" 2>/dev/null)
+    
+    if [ -n "$release_exists" ]; then
+        # Release exists, check if it's recent (within last 15 minutes)
+        local published_at
+        published_at=$(echo "$release_exists" | jq -r '.published_at // empty')
+        
+        if [ -n "$published_at" ]; then
+            local published_epoch
+            published_epoch=$(date -d "$published_at" +%s 2>/dev/null || echo 0)
+            local now_epoch
+            now_epoch=$(date +%s)
+            local age_seconds=$(( now_epoch - published_epoch ))
+            
+            # If release was published in last 15 minutes, build might still be in progress
+            if [ $age_seconds -lt 900 ]; then
+                log_event "INFO" "Release $version published ${age_seconds}s ago, Docker build may be in progress" >&2
+                return 0
+            fi
+        fi
+    fi
+    
+    return 1
+}
+
+wait_for_image_with_progress() {
+    local image="$1"
+    local version="$2"
+    local max_wait="$3"
+    local elapsed=0
+    local check_interval=30
+    
+    log_event "INFO" "Waiting for Docker image to be published..." >&2
+    log_event "INFO" "Image: ${image}:${version}" >&2
+    log_event "INFO" "Max wait time: ${max_wait}s" >&2
+    
+    while [ $elapsed -lt $max_wait ]; do
+        # Check if image exists
+        if check_image_exists "$image" "$version"; then
+            log_event "SUCCESS" "Docker image is now available!" >&2
+            return 0
+        fi
+        
+        # Show progress
+        local remaining=$(( max_wait - elapsed ))
+        log_event "INFO" "Still waiting... (${remaining}s remaining)" >&2
+        
+        sleep $check_interval
+        elapsed=$((elapsed + check_interval))
+    done
+    
+    log_event "ERROR" "Timeout waiting for Docker image" >&2
+    return 1
+}
+
+# ============================================================================
 # UPDATE LOGIC
 # ============================================================================
 
@@ -315,6 +398,37 @@ pull_and_validate_update() {
     if ! check_resources_available; then
         log_event "ERROR" "Insufficient resources for update"
         return 1
+    fi
+    
+    # Check if image exists first
+    log_event "INFO" "Checking if image exists: ${IMAGE_NAME}:${target_version}"
+    if ! check_image_exists "$IMAGE_NAME" "$target_version"; then
+        log_event "WARN" "Docker image not found: ${IMAGE_NAME}:${target_version}"
+        
+        # Check if release workflow might be in progress
+        if check_release_workflow_status "$target_version"; then
+            log_event "INFO" "Recent release detected - Docker build may be in progress"
+            log_event "INFO" "This typically takes 8-10 minutes for multi-arch builds"
+            
+            # Wait up to 15 minutes for image to become available
+            if wait_for_image_with_progress "$IMAGE_NAME" "$target_version" 900; then
+                log_event "SUCCESS" "Image is ready, proceeding with update"
+            else
+                log_event "ERROR" "Timed out waiting for Docker image to be published"
+                log_event "INFO" "You can check build status at:"
+                log_event "INFO" "  https://github.com/${GITHUB_REPO}/actions"
+                log_event "INFO" "Or retry the update later: aviationwx force-update"
+                return 1
+            fi
+        else
+            log_event "ERROR" "Image does not exist and no recent release found"
+            log_event "INFO" "Possible causes:"
+            log_event "INFO" "  1. Release workflow failed (check GitHub Actions)"
+            log_event "INFO" "  2. Version tag doesn't exist"
+            log_event "INFO" "  3. Network connectivity issue"
+            log_event "INFO" "Check: https://github.com/${GITHUB_REPO}/actions"
+            return 1
+        fi
     fi
     
     # Pull image

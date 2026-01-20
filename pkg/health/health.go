@@ -11,13 +11,13 @@ type StatusProvider func() HealthStatus
 
 // HealthStatus represents the overall system health
 type HealthStatus struct {
-	Status          string    `json:"status"`           // "healthy", "degraded", "unhealthy"
-	Timestamp       time.Time `json:"timestamp"`        
+	Status          string    `json:"status"` // "healthy", "degraded", "unhealthy"
+	Timestamp       time.Time `json:"timestamp"`
 	Orchestrator    bool      `json:"orchestrator_running"`
 	CamerasActive   int       `json:"cameras_active"`
 	CamerasTotal    int       `json:"cameras_total"`
 	UploadsLast5Min int       `json:"uploads_last_5min"`
-	QueueHealth     string    `json:"queue_health"`     // "healthy", "degraded", "critical"
+	QueueHealth     string    `json:"queue_health"` // "healthy", "degraded", "critical"
 	NTPHealthy      bool      `json:"ntp_healthy"`
 	Details         string    `json:"details,omitempty"` // Human-readable explanation
 }

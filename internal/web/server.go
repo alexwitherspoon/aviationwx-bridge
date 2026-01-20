@@ -502,15 +502,15 @@ func (s *Server) handleTestUpload(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	// Enhanced health check with actual system status
 	// Returns 200 OK if operational, 503 if unhealthy
-	
+
 	status := s.buildHealthStatus()
-	
+
 	// Set HTTP status code based on health
 	statusCode := http.StatusOK
 	if status["status"] == "unhealthy" {
 		statusCode = http.StatusServiceUnavailable
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(status)
@@ -522,7 +522,7 @@ func (s *Server) buildHealthStatus() map[string]interface{} {
 		"status":    "healthy",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-	
+
 	// Get orchestrator status if available
 	if s.getStatus != nil {
 		rawStatus := s.getStatus()
@@ -534,13 +534,13 @@ func (s *Server) buildHealthStatus() map[string]interface{} {
 			uploadsRecent := 0
 			queueHealth := "unknown"
 			ntpHealthy := true
-			
+
 			if orch, ok := statusMap["orchestrator"].(map[string]interface{}); ok {
 				if running, ok := orch["running"].(bool); ok {
 					orchestratorRunning = running
 				}
 			}
-			
+
 			if cameras, ok := statusMap["cameras"].([]interface{}); ok {
 				camerasTotal = len(cameras)
 				for _, cam := range cameras {
@@ -551,13 +551,13 @@ func (s *Server) buildHealthStatus() map[string]interface{} {
 					}
 				}
 			}
-			
+
 			if queue, ok := statusMap["queue"].(map[string]interface{}); ok {
 				if qh, ok := queue["health"].(string); ok {
 					queueHealth = qh
 				}
 			}
-			
+
 			if upload, ok := statusMap["upload"].(map[string]interface{}); ok {
 				if stats, ok := upload["stats"].(map[string]interface{}); ok {
 					if success, ok := stats["uploads_success"].(int64); ok {
@@ -565,31 +565,31 @@ func (s *Server) buildHealthStatus() map[string]interface{} {
 					}
 				}
 			}
-			
+
 			if timeInfo, ok := statusMap["time"].(map[string]interface{}); ok {
 				if healthy, ok := timeInfo["ntp_healthy"].(bool); ok {
 					ntpHealthy = healthy
 				}
 			}
-			
+
 			// Determine overall health status
 			details := []string{}
-			
+
 			if !orchestratorRunning {
 				health["status"] = "degraded"
 				details = append(details, "orchestrator not running")
 			}
-			
+
 			if camerasTotal > 0 && camerasActive == 0 {
 				health["status"] = "degraded"
 				details = append(details, "no active cameras")
 			}
-			
+
 			if queueHealth == "critical" {
 				health["status"] = "degraded"
 				details = append(details, "queue critical")
 			}
-			
+
 			// Populate health details
 			health["orchestrator_running"] = orchestratorRunning
 			health["cameras_active"] = camerasActive
@@ -597,13 +597,13 @@ func (s *Server) buildHealthStatus() map[string]interface{} {
 			health["uploads_recent"] = uploadsRecent
 			health["queue_health"] = queueHealth
 			health["ntp_healthy"] = ntpHealthy
-			
+
 			if len(details) > 0 {
 				health["details"] = strings.Join(details, "; ")
 			}
 		}
 	}
-	
+
 	return health
 }
 

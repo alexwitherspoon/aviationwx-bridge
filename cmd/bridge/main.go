@@ -26,17 +26,38 @@ import (
 )
 
 func init() {
-	// Resource management for Pi Zero 2 W (512MB RAM)
-	// Set soft memory limit to trigger more aggressive GC before OOM
-	// Leave ~150MB for OS and other processes
-	debug.SetMemoryLimit(350 * 1024 * 1024) // 350MB
-
-	// Reserve one CPU core for web UI responsiveness on multi-core systems
-	// Pi Zero 2 W has 4 cores, so we use 3 for background work
-	numCPU := runtime.NumCPU()
-	if numCPU > 2 {
-		runtime.GOMAXPROCS(numCPU - 1)
+	// Resource management - dynamically set based on Docker container limits
+	// GOMEMLIMIT is passed as environment variable by container startup script
+	// which calculates appropriate limits based on system resources
+	//
+	// The startup script sets this based on total system RAM:
+	//   < 1GB:  60% of RAM for Docker, 85% of that for Go (Pi Zero 2 W)
+	//   1-2GB:  65% of RAM for Docker, 88% of that for Go
+	//   2-4GB:  70% of RAM for Docker, 90% of that for Go
+	//   > 4GB:  75%+ of RAM for Docker, 90% of that for Go
+	//
+	// If GOMEMLIMIT env var is not set, fall back to conservative 256MB
+	// (The startup script always sets this, but we provide a safe default)
+	
+	// Note: GOMEMLIMIT env var is automatically read by Go runtime (1.19+)
+	// We don't need to call debug.SetMemoryLimit() - the runtime does it for us
+	// But we'll log what was detected
+	goMemLimit := os.Getenv("GOMEMLIMIT")
+	if goMemLimit == "" {
+		// Fallback for manual docker runs without the startup script
+		debug.SetMemoryLimit(256 * 1024 * 1024) // 256MB conservative default
+		goMemLimit = "256MiB (default)"
 	}
+	
+	log := logger.Default()
+	log.Info("Resource limits initialized",
+		"gomemlimit", goMemLimit,
+		"num_cpu", runtime.NumCPU(),
+		"gomaxprocs", runtime.GOMAXPROCS(0))
+	
+	// Note: We don't set GOMAXPROCS here anymore - let it default to NumCPU()
+	// The Docker --cpus limit will constrain the actual CPU usage
+	// This gives Go's scheduler more flexibility within the Docker limit
 }
 
 // Build info set at compile time via ldflags

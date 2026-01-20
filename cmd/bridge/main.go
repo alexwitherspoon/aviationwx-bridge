@@ -38,7 +38,7 @@ func init() {
 	//
 	// If GOMEMLIMIT env var is not set, fall back to conservative 256MB
 	// (The startup script always sets this, but we provide a safe default)
-	
+
 	// Note: GOMEMLIMIT env var is automatically read by Go runtime (1.19+)
 	// We don't need to call debug.SetMemoryLimit() - the runtime does it for us
 	// But we'll log what was detected
@@ -48,13 +48,13 @@ func init() {
 		debug.SetMemoryLimit(256 * 1024 * 1024) // 256MB conservative default
 		goMemLimit = "256MiB (default)"
 	}
-	
+
 	log := logger.Default()
 	log.Info("Resource limits initialized",
 		"gomemlimit", goMemLimit,
 		"num_cpu", runtime.NumCPU(),
 		"gomaxprocs", runtime.GOMAXPROCS(0))
-	
+
 	// Note: We don't set GOMAXPROCS here anymore - let it default to NumCPU()
 	// The Docker --cpus limit will constrain the actual CPU usage
 	// This gives Go's scheduler more flexibility within the Docker limit

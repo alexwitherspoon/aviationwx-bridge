@@ -227,20 +227,20 @@ get_update_channel() {
 determine_target_version() {
     local channel="$1"
     
-    log_event "INFO" "Determining target version for channel: $channel"
+    log_event "INFO" "Determining target version for channel: $channel" >&2
     
     local release_json
     release_json=$(get_latest_release_json) || return 1
     
     if [ "$channel" = "edge" ]; then
-        log_event "INFO" "Using edge channel"
+        log_event "INFO" "Using edge channel" >&2
         echo "edge"
     else
         local tag_name
         tag_name=$(echo "$release_json" | jq -r '.tag_name // empty')
         
         if [ -z "$tag_name" ]; then
-            log_event "ERROR" "Cannot parse release tag"
+            log_event "ERROR" "Cannot parse release tag" >&2
             return 1
         fi
         
@@ -249,7 +249,7 @@ determine_target_version() {
             local is_prerelease
             is_prerelease=$(echo "$release_json" | jq -r '.prerelease // false')
             if [ "$is_prerelease" = "true" ]; then
-                log_event "WARN" "Latest release is pre-release, skipping"
+                log_event "WARN" "Latest release is pre-release, skipping" >&2
                 return 1
             fi
         fi
@@ -267,7 +267,7 @@ determine_target_version() {
                 local age_hours=$(( (now_epoch - published_epoch) / 3600 ))
                 
                 if [ $age_hours -lt $MIN_RELEASE_AGE_HOURS ]; then
-                    log_event "INFO" "Release too recent: $tag_name (${age_hours}h old)"
+                    log_event "INFO" "Release too recent: $tag_name (${age_hours}h old)" >&2
                     return 1
                 fi
             fi

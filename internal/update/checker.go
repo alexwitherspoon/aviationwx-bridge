@@ -192,7 +192,7 @@ func (c *Checker) isNewerVersion(tagName string) bool {
 	if len(currentVer) > 0 && currentVer[0] == 'v' {
 		currentVer = currentVer[1:]
 	}
-	
+
 	latestVer := tagName
 	if len(latestVer) > 0 && latestVer[0] == 'v' {
 		latestVer = latestVer[1:]
@@ -243,7 +243,7 @@ func parseVersion(v string) [3]int {
 			idx++
 		}
 	}
-	
+
 	if idx < 3 {
 		parts[idx] = current
 	}

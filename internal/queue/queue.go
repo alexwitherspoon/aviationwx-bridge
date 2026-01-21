@@ -333,6 +333,63 @@ func (q *Queue) Dequeue() (*QueuedImage, error) {
 	}, nil
 }
 
+// DequeueBatch returns multiple images from the queue without removing them
+// If newestFirst is true, returns newest images first (LIFO for catch-up)
+// If newestFirst is false, returns oldest images first (FIFO for normal operation)
+// Returns up to 'count' images
+func (q *Queue) DequeueBatch(count int, newestFirst bool) ([]*QueuedImage, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	if q.state.ImageCount == 0 {
+		return nil, ErrQueueEmpty
+	}
+
+	files, err := q.listFilesSortedLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(files) == 0 {
+		return nil, ErrQueueEmpty
+	}
+
+	// Limit count to available files
+	if count > len(files) {
+		count = len(files)
+	}
+
+	images := make([]*QueuedImage, 0, count)
+
+	if newestFirst {
+		// LIFO: Take from end of sorted list (newest)
+		for i := len(files) - 1; i >= len(files)-count; i-- {
+			file := files[i]
+			timestamp := parseTimestampFromFilename(file.Name())
+			images = append(images, &QueuedImage{
+				Filename:  file.Name(),
+				Timestamp: timestamp,
+				FilePath:  filepath.Join(q.state.Directory, file.Name()),
+				SizeBytes: file.Size(),
+			})
+		}
+	} else {
+		// FIFO: Take from beginning of sorted list (oldest)
+		for i := 0; i < count; i++ {
+			file := files[i]
+			timestamp := parseTimestampFromFilename(file.Name())
+			images = append(images, &QueuedImage{
+				Filename:  file.Name(),
+				Timestamp: timestamp,
+				FilePath:  filepath.Join(q.state.Directory, file.Name()),
+				SizeBytes: file.Size(),
+			})
+		}
+	}
+
+	return images, nil
+}
+
 // Peek returns images from the queue without removing them
 // Returns up to 'count' images, oldest first
 func (q *Queue) Peek(count int) ([]*QueuedImage, error) {

@@ -172,14 +172,14 @@ func (c *FTPSClient) connect() (*goftp.Client, error) {
 		User:     c.config.Username,
 		Password: c.config.Password,
 		Timeout:  time.Duration(c.config.TimeoutConnectSeconds) * time.Second,
-		
+
 		TLSConfig: tlsConfig,
 		TLSMode:   goftp.TLSExplicit, // Use explicit TLS (FTPS)
-		
+
 		// EPSV vs PASV: Some servers (especially with forced data SSL) work
 		// better with standard PASV instead of Extended PASV
 		DisableEPSV:     c.config.DisableEPSV, // Configurable fallback to PASV
-		ActiveTransfers: false,                 // Always use passive mode
+		ActiveTransfers: false,                // Always use passive mode
 	}
 
 	// Connect with timeout

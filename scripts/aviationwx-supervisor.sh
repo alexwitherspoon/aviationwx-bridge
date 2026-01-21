@@ -479,6 +479,9 @@ start_container() {
         -p 1229:1229 \
         -v "${DATA_DIR}:/data" \
         --tmpfs /dev/shm:size=200m \
+        --sysctl net.ipv4.tcp_keepalive_time=60 \
+        --sysctl net.ipv4.tcp_keepalive_intvl=10 \
+        --sysctl net.ipv4.tcp_keepalive_probes=6 \
         --health-cmd='wget --no-verbose --tries=1 --spider http://localhost:1229/healthz || exit 1' \
         --health-interval=30s \
         --health-timeout=3s \

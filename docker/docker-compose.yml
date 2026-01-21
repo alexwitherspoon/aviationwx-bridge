@@ -37,6 +37,12 @@ services:
       # Logging
       - AVIATIONWX_LOG_LEVEL=${AVIATIONWX_LOG_LEVEL:-info}
       # exiftool is used for EXIF reading/writing (included in Docker image)
+    # Sysctls for TCP keep-alive (helps with slow/unreliable networks)
+    # These prevent routers/firewalls from dropping connections during slow uploads
+    sysctls:
+      - net.ipv4.tcp_keepalive_time=60      # Start probes after 60s idle
+      - net.ipv4.tcp_keepalive_intvl=10     # Probe every 10s
+      - net.ipv4.tcp_keepalive_probes=6     # 6 probes before giving up (60s total)
     # Health check to detect crashes
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:1229/healthz"]

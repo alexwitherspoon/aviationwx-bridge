@@ -784,14 +784,3 @@ func getUpdateChannel(channel string) string {
 	// Default to latest for unknown values
 	return "latest"
 }
-
-// getMaxConcurrentUploads returns the max concurrent uploads with a safe default
-func getMaxConcurrentUploads(configured int) int {
-	if configured <= 0 {
-		return 2 // Default: conservative for slow networks
-	}
-	if configured > 10 {
-		return 10 // Cap at 10 to prevent resource exhaustion
-	}
-	return configured
-}

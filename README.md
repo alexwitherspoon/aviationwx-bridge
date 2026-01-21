@@ -7,7 +7,7 @@ Remote bridge device for capturing webcam snapshots and uploading them to Aviati
 AviationWX Bridge is a lightweight daemon that:
 - Captures webcam snapshots from local network cameras (HTTP, ONVIF, RTSP)
 - Queues images locally with accurate observation timestamps
-- Uploads to `upload.aviationwx.org` via FTPS for historic replay
+- Uploads to `upload.aviationwx.org` via SFTP (recommended) or FTPS
 - Uses tmpfs (RAM) for image buffering to avoid SD card wear
 - Provides a modern web console for configuration and monitoring
 
@@ -154,7 +154,9 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
       "snapshot_url": "http://192.168.1.100/snapshot.jpg",
       "capture_interval_seconds": 60,
       "upload": {
+        "protocol": "sftp",
         "host": "upload.aviationwx.org",
+        "port": 2222,
         "username": "your-username",
         "password": "your-password"
       }
@@ -171,7 +173,7 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 - **Historic Replay**: Queue images for time-series display on aviationwx.org
 - **Accurate Timestamps**: UTC observation times with EXIF validation (via exiftool)
 - **Web Console**: Modern dashboard with camera preview and management
-- **FTPS Upload**: Secure uploads with fail2ban-aware retry logic
+- **Secure Upload**: SFTP (recommended) or FTPS with fail2ban-aware retry logic
 - **Low Memory**: Optimized for Raspberry Pi Zero 2 W (512MB RAM)
 - **NTP Health**: Automatic time validation and drift detection
 - **Auto Updates**: Critical security updates with automatic rollback (Path A)
@@ -203,7 +205,7 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 │         ▼                                                    │
 │  ┌─────────────────────────────────────────────────────────┐ │
 │  │              Upload Worker (round-robin)                │ │
-│  │   → FTPS to upload.aviationwx.org                       │ │
+│  │   → SFTP/FTPS to upload.aviationwx.org                  │ │
 │  └─────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```

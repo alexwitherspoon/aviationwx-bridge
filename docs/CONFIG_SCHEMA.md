@@ -62,6 +62,7 @@
 | `rtsp` | object | Cond. | - | RTSP settings (if type=rtsp) |
 | `onvif` | object | Cond. | - | ONVIF settings (if type=onvif) |
 | `capture_interval_seconds` | integer | No | `60` | Capture interval (1-1800) |
+| `remote_path` | string | No | (camera ID) | Remote directory for uploads. Use `"."` to upload directly to base_path |
 | `image` | object | No | - | Image processing options |
 | `upload` | object | Yes | - | Per-camera upload credentials (SFTP/FTPS) |
 | `queue` | object | No | - | Per-camera queue overrides |
@@ -119,9 +120,10 @@ Each camera has its own upload credentials. Supports both SFTP (recommended) and
 |-------|------|----------|---------|-------------|
 | `protocol` | string | No | `"sftp"` | Upload protocol: `"sftp"` (recommended) or `"ftps"` (legacy) |
 | `host` | string | Yes | - | Upload server hostname |
-| `port` | integer | No | (auto) | Server port (22 for SFTP, 2121 for FTPS) |
+| `port` | integer | No | (auto) | Server port (22/2222 for SFTP, 2121 for FTPS) |
 | `username` | string | Yes | - | Upload username |
 | `password` | string | Yes | - | Upload password |
+| `base_path` | string | No | `"/files"` | SFTP only - Base directory for uploads (for chroot environments) |
 | `tls` | boolean | No | `true` | Enable FTPS (FTPS only, ignored for SFTP) |
 | `tls_verify` | boolean | No | `true` | Verify TLS certificate (FTPS only) |
 | `disable_epsv` | boolean | No | `true` | Use PASV instead of EPSV (FTPS only) |
@@ -144,15 +146,19 @@ Each camera has its own upload credentials. Supports both SFTP (recommended) and
 **SFTP (Recommended):**
 ```json
 {
+  "remote_path": ".",
   "upload": {
     "protocol": "sftp",
     "host": "upload.aviationwx.org",
     "port": 2222,
     "username": "your-username",
-    "password": "your-password"
+    "password": "your-password",
+    "base_path": "/files"
   }
 }
 ```
+
+**Note:** For chroot environments, set `base_path` to the writable directory within the chroot (e.g., `/files`). Set `remote_path` to `"."` to upload directly to that directory without a camera subdirectory.
 
 **FTPS (Legacy):**
 ```json
@@ -369,4 +375,7 @@ Key changes from config version 1:
 2. `interval_seconds` → `capture_interval_seconds`
 3. Global `upload` → per-camera `upload` in each camera object
 4. `web_console.basic_auth` → `web_console.password`
-5. `remote_path` → removed (always uploads to root)
+5. `remote_path` behavior changed:
+   - If empty/omitted: uploads to `{base_path}/{camera_id}/filename.jpg`
+   - If set to `"."`: uploads to `{base_path}/filename.jpg` (no subdirectory)
+   - If set to custom path: uploads to `{base_path}/{remote_path}/filename.jpg`

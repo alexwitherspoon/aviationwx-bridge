@@ -531,16 +531,7 @@ func (b *Bridge) createCamera(camConfig config.Camera) (camera.Camera, error) {
 
 // createUploader creates an upload client from config
 func (b *Bridge) createUploader(uploadConfig *config.Upload) (upload.Client, error) {
-	return upload.NewFTPSClient(upload.Config{
-		Host:                  uploadConfig.Host,
-		Port:                  uploadConfig.Port,
-		Username:              uploadConfig.Username,
-		Password:              uploadConfig.Password,
-		TLS:                   uploadConfig.TLS,
-		TLSVerify:             true,
-		TimeoutConnectSeconds: 10,
-		TimeoutUploadSeconds:  30,
-	})
+	return upload.NewClientFromConfig(*uploadConfig)
 }
 
 // handleConfigEvent handles config change events from ConfigService

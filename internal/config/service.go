@@ -40,14 +40,16 @@ type Service struct {
 
 // GlobalSettings holds bridge-wide configuration
 type GlobalSettings struct {
-	Version              int          `json:"version"`                          // Config version, current: 2
-	Timezone             string       `json:"timezone,omitempty"`               // IANA timezone
-	UpdateChannel        string       `json:"update_channel,omitempty"`         // Update channel: "latest" or "edge"
-	MaxConcurrentUploads int          `json:"max_concurrent_uploads,omitempty"` // Max concurrent uploads (default: 2)
-	Global               *Global      `json:"global,omitempty"`                 // Global operational settings
-	Queue                *QueueGlobal `json:"queue,omitempty"`                  // Queue settings
-	SNTP                 *SNTP        `json:"sntp,omitempty"`                   // Time sync settings
-	WebConsole           *WebConsole  `json:"web_console,omitempty"`            // Web console settings
+	Version               int          `json:"version"`                           // Config version, current: 2
+	Timezone              string       `json:"timezone,omitempty"`                // IANA timezone
+	UpdateChannel         string       `json:"update_channel,omitempty"`          // Update channel: "latest" or "edge"
+	MaxConcurrentUploads  int          `json:"max_concurrent_uploads,omitempty"`  // Max concurrent uploads (default: 2)
+	TimeoutConnectSeconds int          `json:"timeout_connect_seconds,omitempty"` // FTPS connect timeout (default: 60)
+	TimeoutUploadSeconds  int          `json:"timeout_upload_seconds,omitempty"`  // FTPS upload timeout (default: 300)
+	Global                *Global      `json:"global,omitempty"`                  // Global operational settings
+	Queue                 *QueueGlobal `json:"queue,omitempty"`                   // Queue settings
+	SNTP                  *SNTP        `json:"sntp,omitempty"`                    // Time sync settings
+	WebConsole            *WebConsole  `json:"web_console,omitempty"`             // Web console settings
 }
 
 // ConfigEvent represents a configuration change
@@ -74,11 +76,13 @@ func NewService(baseDir string) (*Service, error) {
 		// If reload fails, use defaults
 		defaultSNTP := DefaultSNTP()
 		s.global = &GlobalSettings{
-			Version:              2,
-			Timezone:             "UTC",
-			UpdateChannel:        "latest",
-			MaxConcurrentUploads: 2,
-			SNTP:                 &defaultSNTP,
+			Version:               2,
+			Timezone:              "UTC",
+			UpdateChannel:         "latest",
+			MaxConcurrentUploads:  2,
+			TimeoutConnectSeconds: 60,
+			TimeoutUploadSeconds:  300,
+			SNTP:                  &defaultSNTP,
 			WebConsole: &WebConsole{
 				Enabled:  true,
 				Port:     1229,

@@ -982,7 +982,7 @@ async function saveWebSettings() {
     }
 }
 
-// Global Settings (concurrent uploads, update channel)
+// Global Settings (concurrent uploads, update channel, timeouts)
 async function loadGlobalSettings() {
     if (!config) return;
     
@@ -999,14 +999,39 @@ async function loadGlobalSettings() {
     if (updateChannelSelect) {
         updateChannelSelect.value = updateChannel;
     }
+    
+    // Load timeout settings
+    const timeoutConnect = config.timeout_connect_seconds || 60;
+    const timeoutConnectInput = document.getElementById('timeoutConnect');
+    if (timeoutConnectInput) {
+        timeoutConnectInput.value = timeoutConnect;
+    }
+    
+    const timeoutUpload = config.timeout_upload_seconds || 300;
+    const timeoutUploadInput = document.getElementById('timeoutUpload');
+    if (timeoutUploadInput) {
+        timeoutUploadInput.value = timeoutUpload;
+    }
 }
 
 async function saveGlobalSettings() {
     const maxConcurrent = parseInt(document.getElementById('maxConcurrentUploads').value);
     const updateChannel = document.getElementById('updateChannel').value;
+    const timeoutConnect = parseInt(document.getElementById('timeoutConnect').value);
+    const timeoutUpload = parseInt(document.getElementById('timeoutUpload').value);
     
     if (maxConcurrent < 1 || maxConcurrent > 10) {
         alert('Concurrent uploads must be between 1 and 10');
+        return;
+    }
+    
+    if (timeoutConnect < 10 || timeoutConnect > 300) {
+        alert('Connection timeout must be between 10 and 300 seconds');
+        return;
+    }
+    
+    if (timeoutUpload < 60 || timeoutUpload > 600) {
+        alert('Upload timeout must be between 60 and 600 seconds');
         return;
     }
     
@@ -1015,7 +1040,9 @@ async function saveGlobalSettings() {
         const updatedConfig = {
             ...config,
             update_channel: updateChannel,
-            max_concurrent_uploads: maxConcurrent
+            max_concurrent_uploads: maxConcurrent,
+            timeout_connect_seconds: timeoutConnect,
+            timeout_upload_seconds: timeoutUpload
         };
         
         await api('/config', {

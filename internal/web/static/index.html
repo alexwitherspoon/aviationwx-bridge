@@ -243,6 +243,20 @@
                                 <strong>Edge:</strong> Latest development builds. May contain experimental features.
                             </p>
                         </div>
+                        <div class="form-group">
+                            <label for="timeoutConnect">Connection Timeout (seconds)</label>
+                            <input type="number" id="timeoutConnect" class="form-control" min="10" max="300" value="60">
+                            <p class="form-help">
+                                How long to wait for FTPS server connection. Default: 60 seconds.
+                            </p>
+                        </div>
+                        <div class="form-group">
+                            <label for="timeoutUpload">Upload Timeout (seconds)</label>
+                            <input type="number" id="timeoutUpload" class="form-control" min="60" max="600" value="300">
+                            <p class="form-help">
+                                Maximum time for a single file upload. Default: 300 seconds (5 minutes).
+                            </p>
+                        </div>
                         <button class="btn btn-primary" onclick="saveGlobalSettings()">Save Settings</button>
                     </div>
                 </div>

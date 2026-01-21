@@ -17,7 +17,6 @@ readonly SCRIPTS_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main
 # Update configuration
 readonly MIN_RELEASE_AGE_HOURS=2
 readonly SKIP_PRERELEASE=true
-readonly UPDATE_TIMEOUT=90
 readonly PULL_TIMEOUT=600  # 10 minutes for slow connections (Pi Zero)
 
 # Dry-run mode for testing

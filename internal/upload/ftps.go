@@ -64,8 +64,9 @@ func (c *FTPSClient) Upload(remotePath string, data []byte) error {
 	// Normalize remote path
 	remotePath = normalizeRemotePath(remotePath)
 
-	// Create .tmp filename
-	tmpPath := remotePath + ".tmp"
+	// Create unique .tmp filename with timestamp to avoid collisions
+	// Format: filename.jpg.tmp.1234567890123
+	tmpPath := fmt.Sprintf("%s.tmp.%d", remotePath, time.Now().UnixNano())
 
 	// Connect to FTPS server first (needed for directory creation)
 	conn, err := c.connect()
@@ -102,9 +103,21 @@ func (c *FTPSClient) Upload(remotePath string, data []byte) error {
 	}
 
 	// Rename .tmp to final filename (atomic operation)
+	// If rename fails with "RNFR command failed", the .tmp file likely doesn't exist
+	// This can happen if the upload connection dropped mid-transfer
 	if err := c.renameFile(conn, tmpPath, remotePath); err != nil {
-		// Try to cleanup .tmp file on failure
+		// Try to cleanup .tmp file on failure (may not exist)
 		_ = conn.Delete(tmpPath)
+
+		// Provide more context for RNFR failures
+		if strings.Contains(err.Error(), "RNFR") || strings.Contains(err.Error(), "550") {
+			return &UploadError{
+				RemotePath: remotePath,
+				Message:    "rename .tmp to final",
+				Err:        fmt.Errorf("%w (tmp file may not exist - upload may have been incomplete)", err),
+			}
+		}
+
 		return &UploadError{
 			RemotePath: remotePath,
 			Message:    "rename .tmp to final",

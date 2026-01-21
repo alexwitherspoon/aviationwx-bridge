@@ -34,6 +34,10 @@ type UploadWorker struct {
 	connectionMutex    sync.Mutex // Ensures only one connection established at a time
 	lastConnectionTime time.Time  // Track last connection for rate limiting
 
+	// In-flight tracking to prevent duplicate uploads
+	inFlight   map[string]bool // File paths currently being uploaded
+	inFlightMu sync.Mutex      // Separate mutex for in-flight map
+
 	// Fail2ban protection
 	minUploadInterval  time.Duration // Minimum time between uploads (rate limit)
 	authBackoff        time.Duration // Backoff after auth failure
@@ -143,6 +147,7 @@ func NewUploadWorker(cfg UploadWorkerConfig) *UploadWorker {
 		connectionInterval: connectionInterval,
 		todayDate:          time.Now().Truncate(24 * time.Hour), // Initialize to today at 00:00
 		cameraFailures:     make(map[string]*uploadFailureState),
+		inFlight:           make(map[string]bool),
 	}
 }
 
@@ -336,6 +341,11 @@ func (w *UploadWorker) uploadWorkerRoutine(workerID int, workChan <-chan uploadT
 			w.mu.Unlock()
 		}
 
+		// Remove from in-flight tracking (always, regardless of success/failure)
+		w.inFlightMu.Lock()
+		delete(w.inFlight, task.image.FilePath)
+		w.inFlightMu.Unlock()
+
 		// Decrement active uploads counter
 		w.mu.Lock()
 		w.activeUploads--
@@ -413,6 +423,16 @@ func (w *UploadWorker) scheduleUploads(workChan chan<- uploadTask) {
 			continue
 		}
 
+		// Check if this image is already being uploaded (prevent duplicate uploads)
+		w.inFlightMu.Lock()
+		if w.inFlight[img.FilePath] {
+			w.inFlightMu.Unlock()
+			continue // Already being processed, skip
+		}
+		// Mark as in-flight before sending to worker
+		w.inFlight[img.FilePath] = true
+		w.inFlightMu.Unlock()
+
 		// Build remote path
 		remotePath := w.buildRemotePath(config.RemotePath, cameraID, img.Timestamp)
 
@@ -428,7 +448,10 @@ func (w *UploadWorker) scheduleUploads(workChan chan<- uploadTask) {
 		}:
 			tasksScheduled++
 		default:
-			// Channel full, will try again next tick
+			// Channel full, remove from in-flight and try again next tick
+			w.inFlightMu.Lock()
+			delete(w.inFlight, img.FilePath)
+			w.inFlightMu.Unlock()
 		}
 	}
 }

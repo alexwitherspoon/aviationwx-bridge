@@ -18,6 +18,7 @@ readonly SCRIPTS_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main
 readonly MIN_RELEASE_AGE_HOURS=2
 readonly SKIP_PRERELEASE=true
 readonly UPDATE_TIMEOUT=90
+readonly PULL_TIMEOUT=600  # 10 minutes for slow connections (Pi Zero)
 
 # Dry-run mode for testing
 readonly DRY_RUN="${AVIATIONWX_DRY_RUN:-false}"
@@ -322,6 +323,46 @@ check_image_exists() {
     return 1
 }
 
+pull_image_with_retry() {
+    local image="$1"
+    local version="$2"
+    local max_attempts="${3:-3}"
+    local retry_delay="${4:-15}"
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        log_event "INFO" "Pulling image (attempt $attempt/$max_attempts): ${image}:${version}"
+        log_event "INFO" "Timeout: ${PULL_TIMEOUT}s (may take several minutes on slow connections)"
+        
+        if timeout $PULL_TIMEOUT docker pull "${image}:${version}" 2>&1; then
+            log_event "SUCCESS" "Image pulled successfully"
+            return 0
+        fi
+        
+        local exit_code=$?
+        if [ $exit_code -eq 124 ]; then
+            log_event "WARN" "Pull timed out after ${PULL_TIMEOUT}s"
+        else
+            log_event "WARN" "Pull failed with exit code $exit_code"
+        fi
+        
+        if [ $attempt -lt $max_attempts ]; then
+            log_event "INFO" "Retrying in ${retry_delay}s..."
+            sleep $retry_delay
+            # Increase delay for next attempt (exponential backoff, max 60s)
+            retry_delay=$((retry_delay * 2))
+            if [ $retry_delay -gt 60 ]; then
+                retry_delay=60
+            fi
+        fi
+        
+        attempt=$((attempt + 1))
+    done
+    
+    log_event "ERROR" "Failed to pull image after $max_attempts attempts"
+    return 1
+}
+
 check_release_workflow_status() {
     local version="$1"
     
@@ -433,11 +474,15 @@ pull_and_validate_update() {
         fi
     fi
     
-    # Pull image
+    # Pull image with retry logic
     log_event "ACTION" "Pulling ${IMAGE_NAME}:${target_version}"
-    if ! execute_action "Pull image" "timeout $UPDATE_TIMEOUT docker pull '${IMAGE_NAME}:${target_version}'"; then
-        log_event "ERROR" "Failed to pull image"
-        return 1
+    if [ "$DRY_RUN" = "true" ]; then
+        log_event "DRY-RUN" "Would pull: ${IMAGE_NAME}:${target_version}"
+    else
+        if ! pull_image_with_retry "$IMAGE_NAME" "$target_version" 3 10; then
+            log_event "ERROR" "Failed to pull image after retries"
+            return 1
+        fi
     fi
     
     # Stop old container

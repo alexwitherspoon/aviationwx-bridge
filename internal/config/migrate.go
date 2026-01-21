@@ -121,4 +121,3 @@ func NormalizeUploadConfig(upload *Upload) {
 		upload.TimeoutUploadSeconds = 300
 	}
 }
-

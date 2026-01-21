@@ -64,15 +64,15 @@ type ImageProcessing struct {
 
 // Upload represents upload settings (supports SFTP and FTPS)
 type Upload struct {
-	Protocol  string `json:"protocol,omitempty"`   // "sftp" or "ftps", default: "sftp"
-	Host      string `json:"host"`                 // Default: upload.aviationwx.org
-	Port      int    `json:"port,omitempty"`       // Default: 22 (SFTP) or 2121 (FTPS)
-	Username  string `json:"username"`             // Upload username (provided by aviationwx.org)
-	Password  string `json:"password"`             // Upload password (provided by aviationwx.org)
-	
+	Protocol string `json:"protocol,omitempty"` // "sftp" or "ftps", default: "sftp"
+	Host     string `json:"host"`               // Default: upload.aviationwx.org
+	Port     int    `json:"port,omitempty"`     // Default: 22 (SFTP) or 2121 (FTPS)
+	Username string `json:"username"`           // Upload username (provided by aviationwx.org)
+	Password string `json:"password"`           // Upload password (provided by aviationwx.org)
+
 	// FTPS-specific settings (ignored for SFTP)
-	TLS       bool   `json:"tls,omitempty"`        // FTPS only - Default: true
-	TLSVerify bool   `json:"tls_verify,omitempty"` // FTPS only - Default: true
+	TLS       bool `json:"tls,omitempty"`        // FTPS only - Default: true
+	TLSVerify bool `json:"tls_verify,omitempty"` // FTPS only - Default: true
 
 	// Advanced settings (rarely needed)
 	CABundlePath          string `json:"ca_bundle_path,omitempty"`          // FTPS only
@@ -86,7 +86,7 @@ type Upload struct {
 func DefaultUpload() Upload {
 	disableEPSV := true // Default to PASV mode for FTPS (proven reliable)
 	return Upload{
-		Protocol:              "sftp",       // Default to SFTP (more reliable)
+		Protocol:              "sftp", // Default to SFTP (more reliable)
 		Host:                  "upload.aviationwx.org",
 		Port:                  2222,         // SFTP port
 		TLS:                   true,         // FTPS setting (ignored for SFTP)

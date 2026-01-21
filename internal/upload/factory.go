@@ -59,4 +59,3 @@ func NewClientFromConfig(cfg config.Upload) (Client, error) {
 		return nil, fmt.Errorf("unsupported upload protocol: %s (supported: sftp, ftps)", protocol)
 	}
 }
-

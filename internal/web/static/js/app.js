@@ -794,6 +794,14 @@ function getCameraFormHtml(cam = null) {
                     <p class="form-help" id="uploadPortHelp">SFTP port (default: 2222)</p>
                 </div>
                 
+                <div class="form-group" id="uploadBasePathGroup" style="display: ${(cam?.upload?.protocol || 'sftp') === 'sftp' ? 'block' : 'none'}">
+                    <label for="uploadBasePath">Upload Directory</label>
+                    <input type="text" id="uploadBasePath" class="form-control" 
+                           value="${cam?.upload?.base_path || '/files'}"
+                           placeholder="/files">
+                    <p class="form-help">SFTP base directory for uploads (default: /files)</p>
+                </div>
+                
                 <button type="button" class="btn" onclick="testUpload()">Test Connection</button>
                 <div id="uploadTestResult"></div>
             </div>
@@ -824,17 +832,20 @@ function updateProtocolSettings() {
     const protocol = document.getElementById('uploadProtocol').value;
     const portInput = document.getElementById('uploadPort');
     const portHelp = document.getElementById('uploadPortHelp');
+    const basePathGroup = document.getElementById('uploadBasePathGroup');
     
     if (protocol === 'sftp') {
         if (portInput.value == '21' || portInput.value == '2121') {
             portInput.value = '2222';
         }
         portHelp.textContent = 'SFTP port (default: 2222)';
+        if (basePathGroup) basePathGroup.style.display = 'block';
     } else {
         if (portInput.value == '22' || portInput.value == '2222') {
             portInput.value = '2121';
         }
         portHelp.textContent = 'FTPS port (default: 2121)';
+        if (basePathGroup) basePathGroup.style.display = 'none';
     }
 }
 
@@ -872,6 +883,7 @@ async function saveCamera(event, existingId = null) {
     
     const type = document.getElementById('camType').value;
     const protocol = document.getElementById('uploadProtocol')?.value || 'sftp';
+    const basePath = document.getElementById('uploadBasePath')?.value || '/files';
     const camera = {
         id: document.getElementById('camId').value.toLowerCase().replace(/\s+/g, '-'),
         name: document.getElementById('camName').value || document.getElementById('camId').value,
@@ -885,6 +897,7 @@ async function saveCamera(event, existingId = null) {
             username: document.getElementById('uploadUser').value,
             password: document.getElementById('uploadPass').value || undefined,
             tls: true,
+            base_path: protocol === 'sftp' ? basePath : undefined,
         }
     };
     

@@ -1,52 +1,61 @@
+version: "2"
+
 run:
   timeout: 5m
 
 linters:
+  default: none
   enable:
     - errcheck
     - staticcheck
     - unused
     - govet
     - ineffassign
-
-linters-settings:
-  errcheck:
-    # Don't check for errors for these patterns (common safe-to-ignore cases)
-    exclude-functions:
-      # bytes.Buffer writes never fail
-      - '(bytes.Buffer).Write'
-      - '(bytes.Buffer).WriteByte'
-      - '(bytes.Buffer).WriteString'
-      - 'encoding/binary.Write'
-      # HTTP response writes - nothing to do if client disconnected
-      - '(net/http.ResponseWriter).Write'
-      - '(*encoding/json.Encoder).Encode'
-      # Logging and testing
-      - '(io.Writer).Write'
-      - '(*testing.T).Log'
-      - '(*testing.T).Logf'
-      - 'fmt.Fprint'
-      - 'fmt.Fprintf'
-      - 'fmt.Fprintln'
-      # File operations that are best-effort cleanup
-      - 'os.Remove'
+  exclusions:
+    rules:
+      # Exclude test files from errcheck - test code often ignores errors intentionally
+      - path: _test\.go
+        linters:
+          - errcheck
+      - path: _test\.go
+        linters:
+          - unused
+      # Exclude SA9003 (empty branch) - sometimes intentional for clarity
+      - linters:
+          - staticcheck
+        text: "SA9003"
+      # Exclude QF1001 (De Morgan's law) - readability preference
+      - linters:
+          - staticcheck
+        text: "QF1001"
+  settings:
+    errcheck:
+      # Don't check for errors for these patterns (common safe-to-ignore cases)
+      exclude-functions:
+        # bytes.Buffer writes never fail
+        - (bytes.Buffer).Write
+        - (bytes.Buffer).WriteByte
+        - (bytes.Buffer).WriteString
+        - encoding/binary.Write
+        # HTTP response writes - nothing to do if client disconnected
+        - (net/http.ResponseWriter).Write
+        - (*encoding/json.Encoder).Encode
+        # Logging and testing
+        - (io.Writer).Write
+        - (*testing.T).Log
+        - (*testing.T).Logf
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        # File operations that are best-effort cleanup
+        - os.Remove
+        - os.RemoveAll
+        # Connection close operations - best effort cleanup
+        - (*github.com/pkg/sftp.Client).Close
+        - (*github.com/pkg/sftp.File).Close
+        - (*golang.org/x/crypto/ssh.Client).Close
+        - (*os.File).Close
 
 issues:
-  exclude-rules:
-    # Exclude errcheck in test files - test code often ignores errors intentionally
-    - path: _test\.go
-      linters:
-        - errcheck
-    # Allow unused code in test files (test helpers, mocks)
-    - path: _test\.go
-      linters:
-        - unused
-    # Exclude SA9003 (empty branch) - sometimes intentional for clarity
-    - linters:
-        - staticcheck
-      text: "SA9003"
-    # Exclude QF1001 (De Morgan's law) - readability preference
-    - linters:
-        - staticcheck
-      text: "QF1001"
-
+  max-issues-per-linter: 0
+  max-same-issues: 0

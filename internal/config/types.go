@@ -70,6 +70,9 @@ type Upload struct {
 	Username string `json:"username"`           // Upload username (provided by aviationwx.org)
 	Password string `json:"password"`           // Upload password (provided by aviationwx.org)
 
+	// SFTP-specific settings
+	BasePath string `json:"base_path,omitempty"` // SFTP only - Base directory for uploads (default: /files)
+
 	// FTPS-specific settings (ignored for SFTP)
 	TLS       bool `json:"tls,omitempty"`        // FTPS only - Default: true
 	TLSVerify bool `json:"tls_verify,omitempty"` // FTPS only - Default: true

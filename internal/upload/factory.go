@@ -36,6 +36,12 @@ func NewClientFromConfig(cfg config.Upload) (Client, error) {
 		}
 	}
 
+	// Set default base path for SFTP
+	basePath := cfg.BasePath
+	if basePath == "" && protocol == "sftp" {
+		basePath = "/files" // Default SFTP upload directory
+	}
+
 	uploadConfig := Config{
 		Host:                  cfg.Host,
 		Port:                  port,
@@ -47,6 +53,7 @@ func NewClientFromConfig(cfg config.Upload) (Client, error) {
 		TimeoutConnectSeconds: cfg.TimeoutConnectSeconds,
 		TimeoutUploadSeconds:  cfg.TimeoutUploadSeconds,
 		DisableEPSV:           disableEPSV,
+		BasePath:              basePath,
 	}
 
 	// Create appropriate client based on protocol

@@ -27,7 +27,8 @@ type Config struct {
 	CABundlePath          string
 	TimeoutConnectSeconds int
 	TimeoutUploadSeconds  int
-	DisableEPSV           bool // Disable Extended Passive mode, use PASV instead
+	DisableEPSV           bool   // Disable Extended Passive mode, use PASV instead
+	BasePath              string // Base directory for uploads (SFTP only, default: /files)
 }
 
 // Error types for upload operations

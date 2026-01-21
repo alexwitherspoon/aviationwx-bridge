@@ -44,12 +44,15 @@ func (c *SFTPClient) Upload(remotePath string, data []byte) error {
 	if err := c.connect(); err != nil {
 		return fmt.Errorf("connection failed: %w", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }() // Best-effort cleanup
 
 	fileSize := int64(len(data))
 
-	// Normalize remote path
+	// Normalize remote path and prepend base path
 	remotePath = normalizeRemotePath(remotePath)
+	if c.config.BasePath != "" {
+		remotePath = filepath.Join(c.config.BasePath, remotePath)
+	}
 
 	// Create remote directory if needed
 	remoteDir := filepath.Dir(remotePath)
@@ -68,7 +71,7 @@ func (c *SFTPClient) Upload(remotePath string, data []byte) error {
 
 	// Write data
 	_, err = remote.Write(data)
-	remote.Close()
+	_ = remote.Close() // Close before checking write error
 	if err != nil {
 		_ = c.sftpClient.Remove(tmpPath) // Cleanup on failure (best-effort)
 		return fmt.Errorf("upload failed: %w", err)
@@ -94,11 +97,15 @@ func (c *SFTPClient) TestConnection() error {
 	if err := c.connect(); err != nil {
 		return err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }() // Best-effort cleanup
 
-	// Try to stat the root directory to verify connection works
-	if _, err := c.sftpClient.Stat("."); err != nil {
-		return fmt.Errorf("connection test failed: %w", err)
+	// Try to stat the base path directory to verify connection works
+	testPath := "."
+	if c.config.BasePath != "" {
+		testPath = c.config.BasePath
+	}
+	if _, err := c.sftpClient.Stat(testPath); err != nil {
+		return fmt.Errorf("connection test failed (path: %s): %w", testPath, err)
 	}
 
 	return nil
@@ -132,7 +139,7 @@ func (c *SFTPClient) connect() error {
 	// Open SFTP session
 	c.sftpClient, err = sftp.NewClient(c.sshClient)
 	if err != nil {
-		c.sshClient.Close()
+		_ = c.sshClient.Close() // Best-effort cleanup on SFTP session failure
 		return fmt.Errorf("sftp session: %w", err)
 	}
 

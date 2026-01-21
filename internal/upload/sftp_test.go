@@ -75,6 +75,60 @@ func TestNewSFTPClient(t *testing.T) {
 	}
 }
 
+func TestNewSFTPClient_WithBasePath(t *testing.T) {
+	tests := []struct {
+		name         string
+		config       Config
+		wantBasePath string
+	}{
+		{
+			name: "with base path",
+			config: Config{
+				Host:     "sftp.example.com",
+				Port:     22,
+				Username: "testuser",
+				Password: "testpass",
+				BasePath: "/files",
+			},
+			wantBasePath: "/files",
+		},
+		{
+			name: "with custom base path",
+			config: Config{
+				Host:     "sftp.example.com",
+				Port:     22,
+				Username: "testuser",
+				Password: "testpass",
+				BasePath: "/custom/upload/dir",
+			},
+			wantBasePath: "/custom/upload/dir",
+		},
+		{
+			name: "without base path",
+			config: Config{
+				Host:     "sftp.example.com",
+				Port:     22,
+				Username: "testuser",
+				Password: "testpass",
+			},
+			wantBasePath: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, err := NewSFTPClient(tt.config)
+			if err != nil {
+				t.Errorf("NewSFTPClient() error = %v", err)
+				return
+			}
+			if client.config.BasePath != tt.wantBasePath {
+				t.Errorf("NewSFTPClient() BasePath = %v, want %v", client.config.BasePath, tt.wantBasePath)
+			}
+		})
+	}
+}
+
 func TestSFTPClient_Close(t *testing.T) {
 	client := &SFTPClient{
 		config: Config{

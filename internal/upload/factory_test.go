@@ -70,3 +70,72 @@ func TestNewClientFromConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestNewClientFromConfig_SFTPBasePath(t *testing.T) {
+	tests := []struct {
+		name         string
+		cfg          config.Upload
+		wantBasePath string
+	}{
+		{
+			name: "SFTP default base path",
+			cfg: config.Upload{
+				Protocol: "sftp",
+				Host:     "upload.aviationwx.org",
+				Username: "testuser",
+				Password: "testpass",
+			},
+			wantBasePath: "/files", // Default for SFTP
+		},
+		{
+			name: "SFTP custom base path",
+			cfg: config.Upload{
+				Protocol: "sftp",
+				Host:     "upload.aviationwx.org",
+				Username: "testuser",
+				Password: "testpass",
+				BasePath: "/custom/path",
+			},
+			wantBasePath: "/custom/path",
+		},
+		{
+			name: "SFTP empty protocol defaults to SFTP with base path",
+			cfg: config.Upload{
+				Host:     "upload.aviationwx.org",
+				Username: "testuser",
+				Password: "testpass",
+			},
+			wantBasePath: "/files", // Default for SFTP (default protocol)
+		},
+		{
+			name: "FTPS no base path",
+			cfg: config.Upload{
+				Protocol: "ftps",
+				Host:     "upload.aviationwx.org",
+				Username: "testuser",
+				Password: "testpass",
+				BasePath: "/files", // Should be ignored for FTPS
+			},
+			wantBasePath: "", // FTPS doesn't use base path (set in factory but not applied)
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, err := NewClientFromConfig(tt.cfg)
+			if err != nil {
+				t.Errorf("NewClientFromConfig() error = %v", err)
+				return
+			}
+
+			// Check SFTP client base path
+			if sftpClient, ok := client.(*SFTPClient); ok {
+				if sftpClient.config.BasePath != tt.wantBasePath {
+					t.Errorf("SFTPClient BasePath = %q, want %q", sftpClient.config.BasePath, tt.wantBasePath)
+				}
+			} else if tt.cfg.Protocol == "" || tt.cfg.Protocol == "sftp" {
+				t.Error("Expected SFTPClient for SFTP protocol")
+			}
+		})
+	}
+}

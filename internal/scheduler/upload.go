@@ -45,6 +45,8 @@ type UploadWorker struct {
 	uploadsSuccess    int64
 	uploadsFailed     int64
 	uploadsRetried    int64
+	uploadsToday      int64     // Daily counter
+	todayDate         time.Time // Track current day for reset
 	authFailures      int64
 	lastUploadTime    time.Time
 	lastSuccessTime   time.Time
@@ -139,6 +141,7 @@ func NewUploadWorker(cfg UploadWorkerConfig) *UploadWorker {
 		authBackoff:        authBackoff,
 		retryDelay:         retryDelay,
 		connectionInterval: connectionInterval,
+		todayDate:          time.Now().Truncate(24 * time.Hour), // Initialize to today at 00:00
 		cameraFailures:     make(map[string]*uploadFailureState),
 	}
 }
@@ -208,6 +211,7 @@ func (w *UploadWorker) GetStats() UploadStats {
 		UploadsSuccess:     w.uploadsSuccess,
 		UploadsFailed:      w.uploadsFailed,
 		UploadsRetried:     w.uploadsRetried,
+		UploadsToday:       w.uploadsToday,
 		AuthFailures:       w.authFailures,
 		QueuedImages:       queuedTotal,
 		LastUploadTime:     w.lastUploadTime,
@@ -236,6 +240,7 @@ type UploadStats struct {
 	UploadsSuccess     int64            `json:"uploads_success"`
 	UploadsFailed      int64            `json:"uploads_failed"`
 	UploadsRetried     int64            `json:"uploads_retried"`
+	UploadsToday       int64            `json:"uploads_today"` // Successful uploads today (resets at midnight)
 	AuthFailures       int64            `json:"auth_failures"`
 	QueuedImages       int              `json:"queued_images"`
 	LastUploadTime     time.Time        `json:"last_upload_time"`
@@ -589,8 +594,19 @@ func (w *UploadWorker) recordSuccess() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	now := time.Now()
+	today := now.Truncate(24 * time.Hour)
+
+	// Reset daily counter if it's a new day
+	if today.After(w.todayDate) {
+		w.uploadsToday = 0
+		w.todayDate = today
+		w.logger.Info("Daily upload counter reset", "date", today.Format("2006-01-02"))
+	}
+
 	w.uploadsSuccess++
-	w.lastSuccessTime = time.Now()
+	w.uploadsToday++
+	w.lastSuccessTime = now
 }
 
 func (w *UploadWorker) recordFailure(cameraID string, err error) {

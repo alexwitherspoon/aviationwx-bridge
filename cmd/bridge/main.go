@@ -699,11 +699,13 @@ func (b *Bridge) getStatus() interface{} {
 	}
 
 	queuedImages := 0
+	uploadsToday := int64(0)
 	if b.orchestrator != nil {
 		orchStatus := b.orchestrator.GetStatus()
 		for _, camStatus := range orchStatus.CameraStats {
 			queuedImages += camStatus.QueueStats.ImageCount
 		}
+		uploadsToday = orchStatus.UploadStats.UploadsToday
 	}
 
 	status := map[string]interface{}{
@@ -714,6 +716,7 @@ func (b *Bridge) getStatus() interface{} {
 		"cameras":        enabledCameras,
 		"total_cameras":  len(cameras),
 		"queued_images":  queuedImages,
+		"uploads_today":  uploadsToday,
 	}
 
 	// Add system health if available

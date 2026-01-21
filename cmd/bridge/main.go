@@ -417,10 +417,11 @@ func (b *Bridge) addCamera(camConfig config.Camera) error {
 		imgProcessor = image.NewProcessor(nil)
 	}
 
-	// Use remote_path from config, default to camera ID for backwards compatibility
+	// Use remote_path from config, default to "." (upload directly to base_path)
+	// Each camera has unique credentials with its own chroot, so no subdirectory needed
 	remotePath := camConfig.RemotePath
 	if remotePath == "" {
-		remotePath = camConfig.ID
+		remotePath = "."
 	}
 
 	schedConfig := scheduler.CameraConfig{

@@ -62,7 +62,7 @@
 | `rtsp` | object | Cond. | - | RTSP settings (if type=rtsp) |
 | `onvif` | object | Cond. | - | ONVIF settings (if type=onvif) |
 | `capture_interval_seconds` | integer | No | `60` | Capture interval (1-1800) |
-| `remote_path` | string | No | (camera ID) | Remote directory for uploads. Use `"."` to upload directly to base_path |
+| `remote_path` | string | No | `"."` | Remote directory for uploads. Default uploads directly to base_path |
 | `image` | object | No | - | Image processing options |
 | `upload` | object | Yes | - | Per-camera upload credentials (SFTP/FTPS) |
 | `queue` | object | No | - | Per-camera queue overrides |
@@ -376,6 +376,6 @@ Key changes from config version 1:
 3. Global `upload` → per-camera `upload` in each camera object
 4. `web_console.basic_auth` → `web_console.password`
 5. `remote_path` behavior changed:
-   - If empty/omitted: uploads to `{base_path}/{camera_id}/filename.jpg`
-   - If set to `"."`: uploads to `{base_path}/filename.jpg` (no subdirectory)
+   - If empty/omitted: uploads to `{base_path}/filename.jpg` (v2.2.5+)
    - If set to custom path: uploads to `{base_path}/{remote_path}/filename.jpg`
+   - Note: Prior to v2.2.5, empty `remote_path` defaulted to camera ID

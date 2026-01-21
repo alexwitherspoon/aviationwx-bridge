@@ -40,12 +40,13 @@ type Service struct {
 
 // GlobalSettings holds bridge-wide configuration
 type GlobalSettings struct {
-	Version    int          `json:"version"`               // Config version, current: 2
-	Timezone   string       `json:"timezone,omitempty"`    // IANA timezone
-	Global     *Global      `json:"global,omitempty"`      // Global operational settings
-	Queue      *QueueGlobal `json:"queue,omitempty"`       // Queue settings
-	SNTP       *SNTP        `json:"sntp,omitempty"`        // Time sync settings
-	WebConsole *WebConsole  `json:"web_console,omitempty"` // Web console settings
+	Version       int          `json:"version"`                 // Config version, current: 2
+	Timezone      string       `json:"timezone,omitempty"`      // IANA timezone
+	UpdateChannel string       `json:"update_channel,omitempty"` // Update channel: "latest" or "edge"
+	Global        *Global      `json:"global,omitempty"`        // Global operational settings
+	Queue         *QueueGlobal `json:"queue,omitempty"`         // Queue settings
+	SNTP          *SNTP        `json:"sntp,omitempty"`          // Time sync settings
+	WebConsole    *WebConsole  `json:"web_console,omitempty"`   // Web console settings
 }
 
 // ConfigEvent represents a configuration change

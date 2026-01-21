@@ -126,7 +126,11 @@ function updateStatusDisplay() {
     // Update version display
     if (status.version) {
         const versionEl = document.getElementById('appVersion');
-        versionEl.textContent = `v${status.version}`;
+        const updateChannel = status.update_channel || 'latest';
+        const channelBadge = updateChannel === 'edge' 
+            ? '<span style="background: #f59e0b; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 0.75em; margin-left: 4px;">EDGE</span>'
+            : '<span style="background: #10b981; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 0.75em; margin-left: 4px;">LATEST</span>';
+        versionEl.innerHTML = `v${status.version} ${channelBadge}`;
     }
     
     // Update available notification

@@ -707,12 +707,13 @@ func (b *Bridge) getStatus() interface{} {
 	}
 
 	status := map[string]interface{}{
-		"version":       Version,
-		"commit":        GitCommit,
-		"timezone":      global.Timezone,
-		"cameras":       enabledCameras,
-		"total_cameras": len(cameras),
-		"queued_images": queuedImages,
+		"version":        Version,
+		"commit":         GitCommit,
+		"update_channel": getUpdateChannel(global.UpdateChannel),
+		"timezone":       global.Timezone,
+		"cameras":        enabledCameras,
+		"total_cameras":  len(cameras),
+		"queued_images":  queuedImages,
 	}
 
 	// Add system health if available
@@ -759,4 +760,16 @@ func (b *Bridge) getStatus() interface{} {
 	}
 
 	return status
+}
+
+// getUpdateChannel normalizes the update channel value
+func getUpdateChannel(channel string) string {
+	if channel == "" || channel == "latest" {
+		return "latest"
+	}
+	if channel == "edge" {
+		return "edge"
+	}
+	// Default to latest for unknown values
+	return "latest"
 }

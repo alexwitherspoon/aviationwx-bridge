@@ -73,8 +73,8 @@ type Upload struct {
 
 	// Advanced settings (rarely needed)
 	CABundlePath          string `json:"ca_bundle_path,omitempty"`
-	TimeoutConnectSeconds int    `json:"timeout_connect_seconds,omitempty"` // Default: 30
-	TimeoutUploadSeconds  int    `json:"timeout_upload_seconds,omitempty"`  // Default: 60
+	TimeoutConnectSeconds int    `json:"timeout_connect_seconds,omitempty"` // Default: 60
+	TimeoutUploadSeconds  int    `json:"timeout_upload_seconds,omitempty"`  // Default: 300 (5 minutes)
 	DisableEPSV           *bool  `json:"disable_epsv,omitempty"`            // Default: true (use standard PASV, set false to enable EPSV)
 }
 
@@ -86,8 +86,8 @@ func DefaultUpload() Upload {
 		Port:                  2121,
 		TLS:                   true,
 		TLSVerify:             true,
-		TimeoutConnectSeconds: 30,
-		TimeoutUploadSeconds:  60,
+		TimeoutConnectSeconds: 60,           // Generous timeout for slow networks
+		TimeoutUploadSeconds:  300,          // 5 minutes for large files on slow connections
 		DisableEPSV:           &disableEPSV, // Use standard PASV by default
 	}
 }

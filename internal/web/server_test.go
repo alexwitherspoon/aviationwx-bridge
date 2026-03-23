@@ -56,6 +56,66 @@ func TestTimezoneUpdate(t *testing.T) {
 	}
 }
 
+// TestConfigPutTopLevelFields verifies PUT /api/config persists top-level global fields used by the settings UI.
+func TestConfigPutTopLevelFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+
+	base := svc.GetGlobal()
+	body, err := json.Marshal(map[string]interface{}{
+		"version":                 base.Version,
+		"timezone":                base.Timezone,
+		"update_channel":          "edge",
+		"max_concurrent_uploads":  5,
+		"timeout_connect_seconds": 45,
+		"timeout_upload_seconds":  400,
+		"web_console":             base.WebConsole,
+		"global":                  base.Global,
+		"queue":                   base.Queue,
+		"sntp":                    base.SNTP,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	req := httptest.NewRequest("PUT", "/api/config", bytes.NewBuffer(body))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	g := svc.GetGlobal()
+	if g.UpdateChannel != "edge" {
+		t.Errorf("update_channel: want edge, got %q", g.UpdateChannel)
+	}
+	if g.MaxConcurrentUploads != 5 {
+		t.Errorf("max_concurrent_uploads: want 5, got %d", g.MaxConcurrentUploads)
+	}
+	if g.Global == nil || g.Global.MaxConcurrentUploads != 5 {
+		t.Errorf("global.max_concurrent_uploads should mirror top-level, got %+v", g.Global)
+	}
+	if g.TimeoutConnectSeconds != 45 {
+		t.Errorf("timeout_connect_seconds: want 45, got %d", g.TimeoutConnectSeconds)
+	}
+	if g.TimeoutUploadSeconds != 400 {
+		t.Errorf("timeout_upload_seconds: want 400, got %d", g.TimeoutUploadSeconds)
+	}
+}
+
 // TestCameraAddUpdateDelete tests full camera lifecycle
 func TestCameraAddUpdateDelete(t *testing.T) {
 	tmpDir := t.TempDir()

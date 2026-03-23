@@ -177,7 +177,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 
 		err := s.configService.UpdateGlobal(func(g *config.GlobalSettings) error {
-			// Update fields
+			// Nested sections first (full replacements from JSON)
 			if updates.Timezone != "" {
 				g.Timezone = updates.Timezone
 			}
@@ -192,6 +192,23 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			if updates.SNTP != nil {
 				g.SNTP = updates.SNTP
+			}
+			// Top-level persisted fields (settings UI); apply after nested so PUT body scalars win
+			if updates.UpdateChannel != "" {
+				g.UpdateChannel = updates.UpdateChannel
+			}
+			if updates.MaxConcurrentUploads != 0 {
+				g.MaxConcurrentUploads = updates.MaxConcurrentUploads
+				if g.Global == nil {
+					g.Global = &config.Global{}
+				}
+				g.Global.MaxConcurrentUploads = updates.MaxConcurrentUploads
+			}
+			if updates.TimeoutConnectSeconds != 0 {
+				g.TimeoutConnectSeconds = updates.TimeoutConnectSeconds
+			}
+			if updates.TimeoutUploadSeconds != 0 {
+				g.TimeoutUploadSeconds = updates.TimeoutUploadSeconds
 			}
 			return nil
 		})

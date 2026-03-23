@@ -283,16 +283,13 @@ func (b *Bridge) initOrchestrator() error {
 	}
 
 	global := b.configService.GetGlobal()
-
-	maxConcurrent := 2 // Default
-	if global.Global != nil && global.Global.MaxConcurrentUploads > 0 {
-		maxConcurrent = global.Global.MaxConcurrentUploads
-	}
+	maxConcurrent := config.EffectiveMaxConcurrentUploads(global)
 
 	orch, err := scheduler.NewOrchestrator(scheduler.OrchestratorConfig{
 		QueueBasePath:        queuePath,
 		QueueMaxTotalMB:      100,
 		QueueMaxHeapMB:       400,
+		Timezone:             global.Timezone,
 		MaxConcurrentUploads: maxConcurrent,
 		ResourceLimiter:      b.resourceLimiter,
 		Logger:               b.log,
@@ -335,6 +332,9 @@ func (b *Bridge) updateTimezone(timezone string) error {
 	}
 
 	b.log.Info("Updating timezone", "new_timezone", timezone)
+
+	// Keep orchestrator config in sync so SetTimeHealth (SNTP restart) does not reset to system local TZ
+	b.orchestrator.SetBridgeTimezone(timezone)
 
 	// Create new authority with updated timezone
 	authorityConfig := timehealth.DefaultAuthorityConfig()
@@ -536,9 +536,37 @@ func (b *Bridge) createCamera(camConfig config.Camera) (camera.Camera, error) {
 	return camera.NewCamera(cameraConf)
 }
 
-// createUploader creates an upload client from config
+// createUploader creates an upload client from config, applying global SFTP timeout defaults when unset.
 func (b *Bridge) createUploader(uploadConfig *config.Upload) (upload.Client, error) {
-	return upload.NewClientFromConfig(*uploadConfig)
+	merged := *uploadConfig
+	glob := b.configService.GetGlobal()
+	if merged.TimeoutConnectSeconds <= 0 && glob.TimeoutConnectSeconds > 0 {
+		merged.TimeoutConnectSeconds = glob.TimeoutConnectSeconds
+	}
+	if merged.TimeoutUploadSeconds <= 0 && glob.TimeoutUploadSeconds > 0 {
+		merged.TimeoutUploadSeconds = glob.TimeoutUploadSeconds
+	}
+	return upload.NewClientFromConfig(merged)
+}
+
+// refreshUploadersFromGlobal rebuilds per-camera SFTP clients so global timeout defaults take effect without restart.
+func (b *Bridge) refreshUploadersFromGlobal() {
+	if b.orchestrator == nil {
+		return
+	}
+	for _, cam := range b.configService.ListCameras() {
+		if !cam.Enabled || cam.Upload == nil {
+			continue
+		}
+		client, err := b.createUploader(cam.Upload)
+		if err != nil {
+			b.log.Warn("Failed to refresh uploader after global config change",
+				"camera", cam.ID,
+				"error", err)
+			continue
+		}
+		b.orchestrator.SetCameraUploader(cam.ID, client)
+	}
 }
 
 // handleConfigEvent handles config change events from ConfigService
@@ -614,19 +642,31 @@ func (b *Bridge) handleConfigEvent(event config.ConfigEvent) {
 		// Global settings changed - update services that need hot-reload
 		global := b.configService.GetGlobal()
 
-		// Update timezone for all camera workers
-		if err := b.updateTimezone(global.Timezone); err != nil {
-			b.log.Error("Failed to update timezone", "error", err)
+		// Sync orchestrator timezone before SNTP restart: SetTimeHealth rebuilds authority from o.config.Timezone.
+		// If we only called updateTimezone after restartSNTP, SNTP would wipe the user's IANA zone (empty config).
+		if b.orchestrator != nil {
+			b.orchestrator.SetBridgeTimezone(global.Timezone)
 		}
 
-		// Restart SNTP service with new config
+		// Restart SNTP service with new config (recreates time authority with NTP + timezone above)
 		if err := b.restartSNTP(global.SNTP); err != nil {
 			b.log.Error("Failed to restart SNTP", "error", err)
 		}
 
+		// Apply full authority to capture workers (required when SNTP is disabled; aligns state when enabled)
+		if err := b.updateTimezone(global.Timezone); err != nil {
+			b.log.Error("Failed to update timezone", "error", err)
+		}
+
+		if b.orchestrator != nil {
+			b.orchestrator.SetMaxConcurrentUploads(config.EffectiveMaxConcurrentUploads(global))
+			b.refreshUploadersFromGlobal()
+		}
+
 		b.log.Info("Global config updated",
 			"timezone", global.Timezone,
-			"sntp_enabled", global.SNTP != nil && global.SNTP.Enabled)
+			"sntp_enabled", global.SNTP != nil && global.SNTP.Enabled,
+			"max_concurrent_uploads", config.EffectiveMaxConcurrentUploads(global))
 	}
 }
 

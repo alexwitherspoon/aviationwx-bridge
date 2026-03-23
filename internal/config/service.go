@@ -105,6 +105,19 @@ func NewService(baseDir string) (*Service, error) {
 	return s, nil
 }
 
+// EffectiveMaxConcurrentUploads returns the configured maximum concurrent uploads, or 2 if unset.
+// Top-level MaxConcurrentUploads takes precedence over global.global.max_concurrent_uploads.
+func EffectiveMaxConcurrentUploads(g GlobalSettings) int {
+	n := g.MaxConcurrentUploads
+	if n <= 0 && g.Global != nil {
+		n = g.Global.MaxConcurrentUploads
+	}
+	if n > 0 {
+		return n
+	}
+	return 2
+}
+
 // GetGlobal returns a copy of global config (thread-safe)
 func (s *Service) GetGlobal() GlobalSettings {
 	s.mu.RLock()

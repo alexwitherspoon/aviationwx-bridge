@@ -259,6 +259,22 @@ func TestUpdateGlobal(t *testing.T) {
 	}
 }
 
+func TestEffectiveMaxConcurrentUploads(t *testing.T) {
+	if n := EffectiveMaxConcurrentUploads(GlobalSettings{MaxConcurrentUploads: 7}); n != 7 {
+		t.Errorf("top-level: want 7, got %d", n)
+	}
+	nested := &Global{MaxConcurrentUploads: 4}
+	if n := EffectiveMaxConcurrentUploads(GlobalSettings{Global: nested}); n != 4 {
+		t.Errorf("nested only: want 4, got %d", n)
+	}
+	if n := EffectiveMaxConcurrentUploads(GlobalSettings{MaxConcurrentUploads: 6, Global: nested}); n != 6 {
+		t.Errorf("top-level wins over nested: want 6, got %d", n)
+	}
+	if n := EffectiveMaxConcurrentUploads(GlobalSettings{}); n != 2 {
+		t.Errorf("default: want 2, got %d", n)
+	}
+}
+
 func TestSubscribe(t *testing.T) {
 	tmpDir := t.TempDir()
 	svc, _ := NewService(tmpDir)

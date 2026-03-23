@@ -232,8 +232,13 @@ func (o *Orchestrator) RemoveCamera(cameraID string) error {
 func (o *Orchestrator) SetTimeHealth(timeHealth *timepkg.TimeHealth) {
 	// Recreate authority with time health
 	authorityConfig := timepkg.DefaultAuthorityConfig()
-	if o.config.Timezone != "" {
-		authorityConfig.Timezone = o.config.Timezone
+	tz := o.config.Timezone
+	if tz == "" && o.authority != nil {
+		// o.config.Timezone may be unset on older runs; preserve IANA zone from current authority
+		tz = o.authority.GetConfiguredTimezone()
+	}
+	if tz != "" {
+		authorityConfig.Timezone = tz
 	}
 
 	authority, err := timepkg.NewAuthority(timeHealth, authorityConfig)
@@ -249,6 +254,44 @@ func (o *Orchestrator) SetTimeHealth(timeHealth *timepkg.TimeHealth) {
 		worker.authority = authority
 	}
 	o.mu.Unlock()
+}
+
+// SetMaxConcurrentUploads updates the orchestrator config and applies the new limit to the upload worker.
+// n is clamped to the range allowed by the web console (1–10).
+func (o *Orchestrator) SetMaxConcurrentUploads(n int) {
+	if n < 1 {
+		n = 1
+	}
+	if n > maxConcurrentUploadsCap {
+		n = maxConcurrentUploadsCap
+	}
+
+	o.mu.Lock()
+	o.config.MaxConcurrentUploads = n
+	uw := o.uploadWorker
+	o.mu.Unlock()
+
+	if uw != nil {
+		uw.SetMaxConcurrent(n)
+	}
+}
+
+// SetCameraUploader replaces the upload client for a camera (hot reload of SFTP settings).
+func (o *Orchestrator) SetCameraUploader(cameraID string, uploader upload.Client) {
+	o.mu.RLock()
+	uw := o.uploadWorker
+	o.mu.RUnlock()
+	if uw == nil {
+		return
+	}
+	uw.SetUploader(cameraID, uploader)
+}
+
+// SetBridgeTimezone updates the stored IANA timezone used when recreating authority (e.g. SNTP restart).
+func (o *Orchestrator) SetBridgeTimezone(tz string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.config.Timezone = tz
 }
 
 // SetTimeAuthority updates the time authority for all workers

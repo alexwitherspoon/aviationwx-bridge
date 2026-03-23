@@ -14,7 +14,7 @@ import (
 )
 
 // UploadWorker handles uploading queued images to the server
-// Supports concurrent uploads (default: 3) with connection rate limiting
+// Supports concurrent uploads (default: 2) with connection rate limiting
 // Uses newest-first (LIFO) when catching up, oldest-first (FIFO) otherwise
 // Each camera has its own uploader with independent credentials
 type UploadWorker struct {
@@ -28,7 +28,11 @@ type UploadWorker struct {
 	logger     Logger
 
 	// Concurrent upload configuration
-	maxConcurrent      int        // Max concurrent uploads (default: 3)
+	maxConcurrent      int // Max concurrent uploads (scheduling limit; default: 2)
+	workerCount        int // Goroutines in the pool (>= maxConcurrent when limit is lowered)
+	workChan           chan uploadTask
+	poolWG             sync.WaitGroup
+	poolMu             sync.Mutex // Serializes initial pool setup and SetMaxConcurrent spawns
 	catchupThreshold   int        // Queue size to trigger LIFO mode (default: 20)
 	activeUploads      int        // Current number of active uploads
 	connectionMutex    sync.Mutex // Ensures only one connection established at a time
@@ -149,6 +153,63 @@ func NewUploadWorker(cfg UploadWorkerConfig) *UploadWorker {
 		cameraFailures:     make(map[string]*uploadFailureState),
 		inFlight:           make(map[string]bool),
 	}
+}
+
+// maxConcurrentUploadsCap is the upper bound for concurrent upload workers (matches web UI and orchestrator).
+const maxConcurrentUploadsCap = 10
+
+// SetMaxConcurrent updates the scheduling limit and spawns more worker goroutines when the limit increases.
+// Lowering the limit does not stop existing goroutines; they remain idle until the limit rises again.
+func (w *UploadWorker) SetMaxConcurrent(n int) {
+	if n < 1 {
+		n = 1
+	}
+	if n > maxConcurrentUploadsCap {
+		n = maxConcurrentUploadsCap
+	}
+
+	w.mu.Lock()
+	w.maxConcurrent = n
+	w.mu.Unlock()
+
+	w.poolMu.Lock()
+	wc := w.workChan
+	cnt := w.workerCount
+	w.poolMu.Unlock()
+
+	if wc == nil || n <= cnt {
+		return
+	}
+
+	additional := n - cnt
+	for i := 0; i < additional; i++ {
+		workerID := cnt + i
+		w.poolWG.Add(1)
+		go func(id int) {
+			defer w.poolWG.Done()
+			w.uploadWorkerRoutine(id, wc)
+		}(workerID)
+	}
+
+	w.poolMu.Lock()
+	w.workerCount += additional
+	workers := w.workerCount
+	w.poolMu.Unlock()
+
+	w.logger.Info("Upload worker concurrency increased",
+		"max_concurrent", n,
+		"workers_added", additional,
+		"worker_count", workers)
+}
+
+// SetUploader replaces the SFTP client for a camera (e.g. after global timeout defaults change).
+func (w *UploadWorker) SetUploader(cameraID string, uploader upload.Client) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, ok := w.uploaders[cameraID]; !ok {
+		return
+	}
+	w.uploaders[cameraID] = uploader
 }
 
 // AddQueue adds a camera queue to the upload worker with its own uploader
@@ -277,19 +338,35 @@ func (w *UploadWorker) run() {
 		}
 	}()
 
+	w.mu.Lock()
+	initialN := w.maxConcurrent
+	w.mu.Unlock()
+	if initialN < 1 {
+		initialN = 1
+	}
+	if initialN > maxConcurrentUploadsCap {
+		initialN = maxConcurrentUploadsCap
+	}
+
+	bufCap := initialN * 2
+	if bufCap < 8 {
+		bufCap = 8
+	}
+
+	w.poolMu.Lock()
+	workChan := make(chan uploadTask, bufCap)
+	w.workChan = workChan
+	w.workerCount = initialN
+	w.poolMu.Unlock()
+
 	w.logger.Info("Upload worker started",
-		"max_concurrent", w.maxConcurrent,
+		"max_concurrent", initialN,
 		"catchup_threshold", w.catchupThreshold)
 
-	// Work channel for distributing upload tasks
-	workChan := make(chan uploadTask, w.maxConcurrent*2)
-
-	// Start worker goroutines
-	var wg sync.WaitGroup
-	for i := 0; i < w.maxConcurrent; i++ {
-		wg.Add(1)
+	for i := 0; i < initialN; i++ {
+		w.poolWG.Add(1)
 		go func(workerID int) {
-			defer wg.Done()
+			defer w.poolWG.Done()
 			w.uploadWorkerRoutine(workerID, workChan)
 		}(i)
 	}
@@ -303,7 +380,10 @@ func (w *UploadWorker) run() {
 		case <-w.ctx.Done():
 			w.logger.Info("Upload worker stopping")
 			close(workChan)
-			wg.Wait()
+			w.poolWG.Wait()
+			w.poolMu.Lock()
+			w.workChan = nil
+			w.poolMu.Unlock()
 			w.logger.Info("Upload worker stopped")
 			return
 

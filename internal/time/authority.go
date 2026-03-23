@@ -218,6 +218,14 @@ func (a *Authority) GetTimezoneName() string {
 	return a.localTZ.String()
 }
 
+// GetConfiguredTimezone returns the IANA timezone string from bridge config (may be empty).
+func (a *Authority) GetConfiguredTimezone() string {
+	if a == nil {
+		return ""
+	}
+	return a.config.Timezone
+}
+
 // FormatLocalTime formats a UTC time in the local timezone
 func (a *Authority) FormatLocalTime(t time.Time) string {
 	return t.In(a.localTZ).Format("2006-01-02 15:04:05 MST")

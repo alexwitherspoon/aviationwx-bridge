@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupNavigation();
     populateTimezones();
     await refreshStatus();
+    await loadConfig();
     await loadCameras();
     startTimeUpdates();
     startAutoRefresh(); // Auto-refresh dashboard every second
@@ -112,6 +113,16 @@ async function refreshStatus() {
         console.error('Failed to fetch status:', err);
         document.getElementById('statusDot').classList.add('error');
         document.getElementById('statusText').textContent = 'Disconnected';
+    }
+}
+
+/** Loads global config from the API (required for settings UI and PUT /config spreads). */
+async function loadConfig() {
+    try {
+        config = await api('/config');
+        loadGlobalSettings();
+    } catch (err) {
+        console.error('Failed to load config:', err);
     }
 }
 
@@ -1119,6 +1130,7 @@ async function saveWebSettings() {
         });
         alert('Password updated successfully');
         document.getElementById('webPassword').value = '';
+        await loadConfig();
     } catch (err) {
         alert('Failed to save: ' + err.message);
     }
@@ -1192,7 +1204,10 @@ async function saveGlobalSettings() {
             body: JSON.stringify(updatedConfig),
         });
         
-        showNotification('✅ Settings saved successfully. Restart bridge to apply changes.', 'success');
+        showNotification(
+            '✅ Settings saved. Upload limits, SFTP timeouts, and update channel apply immediately. Restart the bridge only if you changed the web console listen port.',
+            'success'
+        );
         
         // Reload config to reflect changes
         await loadConfig();

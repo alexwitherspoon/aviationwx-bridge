@@ -30,6 +30,9 @@ func TestNewAuthority_WithTimezone(t *testing.T) {
 	if authority.GetTimezoneName() != "America/Los_Angeles" {
 		t.Errorf("expected timezone 'America/Los_Angeles', got %q", authority.GetTimezoneName())
 	}
+	if authority.GetConfiguredTimezone() != "America/Los_Angeles" {
+		t.Errorf("GetConfiguredTimezone: want America/Los_Angeles, got %q", authority.GetConfiguredTimezone())
+	}
 }
 
 func TestNewAuthority_InvalidTimezone(t *testing.T) {

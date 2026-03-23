@@ -60,7 +60,7 @@ jobs:
         run: npm run test:js
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v5.5.2
+        uses: codecov/codecov-action@v5.5.3
         with:
           files: ./coverage.out
           flags: unittests

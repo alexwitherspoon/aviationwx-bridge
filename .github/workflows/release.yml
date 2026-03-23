@@ -191,7 +191,7 @@ jobs:
           sha256sum aviationwx-org-bridge-* > checksums.txt
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2.5.1
+        uses: softprops/action-gh-release@v2.6.1
         with:
           name: AviationWX.org Bridge ${{ steps.version.outputs.VERSION }}
           body: |

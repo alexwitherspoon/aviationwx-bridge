@@ -79,14 +79,21 @@ docker/data/  # Runtime configuration and state - do not commit
 .env.local
 .env.*.local
 
-# AI-specific configuration files (keep local only, never commit)
+# Local AI / IDE assistant state (never commit; machine-local only)
+# Covers common editors and assistants; does not affect committed CI/docs under .github/
 .cursor/
+.cursorrules
 *.cursorrules
-!.cursorrules
 .cursorrc
 .cursor-settings.json
+.cursorignore
+.windsurf/
+.claude/
+.continue/
+.aider*
+.specstory/
 
-# AI-generated temporary files (if any)
+# Local scratch / assistant-generated artifacts (never commit)
 *.ai-temp
 *.ai-backup
 *_ai_*.tmp

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Docker and Docker Compose
 - exiftool (required for tests): `brew install exiftool` or `apt install libimage-exiftool-perl`
 
@@ -47,3 +47,7 @@ Use `docker-compose.test.yml` for isolated test runs (port 1230, separate data d
 ## Config
 
 Create `docker/data/` with `global.json` and `cameras/*.json`. See CONFIG_SCHEMA.md.
+
+## Dependency updates (Dependabot)
+
+Version updates are configured in [`.github/dependabot.yml`](../.github/dependabot.yml) for Go modules, GitHub Actions, and Docker images. Enable **Dependabot version updates** in the repository **Settings → Code security** if it is not already on. There is no npm ecosystem entry until `package.json` declares dependencies.

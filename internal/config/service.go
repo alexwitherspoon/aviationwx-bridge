@@ -84,7 +84,7 @@ func NewService(baseDir string) (*Service, error) {
 			Timezone:              "UTC",
 			UpdateChannel:         "latest",
 			MaxConcurrentUploads:  2,
-			MaxConcurrentCaptures: hardware.DefaultMaxConcurrentCaptures(),
+			MaxConcurrentCaptures: 0, // omitted on disk (omitempty); profile each boot via EffectiveMaxConcurrentCaptures
 			TimeoutConnectSeconds: 60,
 			TimeoutUploadSeconds:  300,
 			SNTP:                  &defaultSNTP,

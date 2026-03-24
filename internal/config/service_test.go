@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,19 @@ func TestNewService(t *testing.T) {
 	}
 	if global.WebConsole == nil || global.WebConsole.Port != 1229 {
 		t.Error("Expected default web console config")
+	}
+	if global.MaxConcurrentCaptures != 0 {
+		t.Errorf("Expected MaxConcurrentCaptures 0 (unset, profiled each boot), got %d", global.MaxConcurrentCaptures)
+	}
+	if n := EffectiveMaxConcurrentCaptures(global); n != hardware.DefaultMaxConcurrentCaptures() {
+		t.Errorf("EffectiveMaxConcurrentCaptures: want profiled default %d, got %d", hardware.DefaultMaxConcurrentCaptures(), n)
+	}
+	raw, err := os.ReadFile(filepath.Join(tmpDir, "global.json"))
+	if err != nil {
+		t.Fatalf("read global.json: %v", err)
+	}
+	if strings.Contains(string(raw), "max_concurrent_captures") {
+		t.Error("first-time global.json should omit max_concurrent_captures so profiling applies each boot")
 	}
 
 	// Verify global.json was created

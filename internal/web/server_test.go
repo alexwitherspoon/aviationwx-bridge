@@ -297,6 +297,93 @@ func TestAddCamera_DuplicateUploadCredentialsHTTP409(t *testing.T) {
 	}
 }
 
+// TestAddCamera_ONVIF_NormalizesDuplicateEndpoint verifies POST /api/cameras persists a
+// single-scheme ONVIF endpoint when the client sends duplicated http:// prefixes.
+func TestAddCamera_ONVIF_NormalizesDuplicateEndpoint(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	camJSON := `{
+		"name": "Onvif Dup Endpoint",
+		"type": "onvif",
+		"enabled": true,
+		"capture_interval_seconds": 60,
+		"onvif": {
+			"endpoint": "http://http://192.168.1.50/onvif/device_service",
+			"username": "admin",
+			"password": "secret"
+		},
+		"upload": {
+			"host": "upload.example.com",
+			"port": 2222,
+			"username": "onvif-dup-user",
+			"password": "pass"
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(camJSON))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", w.Code, w.Body.String())
+	}
+	cam, err := svc.GetCamera("onvif-dup-endpoint")
+	if err != nil {
+		t.Fatalf("GetCamera: %v", err)
+	}
+	if cam.ONVIF == nil {
+		t.Fatal("expected ONVIF config")
+	}
+	want := "http://192.168.1.50/onvif/device_service"
+	if cam.ONVIF.Endpoint != want {
+		t.Errorf("onvif.endpoint = %q, want %q", cam.ONVIF.Endpoint, want)
+	}
+
+	updateJSON := `{
+		"id": "onvif-dup-endpoint",
+		"name": "Onvif Dup Endpoint",
+		"type": "onvif",
+		"enabled": true,
+		"capture_interval_seconds": 60,
+		"onvif": {
+			"endpoint": "https://https://10.0.0.2/other/onvif",
+			"username": "admin",
+			"password": "secret"
+		},
+		"upload": {
+			"host": "upload.example.com",
+			"port": 2222,
+			"username": "onvif-dup-user",
+			"password": ""
+		}
+	}`
+	req2 := httptest.NewRequest(http.MethodPut, "/api/cameras/onvif-dup-endpoint", bytes.NewBufferString(updateJSON))
+	req2.SetBasicAuth("admin", svc.GetWebPassword())
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("PUT: %d %s", w2.Code, w2.Body.String())
+	}
+	cam2, err := svc.GetCamera("onvif-dup-endpoint")
+	if err != nil {
+		t.Fatalf("GetCamera after PUT: %v", err)
+	}
+	wantHTTPS := "https://10.0.0.2/other/onvif"
+	if cam2.ONVIF.Endpoint != wantHTTPS {
+		t.Errorf("after PUT onvif.endpoint = %q, want %q", cam2.ONVIF.Endpoint, wantHTTPS)
+	}
+}
+
 // TestCameraAddUpdateDelete tests full camera lifecycle
 func TestCameraAddUpdateDelete(t *testing.T) {
 	tmpDir := t.TempDir()

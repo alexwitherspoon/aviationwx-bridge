@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/camera"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/logger"
 )
@@ -299,6 +300,10 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 		cam.Upload.Port = 2222
 	}
 
+	if cam.ONVIF != nil && cam.ONVIF.Endpoint != "" {
+		cam.ONVIF.Endpoint = camera.NormalizeONVIFEndpoint(cam.ONVIF.Endpoint)
+	}
+
 	// Add camera via ConfigService
 	if err := s.configService.AddCamera(cam); err != nil {
 		if errors.Is(err, config.ErrDuplicateUploadCredentials) {
@@ -367,6 +372,10 @@ func (s *Server) updateCamera(w http.ResponseWriter, r *http.Request, cameraID s
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	if updates.ONVIF != nil && updates.ONVIF.Endpoint != "" {
+		updates.ONVIF.Endpoint = camera.NormalizeONVIFEndpoint(updates.ONVIF.Endpoint)
 	}
 
 	err := s.configService.UpdateCamera(cameraID, func(cam *config.Camera) error {
@@ -511,6 +520,10 @@ func (s *Server) handleTestCamera(w http.ResponseWriter, r *http.Request) {
 	if s.testCamera == nil {
 		http.Error(w, "Test not available", http.StatusServiceUnavailable)
 		return
+	}
+
+	if cam.ONVIF != nil && cam.ONVIF.Endpoint != "" {
+		cam.ONVIF.Endpoint = camera.NormalizeONVIFEndpoint(cam.ONVIF.Endpoint)
 	}
 
 	imageData, err := s.testCamera(cam)

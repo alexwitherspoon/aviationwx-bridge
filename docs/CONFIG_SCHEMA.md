@@ -91,7 +91,7 @@
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `endpoint` | string | Yes | - | ONVIF device service URL |
+| `endpoint` | string | Yes | - | ONVIF device service URL (e.g. `http://host/onvif/device_service`). The bridge and web API normalize the value: repeated `http://` / `https://` prefixes (common when pasting a full URL) are collapsed to a single scheme; if the value began with `https://`, that scheme is kept, otherwise `http://` is used. |
 | `username` | string | Yes | - | ONVIF username |
 | `password` | string | Yes | - | ONVIF password |
 | `profile_token` | string | No | (auto) | Media profile token |

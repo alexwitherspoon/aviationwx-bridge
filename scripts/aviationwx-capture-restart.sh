@@ -35,6 +35,7 @@ readonly MAX_PER_24H="$(_nonneg_int "${AVIATIONWX_CAPTURE_RESTART_MAX_PER_24H:-}
 readonly DATA_DIR="${AVIATIONWX_DATA_DIR:-/data/aviationwx}"
 readonly STATE_FILE="${DATA_DIR}/capture-restart-state.json"
 readonly LOG_FILE="${DATA_DIR}/capture-restart.log"
+readonly LOCK_FILE="${DATA_DIR}/capture-restart.lock"
 
 log_event() {
 	local level="$1"
@@ -42,11 +43,39 @@ log_event() {
 	echo "[$(date -Iseconds)] [$level] $message" | tee -a "$LOG_FILE"
 }
 
-main() {
-	mkdir -p "$DATA_DIR" || true
+ensure_state_json() {
 	if [ ! -f "$STATE_FILE" ]; then
 		echo '{"consecutive_unready":0,"recent_restarts":[]}' >"$STATE_FILE"
 	fi
+	if ! jq empty "$STATE_FILE" 2>/dev/null; then
+		log_event "WARN" "state file invalid JSON; resetting to defaults"
+		echo '{"consecutive_unready":0,"recent_restarts":[]}' >"$STATE_FILE"
+	fi
+}
+
+acquire_lock_or_exit() {
+	if command -v flock >/dev/null 2>&1; then
+		exec 200>>"$LOCK_FILE" || true
+		if ! flock -n 200; then
+			log_event "INFO" "another capture-restart run in progress; exiting"
+			exit 0
+		fi
+	fi
+}
+
+write_state_reset_consecutive() {
+	local pruned_json="$1"
+	jq -n \
+		--argjson pruned "$pruned_json" \
+		'{consecutive_unready: 0, recent_restarts: $pruned}' >"${STATE_FILE}.tmp"
+	mv "${STATE_FILE}.tmp" "$STATE_FILE"
+}
+
+main() {
+	mkdir -p "$DATA_DIR" || true
+	# Serialize read/modify/write so overlapping cron runs cannot corrupt state.
+	acquire_lock_or_exit
+	ensure_state_json
 
 	local now_epoch
 	now_epoch=$(date +%s)
@@ -69,15 +98,14 @@ main() {
 		if [ "$consecutive" != "0" ]; then
 			log_event "INFO" "readyz OK; reset consecutive (was $consecutive)"
 		fi
-		jq -n \
-			--argjson pruned "$pruned_restarts" \
-			'{consecutive_unready: 0, recent_restarts: $pruned}' >"${STATE_FILE}.tmp"
-		mv "${STATE_FILE}.tmp" "$STATE_FILE"
+		write_state_reset_consecutive "$pruned_restarts"
 		return 0
 	fi
 
+	# Any non-503 (including connection errors "000") breaks the consecutive-503 streak.
 	if [ "$code" != "503" ]; then
-		log_event "WARN" "readyz HTTP $code (only 503 increases consecutive; not restarting)"
+		log_event "WARN" "readyz HTTP $code (resetting consecutive; not restarting)"
+		write_state_reset_consecutive "$pruned_restarts"
 		return 0
 	fi
 
@@ -95,10 +123,7 @@ main() {
 
 	if [ "$count_restart" -ge "$MAX_PER_24H" ]; then
 		log_event "ERROR" "max capture restarts in last 24h reached ($count_restart/$MAX_PER_24H); not restarting"
-		jq -n \
-			--argjson pruned "$pruned_restarts" \
-			'{consecutive_unready: 0, recent_restarts: $pruned}' >"${STATE_FILE}.tmp"
-		mv "${STATE_FILE}.tmp" "$STATE_FILE"
+		write_state_reset_consecutive "$pruned_restarts"
 		return 0
 	fi
 

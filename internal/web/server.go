@@ -21,6 +21,21 @@ import (
 //go:embed static/*
 var staticFiles embed.FS
 
+// normalizeUploadForAPI trims upload host/username/password, lowercases host, and applies the
+// default host when the trimmed value is empty so SFTP identity keys stay consistent.
+func normalizeUploadForAPI(u *config.Upload) {
+	if u == nil {
+		return
+	}
+	u.Host = strings.TrimSpace(u.Host)
+	u.Username = strings.TrimSpace(u.Username)
+	u.Password = strings.TrimSpace(u.Password)
+	if u.Host == "" {
+		u.Host = "upload.aviationwx.org"
+	}
+	u.Host = strings.ToLower(u.Host)
+}
+
 // Server provides the web console HTTP server
 type Server struct {
 	configService *config.Service
@@ -289,13 +304,11 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Upload credentials are required", http.StatusBadRequest)
 		return
 	}
+	normalizeUploadForAPI(cam.Upload)
 
 	// Set defaults
 	if cam.CaptureIntervalSeconds == 0 {
 		cam.CaptureIntervalSeconds = 60
-	}
-	if cam.Upload.Host == "" {
-		cam.Upload.Host = "upload.aviationwx.org"
 	}
 	if cam.Upload.Port == 0 {
 		cam.Upload.Port = 2222
@@ -384,11 +397,31 @@ func (s *Server) updateCamera(w http.ResponseWriter, r *http.Request, cameraID s
 		return
 	}
 
-	if updates.ONVIF != nil && updates.ONVIF.Endpoint != "" {
-		updates.ONVIF.Endpoint = camera.NormalizeONVIFEndpoint(updates.ONVIF.Endpoint)
+	existing, err := s.configService.GetCamera(cameraID)
+	if err != nil {
+		http.Error(w, "Camera not found", http.StatusNotFound)
+		return
 	}
 
-	err := s.configService.UpdateCamera(cameraID, func(cam *config.Camera) error {
+	if updates.Upload != nil {
+		normalizeUploadForAPI(updates.Upload)
+	}
+
+	if updates.ONVIF != nil {
+		ep := strings.TrimSpace(updates.ONVIF.Endpoint)
+		if ep != "" {
+			ep = camera.NormalizeONVIFEndpoint(ep)
+		} else if existing.ONVIF != nil && strings.TrimSpace(existing.ONVIF.Endpoint) != "" {
+			ep = strings.TrimSpace(existing.ONVIF.Endpoint)
+		}
+		updates.ONVIF.Endpoint = ep
+		if strings.TrimSpace(updates.ONVIF.Endpoint) == "" {
+			http.Error(w, "ONVIF endpoint is required when ONVIF settings are present", http.StatusBadRequest)
+			return
+		}
+	}
+
+	err = s.configService.UpdateCamera(cameraID, func(cam *config.Camera) error {
 		// Preserve passwords if empty
 		if updates.Upload != nil && updates.Upload.Password == "" && cam.Upload != nil {
 			updates.Upload.Password = cam.Upload.Password

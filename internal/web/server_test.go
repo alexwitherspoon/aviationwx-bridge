@@ -369,6 +369,74 @@ func TestAddCamera_POST_RequiresUploadUsernameAndPassword(t *testing.T) {
 	}
 }
 
+func TestAddCamera_NormalizesUploadFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	body := `{"name":"Trim Upload","type":"http","enabled":true,"snapshot_url":"http://example.com/s.jpg","capture_interval_seconds":60,"upload":{"host":"  Upload.EXAMPLE.com  ","port":2222,"username":"  user1  ","password":"  secret  "}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(body))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", w.Code, w.Body.String())
+	}
+	cam, err := svc.GetCamera("trim-upload")
+	if err != nil {
+		t.Fatalf("GetCamera: %v", err)
+	}
+	if cam.Upload.Host != "upload.example.com" {
+		t.Errorf("upload.host: got %q", cam.Upload.Host)
+	}
+	if cam.Upload.Username != "user1" {
+		t.Errorf("upload.username: got %q", cam.Upload.Username)
+	}
+	if cam.Upload.Password != "secret" {
+		t.Errorf("upload.password: got %q", cam.Upload.Password)
+	}
+}
+
+func TestUpdateCamera_ONVIF_RejectEmptyEndpointWhenNoExistingEndpoint(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	postJSON := `{"name":"HTTP Cam","type":"http","enabled":true,"snapshot_url":"http://x/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"u","password":"p"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(postJSON))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", w.Code, w.Body.String())
+	}
+	putJSON := `{"name":"HTTP Cam","type":"http","enabled":true,"snapshot_url":"http://x/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"u","password":"p"},"onvif":{"endpoint":"   ","username":"a","password":"b"}}`
+	req2 := httptest.NewRequest(http.MethodPut, "/api/cameras/http-cam", bytes.NewBufferString(putJSON))
+	req2.SetBasicAuth("admin", svc.GetWebPassword())
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Fatalf("PUT empty ONVIF endpoint: want 400, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
 // TestAddCamera_ONVIF_NormalizesDuplicateEndpoint verifies POST /api/cameras persists a
 // single-scheme ONVIF endpoint when the client sends duplicated http:// prefixes.
 func TestAddCamera_ONVIF_NormalizesDuplicateEndpoint(t *testing.T) {

@@ -841,7 +841,14 @@ func (b *Bridge) getCaptureReadiness() (bool, string) {
 	minStale := envDurationSeconds("AVIATIONWX_READYZ_STALE_SECONDS", 900)
 
 	if b.orchestrator == nil {
-		return true, ""
+		hasEnabled := false
+		for _, c := range b.configService.ListCameras() {
+			if c.Enabled {
+				hasEnabled = true
+				break
+			}
+		}
+		return readinessWithNilOrchestrator(hasEnabled)
 	}
 
 	return evalCaptureReadiness(grace, minStale, b.orchestrator.GetStatus(), time.Now())

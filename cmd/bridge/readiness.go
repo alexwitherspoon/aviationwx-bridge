@@ -7,6 +7,15 @@ import (
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/scheduler"
 )
 
+// readinessWithNilOrchestrator implements /readyz when the orchestrator was never started
+// (e.g. init failure): not-ready if any camera is enabled, since capture cannot run.
+func readinessWithNilOrchestrator(hasEnabledCameras bool) (bool, string) {
+	if hasEnabledCameras {
+		return false, "orchestrator not initialized"
+	}
+	return true, ""
+}
+
 // evalCaptureReadiness implements /readyz camera checks. now is injectable for tests.
 //
 // grace: no staleness checks until orchestrator uptime exceeds this.

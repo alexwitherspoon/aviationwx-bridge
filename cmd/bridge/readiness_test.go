@@ -8,6 +8,17 @@ import (
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/scheduler"
 )
 
+func TestReadinessWithNilOrchestrator(t *testing.T) {
+	ok, msg := readinessWithNilOrchestrator(false)
+	if !ok || msg != "" {
+		t.Fatalf("no enabled cameras: want ready; ok=%v msg=%q", ok, msg)
+	}
+	ok, msg = readinessWithNilOrchestrator(true)
+	if ok || msg != "orchestrator not initialized" {
+		t.Fatalf("enabled cameras, no orchestrator: want not ready; ok=%v msg=%q", ok, msg)
+	}
+}
+
 func TestEvalCaptureReadiness(t *testing.T) {
 	grace := 10 * time.Minute
 	minStale := 15 * time.Minute

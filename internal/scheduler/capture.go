@@ -199,6 +199,25 @@ func (w *CaptureWorker) run() {
 			if busy {
 				continue
 			}
+			// Match ticker-path protections: do not run deferred capture while paused or in backoff.
+			if w.queue.IsCapturePaused() {
+				continue
+			}
+			w.mu.RLock()
+			nextWake := w.state.NextAttempt
+			w.mu.RUnlock()
+			if time.Now().Before(nextWake) {
+				d := time.Until(nextWake)
+				if d > 0 {
+					time.AfterFunc(d, func() {
+						select {
+						case w.wakeCapture <- struct{}{}:
+						default:
+						}
+					})
+				}
+				continue
+			}
 			w.capture()
 
 		case <-ticker.C:
@@ -244,6 +263,13 @@ func (w *CaptureWorker) run() {
 
 		case <-w.queue.ResumeCapture():
 			w.logger.Info("Capture resumed", "camera", w.camera.ID())
+			// Retry a deferred capture that may have skipped while paused (wake path).
+			if w.hasPendingCapture() {
+				select {
+				case w.wakeCapture <- struct{}{}:
+				default:
+				}
+			}
 		}
 	}
 }

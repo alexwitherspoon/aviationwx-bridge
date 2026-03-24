@@ -37,8 +37,9 @@ type Server struct {
 
 // ServerConfig configures the web server
 type ServerConfig struct {
-	ConfigService       *config.Service
-	GetStatus           func() interface{}
+	ConfigService *config.Service
+	GetStatus     func() interface{}
+	// GetCaptureReadiness, if non-nil, backs GET /readyz for host-side capture health checks (no auth).
 	GetCaptureReadiness func() (ok bool, reason string)
 	TestCamera          func(camConfig config.Camera) ([]byte, error)
 	TestUpload          func(uploadConfig config.Upload) error

@@ -817,7 +817,7 @@ func (b *Bridge) getStatus() interface{} {
 // getCaptureReadiness implements /readyz: reports not-ready (503) when enabled cameras have no recent successful capture.
 // Uses AVIATIONWX_READYZ_GRACE_SECONDS (default 600) after orchestrator start before enforcing staleness,
 // and AVIATIONWX_READYZ_STALE_SECONDS (default 900) as a minimum staleness window; per-camera threshold is
-// max(stale, 3×capture interval) so long-interval cameras are not flagged incorrectly.
+// max(stale, 3*capture interval) so long-interval cameras are not flagged incorrectly.
 func (b *Bridge) getCaptureReadiness() (bool, string) {
 	grace := envDurationSeconds("AVIATIONWX_READYZ_GRACE_SECONDS", 600)
 	minStale := envDurationSeconds("AVIATIONWX_READYZ_STALE_SECONDS", 900)

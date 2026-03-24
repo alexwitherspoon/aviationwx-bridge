@@ -180,6 +180,7 @@
                                 Camera timestamps will be interpreted in this timezone and converted to UTC.
                                 Click Save to apply changes.
                             </p>
+                            <p id="timezoneUnsavedHint" class="form-help" style="display:none;color:var(--color-warning);">Unsaved changes — click Save timezone to apply.</p>
                         </div>
                         <div style="margin-top: var(--space-md);">
                             <button type="button" class="btn btn-primary" onclick="saveTimezone()">Save timezone</button>
@@ -207,13 +208,14 @@
                     <div class="card-body">
                         <div class="form-group">
                             <label for="webPassword">Password</label>
-                            <input type="password" id="webPassword" class="form-control" placeholder="••••••••">
+                            <input type="password" id="webPassword" class="form-control" placeholder="••••••••" oninput="markWebConsoleDirty()">
                             <p class="form-help">
                                 Change the password for the web console. 
                                 Contact: <a href="mailto:contact@aviationwx.org">contact@aviationwx.org</a> for SFTP credentials.
                             </p>
+                            <p id="webConsoleUnsavedHint" class="form-help" style="display:none;color:var(--color-warning);">Unsaved changes — click Save password to apply.</p>
                         </div>
-                        <button class="btn btn-primary" onclick="saveWebSettings()">Save Password</button>
+                        <button type="button" class="btn btn-primary" onclick="saveWebSettings()">Save password</button>
                     </div>
                 </div>
 
@@ -225,7 +227,7 @@
                     <div class="card-body">
                         <div class="form-group">
                             <label for="maxConcurrentUploads">Concurrent Uploads</label>
-                            <select id="maxConcurrentUploads" class="form-control">
+                            <select id="maxConcurrentUploads" class="form-control" onchange="markUploadSettingsDirty()">
                                 <option value="1">1 (Slowest connection)</option>
                                 <option value="2" selected>2 (Default - recommended)</option>
                                 <option value="3">3 (Faster connection)</option>
@@ -238,7 +240,7 @@
                         </div>
                         <div class="form-group">
                             <label for="maxConcurrentCaptures">Concurrent Captures</label>
-                            <select id="maxConcurrentCaptures" class="form-control">
+                            <select id="maxConcurrentCaptures" class="form-control" onchange="markUploadSettingsDirty()">
                                 <option value="1" selected>1 (Recommended for Pi Zero 2 W)</option>
                                 <option value="2">2</option>
                                 <option value="3">3</option>
@@ -256,7 +258,7 @@
                         </div>
                         <div class="form-group">
                             <label for="updateChannel">Update Channel</label>
-                            <select id="updateChannel" class="form-control">
+                            <select id="updateChannel" class="form-control" onchange="markUploadSettingsDirty()">
                                 <option value="latest" selected>Latest (Stable releases - recommended)</option>
                                 <option value="edge">Edge (Development builds - for testing)</option>
                             </select>
@@ -267,19 +269,20 @@
                         </div>
                         <div class="form-group">
                             <label for="timeoutConnect">Connection Timeout (seconds)</label>
-                            <input type="number" id="timeoutConnect" class="form-control" min="10" max="300" value="60">
+                            <input type="number" id="timeoutConnect" class="form-control" min="10" max="300" value="60" oninput="markUploadSettingsDirty()">
                             <p class="form-help">
                                 How long to wait for SFTP server connection. Default: 60 seconds.
                             </p>
                         </div>
                         <div class="form-group">
                             <label for="timeoutUpload">Upload Timeout (seconds)</label>
-                            <input type="number" id="timeoutUpload" class="form-control" min="60" max="600" value="300">
+                            <input type="number" id="timeoutUpload" class="form-control" min="60" max="600" value="300" oninput="markUploadSettingsDirty()">
                             <p class="form-help">
                                 Maximum time for a single file upload. Default: 300 seconds (5 minutes).
                             </p>
                         </div>
-                        <button class="btn btn-primary" onclick="saveGlobalSettings()">Save Settings</button>
+                        <p id="uploadSettingsUnsavedHint" class="form-help" style="display:none;color:var(--color-warning);">Unsaved changes — click Save settings to apply.</p>
+                        <button type="button" class="btn btn-primary" onclick="saveGlobalSettings()">Save settings</button>
                     </div>
                 </div>
 
@@ -332,6 +335,9 @@
                         <h2>Log Filters</h2>
                     </div>
                     <div class="card-body">
+                        <p class="form-help" style="margin-bottom: var(--space-md);">
+                            Filters apply only in this browser session; they are not stored on the bridge.
+                        </p>
                         <div class="form-group">
                             <label>
                                 <input type="checkbox" id="filterError" checked onchange="updateLogFilters()">

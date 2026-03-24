@@ -9,8 +9,10 @@ let status = null;
 let previousCameraIds = null;
 let cameras = [];
 let timeUpdateInterval = null;
-/** True when the timezone selector differs from last applied server value (unsaved edit). */
+/** Unsaved local edits — skip syncing those form sections from the server until Save. */
 let timezoneDirty = false;
+let webConsoleDirty = false;
+let uploadSettingsDirty = false;
 
 // Timezone list (IANA timezones for US and common international)
 const TIMEZONES = [
@@ -610,8 +612,29 @@ function formatTime(date, timezone) {
     }
 }
 
+function updateSettingsUnsavedHints() {
+    const set = (id, dirty) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = dirty ? 'block' : 'none';
+    };
+    set('timezoneUnsavedHint', timezoneDirty);
+    set('webConsoleUnsavedHint', webConsoleDirty);
+    set('uploadSettingsUnsavedHint', uploadSettingsDirty);
+}
+
 function markTimezoneDirty() {
     timezoneDirty = true;
+    updateSettingsUnsavedHints();
+}
+
+function markWebConsoleDirty() {
+    webConsoleDirty = true;
+    updateSettingsUnsavedHints();
+}
+
+function markUploadSettingsDirty() {
+    uploadSettingsDirty = true;
+    updateSettingsUnsavedHints();
 }
 
 async function saveTimezone() {
@@ -622,6 +645,7 @@ async function saveTimezone() {
             body: JSON.stringify({ timezone }),
         });
         timezoneDirty = false;
+        updateSettingsUnsavedHints();
         updateTimeDisplay();
         showNotification('✅ Timezone updated! Workers reloaded automatically.', 'success');
     } catch (err) {
@@ -1134,8 +1158,10 @@ async function saveWebSettings() {
                 },
             }),
         });
-        alert('Password updated successfully');
         document.getElementById('webPassword').value = '';
+        webConsoleDirty = false;
+        updateSettingsUnsavedHints();
+        showNotification('✅ Password updated successfully.', 'success');
         await loadConfig();
     } catch (err) {
         alert('Failed to save: ' + err.message);
@@ -1145,7 +1171,11 @@ async function saveWebSettings() {
 // Global Settings (concurrent uploads, update channel, timeouts)
 async function loadGlobalSettings() {
     if (!config) return;
-    
+    if (uploadSettingsDirty) {
+        updateSettingsUnsavedHints();
+        return;
+    }
+
     // Load max concurrent uploads (from top-level, not nested in global)
     const maxConcurrent = config.max_concurrent_uploads || 2;
     const maxConcurrentSelect = document.getElementById('maxConcurrentUploads');
@@ -1180,6 +1210,8 @@ async function loadGlobalSettings() {
     if (timeoutUploadInput) {
         timeoutUploadInput.value = timeoutUpload;
     }
+
+    updateSettingsUnsavedHints();
 }
 
 async function saveGlobalSettings() {
@@ -1224,7 +1256,10 @@ async function saveGlobalSettings() {
             method: 'PUT',
             body: JSON.stringify(updatedConfig),
         });
-        
+
+        uploadSettingsDirty = false;
+        updateSettingsUnsavedHints();
+
         showNotification(
             '✅ Settings saved. Upload/capture limits, SFTP timeouts, and update channel apply immediately. Restart the bridge only if you changed the web console listen port.',
             'success'
@@ -1279,6 +1314,10 @@ async function wizardStep2() {
             method: 'PUT',
             body: JSON.stringify({ timezone }),
         });
+        timezoneDirty = false;
+        const tzMain = document.getElementById('timezone');
+        if (tzMain) tzMain.value = timezone;
+        updateSettingsUnsavedHints();
     } catch (err) {
         console.error('Failed to set timezone:', err);
     }

@@ -77,10 +77,11 @@ run_tests_native() {
     log_success "All Go tests passed"
 
     if [ -f package-lock.json ] && command -v npm &> /dev/null; then
-        log_info "Running npm ci and shell (Bats) tests..."
+        log_info "Running npm ci, JS unit tests, and shell (Bats) tests..."
         npm ci
+        npm run test:js
         npm run test:sh
-        log_success "Shell (Bats) tests passed"
+        log_success "JS and shell (Bats) tests passed"
     else
         log_warn "Skipping npm/Bats tests (npm or package-lock.json missing)"
     fi

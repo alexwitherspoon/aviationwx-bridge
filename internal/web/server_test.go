@@ -254,6 +254,50 @@ func testServerConfigService(t *testing.T) *config.Service {
 	return svc
 }
 
+func TestAddCamera_DuplicateUploadCredentialsHTTP409(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	camJSON := func(id string) string {
+		return fmt.Sprintf(`{
+			"id": %q,
+			"name": "Cam",
+			"type": "http",
+			"enabled": true,
+			"snapshot_url": "http://example.com/s.jpg",
+			"capture_interval_seconds": 60,
+			"upload": {
+				"host": "upload.example.com",
+				"port": 2222,
+				"username": "shared-sftp-user",
+				"password": "p"
+			}
+		}`, id)
+	}
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(body))
+		req.SetBasicAuth("admin", svc.GetWebPassword())
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		server.GetMux().ServeHTTP(w, req)
+		return w
+	}
+	if w := post(camJSON("cam-first")); w.Code != http.StatusCreated {
+		t.Fatalf("first POST: %d %s", w.Code, w.Body.String())
+	}
+	if w := post(camJSON("cam-second")); w.Code != http.StatusConflict {
+		t.Fatalf("duplicate upload: want 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestCameraAddUpdateDelete tests full camera lifecycle
 func TestCameraAddUpdateDelete(t *testing.T) {
 	tmpDir := t.TempDir()

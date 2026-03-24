@@ -223,6 +223,12 @@ func (s *Service) AddCamera(cam Camera) error {
 		return fmt.Errorf("camera already exists: %s", cam.ID)
 	}
 
+	if cam.Upload != nil {
+		if err := s.checkDuplicateUpload("", cam.Upload); err != nil {
+			return err
+		}
+	}
+
 	// Save to disk first (fail-safe)
 	if err := s.saveCameraFile(cam); err != nil {
 		return err
@@ -258,6 +264,12 @@ func (s *Service) UpdateCamera(id string, fn func(*Camera) error) error {
 
 	// Ensure ID doesn't change
 	updated.ID = id
+
+	if updated.Upload != nil {
+		if err := s.checkDuplicateUpload(id, updated.Upload); err != nil {
+			return err
+		}
+	}
 
 	// Save to disk first (fail-safe)
 	if err := s.saveCameraFile(updated); err != nil {

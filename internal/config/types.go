@@ -67,8 +67,8 @@ type Upload struct {
 	Protocol string `json:"protocol,omitempty"` // "sftp" (default); "ftps"/"ftp" migrated to SFTP
 	Host     string `json:"host"`               // Default: upload.aviationwx.org
 	Port     int    `json:"port,omitempty"`     // Default: 2222 (aviationwx.org SFTP)
-	Username string `json:"username"`           // Upload username (provided by aviationwx.org)
-	Password string `json:"password"`           // Upload password (provided by aviationwx.org)
+	Username string `json:"username"`           // SFTP username for this camera only (from aviationwx.org; unique per camera for a given host:port)
+	Password string `json:"password"`           // SFTP password for this camera (from aviationwx.org)
 
 	BasePath string `json:"base_path,omitempty"` // Base directory for uploads (default: /files)
 

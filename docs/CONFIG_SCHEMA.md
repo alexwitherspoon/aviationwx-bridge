@@ -116,7 +116,7 @@ Controls optional image resizing/quality for bandwidth management.
 
 ### Camera Upload Object
 
-Each camera has its own upload credentials. SFTP only (protocol "ftps"/"ftp" in config are migrated to SFTP).
+Each camera has its own upload credentials. SFTP only (protocol "ftps"/"ftp" in config are migrated to SFTP). Two cameras may not share the same SFTP identity (same `host`, `port`, and `username`); the bridge rejects duplicates when adding or updating cameras.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,6 +79,133 @@ func TestAddCamera(t *testing.T) {
 	}
 	if retrieved.Name != "Test Camera" {
 		t.Errorf("Expected name 'Test Camera', got %s", retrieved.Name)
+	}
+}
+
+func TestAddCamera_DuplicateUploadCredentials(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, _ := NewService(tmpDir)
+	u := &Upload{
+		Protocol: "sftp",
+		Host:     "upload.aviationwx.org",
+		Port:     2222,
+		Username: "acct-one",
+		Password: "secret",
+	}
+	if err := svc.AddCamera(Camera{
+		ID:     "cam-1",
+		Name:   "One",
+		Type:   "http",
+		Upload: u,
+	}); err != nil {
+		t.Fatalf("first AddCamera: %v", err)
+	}
+	err := svc.AddCamera(Camera{
+		ID:   "cam-2",
+		Name: "Two",
+		Type: "http",
+		Upload: &Upload{
+			Protocol: "sftp",
+			Host:     "upload.aviationwx.org",
+			Port:     2222,
+			Username: "acct-one",
+			Password: "different",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for duplicate SFTP identity")
+	}
+	if !errors.Is(err, ErrDuplicateUploadCredentials) {
+		t.Fatalf("want ErrDuplicateUploadCredentials, got %v", err)
+	}
+}
+
+func TestUpdateCamera_AllowedWhenUploadUnchanged(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, _ := NewService(tmpDir)
+	if err := svc.AddCamera(Camera{
+		ID:   "cam-1",
+		Name: "One",
+		Type: "http",
+		Upload: &Upload{
+			Protocol: "sftp",
+			Host:     "upload.aviationwx.org",
+			Port:     2222,
+			Username: "u1",
+			Password: "p",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AddCamera(Camera{
+		ID:   "cam-2",
+		Name: "Two",
+		Type: "http",
+		Upload: &Upload{
+			Protocol: "sftp",
+			Host:     "upload.aviationwx.org",
+			Port:     2222,
+			Username: "u2",
+			Password: "p",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := svc.UpdateCamera("cam-2", func(c *Camera) error {
+		c.Name = "Renamed"
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("update with same upload identity: %v", err)
+	}
+}
+
+func TestUpdateCamera_DuplicateUploadCredentials(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, _ := NewService(tmpDir)
+	if err := svc.AddCamera(Camera{
+		ID:   "cam-1",
+		Name: "One",
+		Type: "http",
+		Upload: &Upload{
+			Protocol: "sftp",
+			Host:     "upload.aviationwx.org",
+			Port:     2222,
+			Username: "u1",
+			Password: "p",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AddCamera(Camera{
+		ID:   "cam-2",
+		Name: "Two",
+		Type: "http",
+		Upload: &Upload{
+			Protocol: "sftp",
+			Host:     "upload.aviationwx.org",
+			Port:     2222,
+			Username: "u2",
+			Password: "p",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := svc.UpdateCamera("cam-2", func(c *Camera) error {
+		c.Upload = &Upload{
+			Protocol: "sftp",
+			Host:     "upload.aviationwx.org",
+			Port:     2222,
+			Username: "u1",
+			Password: "p",
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected duplicate upload error")
+	}
+	if !errors.Is(err, ErrDuplicateUploadCredentials) {
+		t.Fatalf("want ErrDuplicateUploadCredentials, got %v", err)
 	}
 }
 

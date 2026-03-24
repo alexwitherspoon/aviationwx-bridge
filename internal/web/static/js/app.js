@@ -856,22 +856,23 @@ function getCameraFormHtml(cam = null) {
             </div>
             
             <div class="form-section">
-                <div class="form-section-title">Upload Credentials</div>
+                <div class="form-section-title">SFTP upload (this camera)</div>
                 <p class="form-help" style="margin-bottom: var(--space-md)">
-                    Contact <a href="mailto:contact@aviationwx.org">contact@aviationwx.org</a> to get upload credentials for your camera.
+                    Request a dedicated SFTP account for this camera from <a href="mailto:contact@aviationwx.org">contact@aviationwx.org</a>.
+                    Do not reuse the same host, username, and port for another camera — each camera must have its own credentials.
                 </p>
                 
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="uploadUser">Username</label>
+                        <label for="uploadUser">SFTP username (this camera)</label>
                         <input type="text" id="uploadUser" class="form-control" 
                                value="${cam?.upload?.username || ''}"
-                               required placeholder="your-username">
+                               required placeholder="e.g. account assigned to this camera">
                     </div>
                     <div class="form-group">
-                        <label for="uploadPass">Password</label>
-                        <input type="password" id="uploadPass" class="form-control" 
-                               ${isEdit ? 'placeholder="••••••••"' : 'required placeholder="your-password"'}>
+                        <label for="uploadPass">SFTP password (this camera)</label>
+                        <input type="text" id="uploadPass" class="form-control" autocomplete="off" spellcheck="false"
+                               ${isEdit ? 'placeholder="Leave blank to keep current password"' : 'required placeholder="Password for this camera account"'}>
                     </div>
                 </div>
                 
@@ -955,6 +956,17 @@ function updateImagePreset() {
 
 async function saveCamera(event, existingId = null) {
     event.preventDefault();
+
+    const uploadHost = document.getElementById('uploadHost').value || 'upload.aviationwx.org';
+    const uploadPort = parseInt(document.getElementById('uploadPort').value, 10) || 2222;
+    const uploadUser = document.getElementById('uploadUser').value;
+    if (typeof window.findConflictingCameraId === 'function') {
+        const conflictId = window.findConflictingCameraId(cameras, existingId, uploadHost, uploadPort, uploadUser);
+        if (conflictId) {
+            alert(`This SFTP account (host, port, and username) is already used by camera "${conflictId}". Each camera must have its own SFTP credentials from aviationwx.org.`);
+            return;
+        }
+    }
     
     const type = document.getElementById('camType').value;
     const basePath = document.getElementById('uploadBasePath')?.value || '/files';
@@ -966,8 +978,8 @@ async function saveCamera(event, existingId = null) {
         capture_interval_seconds: parseInt(document.getElementById('camInterval').value, 10),
         upload: {
             protocol: 'sftp',
-            host: document.getElementById('uploadHost').value || 'upload.aviationwx.org',
-            port: parseInt(document.getElementById('uploadPort').value, 10) || 2222,
+            host: uploadHost,
+            port: uploadPort,
             username: document.getElementById('uploadUser').value,
             password: document.getElementById('uploadPass').value || undefined,
             base_path: basePath,

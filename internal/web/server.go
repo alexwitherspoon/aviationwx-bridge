@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -301,6 +302,10 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 
 	// Add camera via ConfigService
 	if err := s.configService.AddCamera(cam); err != nil {
+		if errors.Is(err, config.ErrDuplicateUploadCredentials) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		s.log.Error("Failed to add camera via API",
 			"camera", cam.ID,
 			"error", err,
@@ -397,6 +402,10 @@ func (s *Server) updateCamera(w http.ResponseWriter, r *http.Request, cameraID s
 	})
 
 	if err != nil {
+		if errors.Is(err, config.ErrDuplicateUploadCredentials) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, "Failed to update camera: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -4,7 +4,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert';
-import { buildCameraConfigFromFormValues } from './form-utils.js';
+import { buildCameraConfigFromFormValues, uploadCredentialKey, findConflictingCameraId } from './form-utils.js';
 
 test('buildCameraConfigFromFormValues returns null when type is missing', () => {
     assert.strictEqual(buildCameraConfigFromFormValues({}), null);
@@ -117,4 +117,32 @@ test('buildCameraConfigFromFormValues omits profile_token when empty', () => {
         onvif_endpoint: 'http://192.168.1.100/onvif',
     });
     assert.strictEqual(result.onvif.profile_token, undefined);
+});
+
+test('uploadCredentialKey matches server normalization', () => {
+    assert.strictEqual(
+        uploadCredentialKey('  Upload.AVIATIONWX.org ', 2222, '  cam-a  '),
+        'upload.aviationwx.org:2222:cam-a',
+    );
+    assert.strictEqual(uploadCredentialKey('h', 0, 'u'), 'h:2222:u');
+    assert.strictEqual(uploadCredentialKey('', 2222, 'u'), '');
+});
+
+test('findConflictingCameraId detects duplicate SFTP identity', () => {
+    const list = [
+        { id: 'a', upload: { host: 'upload.aviationwx.org', port: 2222, username: 'u1' } },
+        { id: 'b', upload: { host: 'upload.aviationwx.org', port: 2222, username: 'u2' } },
+    ];
+    assert.strictEqual(
+        findConflictingCameraId(list, null, 'upload.aviationwx.org', 2222, 'u1'),
+        'a',
+    );
+    assert.strictEqual(
+        findConflictingCameraId(list, 'a', 'upload.aviationwx.org', 2222, 'u1'),
+        null,
+    );
+    assert.strictEqual(
+        findConflictingCameraId(list, null, 'upload.aviationwx.org', 2222, 'u3'),
+        null,
+    );
 });

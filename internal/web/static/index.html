@@ -46,7 +46,7 @@
                 <div id="setupBanner" class="banner banner-info" style="display: none;">
                     <div class="banner-content">
                         <h3>Welcome to AviationWX.org Bridge!</h3>
-                        <p>Let's set up your first camera. You'll need your SFTP credentials from aviationwx.org</p>
+                        <p>Let's set up your first camera. Each camera needs its own SFTP account from aviationwx.org.</p>
                         <button class="btn btn-primary" onclick="showSetupWizard()">Start Setup</button>
                     </div>
                 </div>
@@ -208,7 +208,7 @@
                     <div class="card-body">
                         <div class="form-group">
                             <label for="webPassword">Password</label>
-                            <input type="password" id="webPassword" class="form-control" placeholder="••••••••" oninput="markWebConsoleDirty()">
+                            <input type="text" id="webPassword" class="form-control" placeholder="New password" autocomplete="new-password" spellcheck="false" oninput="markWebConsoleDirty()">
                             <p class="form-help">
                                 Change the password for the web console. 
                                 Contact: <a href="mailto:contact@aviationwx.org">contact@aviationwx.org</a> for SFTP credentials.
@@ -383,9 +383,11 @@
     </div>
 
     <script type="module">
-        import { buildCameraConfigFromFormValues } from '/js/form-utils.js';
+        import { buildCameraConfigFromFormValues, uploadCredentialKey, findConflictingCameraId } from '/js/form-utils.js';
         import { shouldRefreshPreview } from '/js/preview-refresh.js';
         window.buildCameraConfigFromFormValues = buildCameraConfigFromFormValues;
+        window.uploadCredentialKey = uploadCredentialKey;
+        window.findConflictingCameraId = findConflictingCameraId;
         window.shouldRefreshPreview = shouldRefreshPreview;
     </script>
     <script src="/js/app.js" defer></script>

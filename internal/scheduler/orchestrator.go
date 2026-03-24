@@ -289,8 +289,17 @@ func (o *Orchestrator) SetMaxConcurrentCaptures(n int) {
 	o.config.MaxConcurrentCaptures = n
 	g := o.captureGate
 	o.mu.Unlock()
+	var prevLimit int
 	if g != nil {
+		g.mu.Lock()
+		prevLimit = g.limit
+		g.mu.Unlock()
 		g.SetLimit(n)
+	}
+	if g != nil && n > prevLimit {
+		for i := 0; i < n-prevLimit; i++ {
+			o.notifyCaptureGateReleased()
+		}
 	}
 }
 

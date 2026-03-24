@@ -1209,12 +1209,15 @@ async function loadGlobalSettings() {
         maxConcurrentSelect.value = maxConcurrent.toString();
     }
 
-    const maxCaptures = (typeof config.max_concurrent_captures === 'number' && config.max_concurrent_captures >= 1 && config.max_concurrent_captures <= 10)
-        ? config.max_concurrent_captures
-        : 2;
     const maxCapturesSelect = document.getElementById('maxConcurrentCaptures');
     if (maxCapturesSelect) {
-        maxCapturesSelect.value = maxCaptures.toString();
+        if (config.max_concurrent_captures_auto === true) {
+            maxCapturesSelect.value = '0';
+        } else {
+            const n = config.max_concurrent_captures;
+            const maxCaptures = (typeof n === 'number' && n >= 1 && n <= 10) ? n : 2;
+            maxCapturesSelect.value = maxCaptures.toString();
+        }
     }
     
     // Load update channel
@@ -1242,7 +1245,6 @@ async function loadGlobalSettings() {
 
 async function saveGlobalSettings() {
     const maxConcurrent = parseInt(document.getElementById('maxConcurrentUploads').value);
-    const maxCaptures = parseInt(document.getElementById('maxConcurrentCaptures').value);
     const updateChannel = document.getElementById('updateChannel').value;
     const timeoutConnect = parseInt(document.getElementById('timeoutConnect').value);
     const timeoutUpload = parseInt(document.getElementById('timeoutUpload').value);
@@ -1252,8 +1254,10 @@ async function saveGlobalSettings() {
         return;
     }
 
-    if (maxCaptures < 1 || maxCaptures > 10) {
-        alert('Concurrent captures must be between 1 and 10');
+    const maxCapturesRaw = document.getElementById('maxConcurrentCaptures').value;
+    const maxCaptures = maxCapturesRaw === '0' ? 0 : parseInt(maxCapturesRaw, 10);
+    if (maxCaptures !== 0 && (maxCaptures < 1 || maxCaptures > 10 || Number.isNaN(maxCaptures))) {
+        alert('Concurrent captures must be Auto (profiled) or between 1 and 10');
         return;
     }
     

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -34,6 +35,24 @@ func normalizeUploadForAPI(u *config.Upload) {
 		u.Host = "upload.aviationwx.org"
 	}
 	u.Host = strings.ToLower(u.Host)
+}
+
+var allowedCameraTypes = map[string]struct{}{
+	"http":  {},
+	"onvif": {},
+	"rtsp":  {},
+}
+
+// normalizeCameraType trims, lowercases, and validates camera type for persistence (factory expects lowercase).
+func normalizeCameraType(t string) (string, error) {
+	t = strings.ToLower(strings.TrimSpace(t))
+	if t == "" {
+		return "", errors.New("camera type is required")
+	}
+	if _, ok := allowedCameraTypes[t]; !ok {
+		return "", fmt.Errorf("unsupported camera type %q (use http, onvif, or rtsp)", t)
+	}
+	return t, nil
 }
 
 // validateONVIFCameraForPost ensures ONVIF cameras have a usable endpoint and credentials after normalization.
@@ -213,23 +232,57 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		global := s.configService.GetGlobal()
-		// When top-level is unset (<=0), expose EffectiveMaxConcurrentCaptures so the UI matches runtime,
-		// including when only global.global.max_concurrent_captures is set on disk.
-		// Do not overwrite a positive top-level value.
-		if global.MaxConcurrentCaptures <= 0 {
-			global.MaxConcurrentCaptures = config.EffectiveMaxConcurrentCaptures(global)
+		autoMCC := global.MaxConcurrentCaptures <= 0 &&
+			(global.Global == nil || global.Global.MaxConcurrentCaptures <= 0)
+		effectiveMCC := global.MaxConcurrentCaptures
+		if effectiveMCC <= 0 {
+			effectiveMCC = config.EffectiveMaxConcurrentCaptures(global)
 		}
+		raw, err := json.Marshal(global)
+		if err != nil {
+			http.Error(w, "Failed to encode config", http.StatusInternalServerError)
+			return
+		}
+		var out map[string]interface{}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			http.Error(w, "Failed to encode config", http.StatusInternalServerError)
+			return
+		}
+		out["max_concurrent_captures"] = effectiveMCC
+		out["max_concurrent_captures_auto"] = autoMCC
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(global)
+		json.NewEncoder(w).Encode(out)
 
 	case http.MethodPut:
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+		var keyPresence map[string]json.RawMessage
+		if err := json.Unmarshal(bodyBytes, &keyPresence); err != nil {
+			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
 		var updates config.GlobalSettings
-		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		if err := json.Unmarshal(bodyBytes, &updates); err != nil {
 			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		err := s.configService.UpdateGlobal(func(g *config.GlobalSettings) error {
+		if raw, ok := keyPresence["max_concurrent_captures"]; ok {
+			var ptr *int
+			if err := json.Unmarshal(raw, &ptr); err != nil {
+				http.Error(w, "max_concurrent_captures: invalid value", http.StatusBadRequest)
+				return
+			}
+			if ptr != nil && *ptr != 0 && (*ptr < 1 || *ptr > 10) {
+				http.Error(w, fmt.Sprintf("max_concurrent_captures must be 0 (auto), null, or 1–10, got %d", *ptr), http.StatusBadRequest)
+				return
+			}
+		}
+
+		err = s.configService.UpdateGlobal(func(g *config.GlobalSettings) error {
 			// Nested sections first (full replacements from JSON)
 			if updates.Timezone != "" {
 				g.Timezone = updates.Timezone
@@ -257,12 +310,23 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				}
 				g.Global.MaxConcurrentUploads = updates.MaxConcurrentUploads
 			}
-			if updates.MaxConcurrentCaptures != 0 {
-				g.MaxConcurrentCaptures = updates.MaxConcurrentCaptures
-				if g.Global == nil {
-					g.Global = &config.Global{}
+			if raw, ok := keyPresence["max_concurrent_captures"]; ok {
+				var ptr *int
+				if err := json.Unmarshal(raw, &ptr); err != nil {
+					return err
 				}
-				g.Global.MaxConcurrentCaptures = updates.MaxConcurrentCaptures
+				if ptr == nil || *ptr == 0 {
+					g.MaxConcurrentCaptures = 0
+					if g.Global != nil {
+						g.Global.MaxConcurrentCaptures = 0
+					}
+				} else {
+					g.MaxConcurrentCaptures = *ptr
+					if g.Global == nil {
+						g.Global = &config.Global{}
+					}
+					g.Global.MaxConcurrentCaptures = *ptr
+				}
 			}
 			if updates.TimeoutConnectSeconds != 0 {
 				g.TimeoutConnectSeconds = updates.TimeoutConnectSeconds
@@ -324,6 +388,12 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Display name is required", http.StatusBadRequest)
 		return
 	}
+	camType, err := normalizeCameraType(cam.Type)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	cam.Type = camType
 	cam.ID = ""
 	if cam.Upload == nil {
 		http.Error(w, "Upload credentials are required", http.StatusBadRequest)
@@ -347,7 +417,7 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.EqualFold(strings.TrimSpace(cam.Type), "onvif") {
+	if cam.Type == "onvif" {
 		if err := validateONVIFCameraForPost(&cam); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -431,6 +501,17 @@ func (s *Server) updateCamera(w http.ResponseWriter, r *http.Request, cameraID s
 	if err != nil {
 		http.Error(w, "Camera not found", http.StatusNotFound)
 		return
+	}
+
+	if tt := strings.TrimSpace(updates.Type); tt != "" {
+		nt, errNorm := normalizeCameraType(tt)
+		if errNorm != nil {
+			http.Error(w, errNorm.Error(), http.StatusBadRequest)
+			return
+		}
+		updates.Type = nt
+	} else {
+		updates.Type = existing.Type
 	}
 
 	if updates.Upload != nil {

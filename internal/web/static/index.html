@@ -208,7 +208,10 @@
                     <div class="card-body">
                         <div class="form-group">
                             <label for="webPassword">Password</label>
-                            <input type="text" id="webPassword" class="form-control" placeholder="New password" autocomplete="new-password" spellcheck="false" oninput="markWebConsoleDirty()">
+                            <div class="password-input-row">
+                                <input type="password" id="webPassword" class="form-control" placeholder="New password" autocomplete="new-password" spellcheck="false" oninput="markWebConsoleDirty()">
+                                <button type="button" class="btn btn-secondary btn-sm" id="webPasswordToggle" aria-pressed="false" aria-label="Show password" onclick="togglePasswordField('webPassword', 'webPasswordToggle')">Show</button>
+                            </div>
                             <p class="form-help">
                                 Change the password for the web console. 
                                 Contact: <a href="mailto:contact@aviationwx.org">contact@aviationwx.org</a> for SFTP credentials.

@@ -15,11 +15,22 @@
 
 set -euo pipefail
 
+# Coerce env overrides to non-negative integers; invalid values use defaults (avoids set -e exits on bad arithmetic).
+_nonneg_int() {
+	local val="${1:-}"
+	local def="$2"
+	if [[ -z "$val" || ! "$val" =~ ^[0-9]+$ ]]; then
+		echo "$def"
+	else
+		echo "$val"
+	fi
+}
+
 readonly CONTAINER_NAME="${CONTAINER_NAME:-aviationwx-org-bridge}"
 readonly READYZ_URL="${AVIATIONWX_CAPTURE_RESTART_URL:-http://127.0.0.1:1229/readyz}"
-readonly CONSECUTIVE_THRESHOLD="${AVIATIONWX_CAPTURE_RESTART_CONSECUTIVE:-5}"
-readonly MIN_INTERVAL_SEC="${AVIATIONWX_CAPTURE_RESTART_MIN_INTERVAL_SEC:-3600}"
-readonly MAX_PER_24H="${AVIATIONWX_CAPTURE_RESTART_MAX_PER_24H:-6}"
+readonly CONSECUTIVE_THRESHOLD="$(_nonneg_int "${AVIATIONWX_CAPTURE_RESTART_CONSECUTIVE:-}" 5)"
+readonly MIN_INTERVAL_SEC="$(_nonneg_int "${AVIATIONWX_CAPTURE_RESTART_MIN_INTERVAL_SEC:-}" 3600)"
+readonly MAX_PER_24H="$(_nonneg_int "${AVIATIONWX_CAPTURE_RESTART_MAX_PER_24H:-}" 6)"
 
 readonly DATA_DIR="${AVIATIONWX_DATA_DIR:-/data/aviationwx}"
 readonly STATE_FILE="${DATA_DIR}/capture-restart-state.json"

@@ -43,7 +43,7 @@ func TestAddCamera_AutoIDFromNameAndUniqueness(t *testing.T) {
 			Password: "p",
 		}
 	}
-	if err := svc.AddCamera(Camera{
+	if _, err := svc.AddCamera(Camera{
 		Name:   "Tower North",
 		Type:   "http",
 		Upload: u("a"),
@@ -54,7 +54,7 @@ func TestAddCamera_AutoIDFromNameAndUniqueness(t *testing.T) {
 	if c1 == nil || c1.ID != "tower-north" {
 		t.Fatalf("expected id tower-north, got %+v", c1)
 	}
-	if err := svc.AddCamera(Camera{
+	if _, err := svc.AddCamera(Camera{
 		Name:   "Tower North",
 		Type:   "http",
 		Upload: u("b"),

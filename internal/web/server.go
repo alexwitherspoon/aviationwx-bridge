@@ -304,8 +304,9 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 		cam.ONVIF.Endpoint = camera.NormalizeONVIFEndpoint(cam.ONVIF.Endpoint)
 	}
 
-	// Add camera via ConfigService
-	if err := s.configService.AddCamera(cam); err != nil {
+	// Add camera via ConfigService (returns persisted camera with generated id)
+	added, err := s.configService.AddCamera(cam)
+	if err != nil {
 		if errors.Is(err, config.ErrDuplicateUploadCredentials) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
@@ -318,12 +319,12 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.log.Info("Camera added via API", "camera", cam.ID, "type", cam.Type)
+	s.log.Info("Camera added via API", "camera", added.ID, "type", added.Type)
 
 	global := s.configService.GetGlobal()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(s.cameraToMap(cam, global.Timezone))
+	json.NewEncoder(w).Encode(s.cameraToMap(added, global.Timezone))
 }
 
 func (s *Server) handleCamera(w http.ResponseWriter, r *http.Request) {

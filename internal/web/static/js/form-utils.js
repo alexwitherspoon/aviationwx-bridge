@@ -81,11 +81,6 @@ export function uploadCredentialKey(host, port, username) {
 }
 
 /**
- * @param {Array<{id: string, upload?: {host?: string, port?: number, username?: string}}>} cameraList
- * @param {string|null|undefined} excludeId - camera id being edited (skipped)
- * @returns {string|null} id of another camera using the same SFTP identity, or null
- */
-/**
  * Derives a camera id from display name (matches server SlugCameraIDFromName).
  * @param {string|undefined} name
  * @returns {string}
@@ -118,6 +113,15 @@ export function slugCameraIdFromName(name) {
     return out;
 }
 
+/**
+ * Returns the id of another camera using the same SFTP identity, or null.
+ * @param {Array<{id: string, upload?: {host?: string, port?: number, username?: string}}>} cameraList
+ * @param {string|null|undefined} excludeId - camera id being edited (skipped)
+ * @param {string|undefined} host
+ * @param {number|string|undefined} port
+ * @param {string|undefined} username
+ * @returns {string|null}
+ */
 export function findConflictingCameraId(cameraList, excludeId, host, port, username) {
     const k = uploadCredentialKey(host, port, username);
     if (!k) {

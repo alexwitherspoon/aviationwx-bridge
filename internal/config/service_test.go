@@ -58,7 +58,7 @@ func TestAddCamera(t *testing.T) {
 		},
 	}
 
-	err := svc.AddCamera(cam)
+	_, err := svc.AddCamera(cam)
 	if err != nil {
 		t.Fatalf("AddCamera failed: %v", err)
 	}
@@ -82,6 +82,27 @@ func TestAddCamera(t *testing.T) {
 	}
 }
 
+func TestAddCamera_ReturnsPersistedCameraWithID(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, _ := NewService(tmpDir)
+	added, err := svc.AddCamera(Camera{
+		Name: "Hello Cam",
+		Type: "http",
+		Upload: &Upload{
+			Host:     "example.com",
+			Port:     2222,
+			Username: "u1",
+			Password: "p",
+		},
+	})
+	if err != nil {
+		t.Fatalf("AddCamera: %v", err)
+	}
+	if added.ID != "hello-cam" {
+		t.Fatalf("returned ID: want hello-cam, got %q", added.ID)
+	}
+}
+
 func TestAddCamera_DuplicateUploadCredentials(t *testing.T) {
 	tmpDir := t.TempDir()
 	svc, _ := NewService(tmpDir)
@@ -92,7 +113,7 @@ func TestAddCamera_DuplicateUploadCredentials(t *testing.T) {
 		Username: "acct-one",
 		Password: "secret",
 	}
-	if err := svc.AddCamera(Camera{
+	if _, err := svc.AddCamera(Camera{
 		ID:     "cam-1",
 		Name:   "One",
 		Type:   "http",
@@ -100,7 +121,7 @@ func TestAddCamera_DuplicateUploadCredentials(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("first AddCamera: %v", err)
 	}
-	err := svc.AddCamera(Camera{
+	_, err := svc.AddCamera(Camera{
 		ID:   "cam-2",
 		Name: "Two",
 		Type: "http",
@@ -123,7 +144,7 @@ func TestAddCamera_DuplicateUploadCredentials(t *testing.T) {
 func TestUpdateCamera_AllowedWhenUploadUnchanged(t *testing.T) {
 	tmpDir := t.TempDir()
 	svc, _ := NewService(tmpDir)
-	if err := svc.AddCamera(Camera{
+	if _, err := svc.AddCamera(Camera{
 		ID:   "cam-1",
 		Name: "One",
 		Type: "http",
@@ -137,7 +158,7 @@ func TestUpdateCamera_AllowedWhenUploadUnchanged(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.AddCamera(Camera{
+	if _, err := svc.AddCamera(Camera{
 		ID:   "cam-2",
 		Name: "Two",
 		Type: "http",
@@ -163,7 +184,7 @@ func TestUpdateCamera_AllowedWhenUploadUnchanged(t *testing.T) {
 func TestUpdateCamera_DuplicateUploadCredentials(t *testing.T) {
 	tmpDir := t.TempDir()
 	svc, _ := NewService(tmpDir)
-	if err := svc.AddCamera(Camera{
+	if _, err := svc.AddCamera(Camera{
 		ID:   "cam-1",
 		Name: "One",
 		Type: "http",
@@ -177,7 +198,7 @@ func TestUpdateCamera_DuplicateUploadCredentials(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.AddCamera(Camera{
+	if _, err := svc.AddCamera(Camera{
 		ID:   "cam-2",
 		Name: "Two",
 		Type: "http",
@@ -221,12 +242,12 @@ func TestAddCamera_Duplicate(t *testing.T) {
 	}
 
 	// Add first time - should succeed
-	if err := svc.AddCamera(cam); err != nil {
+	if _, err := svc.AddCamera(cam); err != nil {
 		t.Fatalf("First AddCamera failed: %v", err)
 	}
 
 	// Add second time - should fail
-	err := svc.AddCamera(cam)
+	_, err := svc.AddCamera(cam)
 	if err == nil {
 		t.Error("Expected error when adding duplicate camera")
 	}
@@ -243,7 +264,9 @@ func TestUpdateCamera(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatal(err)
+	}
 
 	// Update it
 	err := svc.UpdateCamera("test-cam-1", func(c *Camera) error {
@@ -275,7 +298,9 @@ func TestUpdateCamera_IDPreserved(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatal(err)
+	}
 
 	// Try to change ID
 	err := svc.UpdateCamera("test-cam-1", func(c *Camera) error {
@@ -316,7 +341,9 @@ func TestDeleteCamera(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatal(err)
+	}
 
 	// Delete it
 	err := svc.DeleteCamera("test-cam-1")
@@ -355,7 +382,9 @@ func TestListCameras(t *testing.T) {
 			Type:    "http",
 			Enabled: true,
 		}
-		svc.AddCamera(cam)
+		if _, err := svc.AddCamera(cam); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// List them
@@ -446,7 +475,9 @@ func TestSubscribe(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatal(err)
+	}
 
 	// Wait for event
 	select {
@@ -502,7 +533,9 @@ func TestReload(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc1.AddCamera(cam)
+	if _, err := svc1.AddCamera(cam); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create second service (should reload from disk)
 	svc2, err := NewService(tmpDir)
@@ -577,7 +610,9 @@ func TestImmutability(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatal(err)
+	}
 
 	// Get camera and try to modify it
 	retrieved, _ := svc.GetCamera("test-cam-1")

@@ -44,7 +44,7 @@ func TestBridgeWithConfigService(t *testing.T) {
 		},
 	}
 
-	if err := svc.AddCamera(cam); err != nil {
+	if _, err := svc.AddCamera(cam); err != nil {
 		t.Fatalf("Failed to add camera: %v", err)
 	}
 
@@ -87,7 +87,9 @@ func TestConfigServiceEvents(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatalf("AddCamera: %v", err)
+	}
 
 	select {
 	case event := <-events:
@@ -395,7 +397,9 @@ func TestPasswordPreservation(t *testing.T) {
 			Password: "secret123",
 		},
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatalf("AddCamera: %v", err)
+	}
 
 	// Update with empty password
 	err := svc.UpdateCamera("pass-test-cam", func(c *config.Camera) error {

@@ -437,6 +437,14 @@ func TestCameraAddUpdateDelete(t *testing.T) {
 			t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
 		}
 
+		var created map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+			t.Fatalf("decode POST response: %v", err)
+		}
+		if id, _ := created["id"].(string); id != "test-camera" {
+			t.Fatalf("response id: want test-camera, got %v", created["id"])
+		}
+
 		// Verify persisted (id derived from display name)
 		cam, err := svc.GetCamera("test-camera")
 		if err != nil {
@@ -534,7 +542,9 @@ func TestConfigServicePersistence(t *testing.T) {
 			Password: "testpass",
 		},
 	}
-	svc1.AddCamera(cam)
+	if _, err := svc1.AddCamera(cam); err != nil {
+		t.Fatalf("AddCamera: %v", err)
+	}
 
 	// Create new service instance (simulates restart)
 	svc2, err := config.NewService(tmpDir)
@@ -578,7 +588,9 @@ func TestConfigServiceEventNotifications(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatalf("AddCamera: %v", err)
+	}
 
 	// Wait for event
 	select {
@@ -743,13 +755,15 @@ func TestCameraPreview(t *testing.T) {
 			},
 		})
 		svc := server.configService
-		svc.AddCamera(config.Camera{
+		if _, err := svc.AddCamera(config.Camera{
 			ID:      "preview-cam",
 			Name:    "Preview Test",
 			Type:    "http",
 			Enabled: true,
 			Upload:  &config.Upload{Host: "upload.example.com", Port: 2222, Username: "u", Password: "p"},
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		req := httptest.NewRequest("GET", "/api/cameras/preview-cam/preview", nil)
 		req.SetBasicAuth("admin", "test")
@@ -773,13 +787,15 @@ func TestCameraPreview(t *testing.T) {
 	t.Run("nil callback returns 503", func(t *testing.T) {
 		server := testServerWithAuth(t, ServerConfig{})
 		svc := server.configService
-		svc.AddCamera(config.Camera{
+		if _, err := svc.AddCamera(config.Camera{
 			ID:      "preview-cam",
 			Name:    "Preview Test",
 			Type:    "http",
 			Enabled: true,
 			Upload:  &config.Upload{Host: "upload.example.com", Port: 2222, Username: "u", Password: "p"},
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		req := httptest.NewRequest("GET", "/api/cameras/preview-cam/preview", nil)
 		req.SetBasicAuth("admin", "test")
@@ -813,13 +829,15 @@ func TestCameraPreview(t *testing.T) {
 			},
 		})
 		svc := server.configService
-		svc.AddCamera(config.Camera{
+		if _, err := svc.AddCamera(config.Camera{
 			ID:      "preview-cam",
 			Name:    "Preview Test",
 			Type:    "http",
 			Enabled: true,
 			Upload:  &config.Upload{Host: "upload.example.com", Port: 2222, Username: "u", Password: "p"},
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		req := httptest.NewRequest("GET", "/api/cameras/preview-cam/preview", nil)
 		req.SetBasicAuth("admin", "test")
@@ -838,13 +856,15 @@ func TestCameraPreview(t *testing.T) {
 			},
 		})
 		svc := server.configService
-		svc.AddCamera(config.Camera{
+		if _, err := svc.AddCamera(config.Camera{
 			ID:      "preview-cam",
 			Name:    "Preview Test",
 			Type:    "http",
 			Enabled: true,
 			Upload:  &config.Upload{Host: "upload.example.com", Port: 2222, Username: "u", Password: "p"},
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		req := httptest.NewRequest("GET", "/api/cameras/preview-cam/preview", nil)
 		req.SetBasicAuth("admin", "test")

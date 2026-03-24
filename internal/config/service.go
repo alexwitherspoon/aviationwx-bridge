@@ -214,13 +214,13 @@ func (s *Service) ListCameras() []Camera {
 	return cameras
 }
 
-// AddCamera adds a new camera atomically
-func (s *Service) AddCamera(cam Camera) error {
+// AddCamera adds a new camera atomically and returns the persisted camera (including the assigned ID).
+func (s *Service) AddCamera(cam Camera) (Camera, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if strings.TrimSpace(cam.Name) == "" {
-		return fmt.Errorf("camera name is required")
+		return Camera{}, fmt.Errorf("camera name is required")
 	}
 	if cam.ID == "" {
 		cam.ID = s.allocateUniqueCameraIDLocked(cam.Name)
@@ -228,18 +228,18 @@ func (s *Service) AddCamera(cam Camera) error {
 
 	// Check for duplicate
 	if _, exists := s.cameras[cam.ID]; exists {
-		return fmt.Errorf("camera already exists: %s", cam.ID)
+		return Camera{}, fmt.Errorf("camera already exists: %s", cam.ID)
 	}
 
 	if cam.Upload != nil {
 		if err := s.checkDuplicateUpload("", cam.Upload); err != nil {
-			return err
+			return Camera{}, err
 		}
 	}
 
 	// Save to disk first (fail-safe)
 	if err := s.saveCameraFile(cam); err != nil {
-		return err
+		return Camera{}, err
 	}
 
 	// Update in-memory
@@ -249,7 +249,7 @@ func (s *Service) AddCamera(cam Camera) error {
 	// Notify listeners (async)
 	s.notifyListeners(ConfigEvent{Type: "camera_added", CameraID: cam.ID})
 
-	return nil
+	return cam, nil
 }
 
 // UpdateCamera updates an existing camera atomically

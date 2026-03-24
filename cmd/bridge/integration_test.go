@@ -196,7 +196,6 @@ func TestWebServerAPIWithConfigService(t *testing.T) {
 
 	t.Run("POST /api/cameras", func(t *testing.T) {
 		camJSON := `{
-			"id": "web-test-cam",
 			"name": "Web Test Camera",
 			"type": "http",
 			"enabled": true,
@@ -216,8 +215,8 @@ func TestWebServerAPIWithConfigService(t *testing.T) {
 			t.Errorf("Expected 201, got %d: %s", w.Code, w.Body.String())
 		}
 
-		// Verify camera was added via ConfigService
-		cam, err := svc.GetCamera("web-test-cam")
+		// Verify camera was added via ConfigService (id slug from display name)
+		cam, err := svc.GetCamera("web-test-camera")
 		if err != nil {
 			t.Errorf("Camera not found in ConfigService: %v", err)
 		}
@@ -244,7 +243,7 @@ func TestWebServerAPIWithConfigService(t *testing.T) {
 
 	t.Run("PUT /api/cameras/{id}", func(t *testing.T) {
 		updateJSON := `{
-			"id": "web-test-cam",
+			"id": "web-test-camera",
 			"name": "Updated Camera Name",
 			"type": "http",
 			"enabled": false,
@@ -259,13 +258,13 @@ func TestWebServerAPIWithConfigService(t *testing.T) {
 			}
 		}`
 
-		w := makeRequest("PUT", "/api/cameras/web-test-cam", strings.NewReader(updateJSON))
+		w := makeRequest("PUT", "/api/cameras/web-test-camera", strings.NewReader(updateJSON))
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected 200, got %d: %s", w.Code, w.Body.String())
 		}
 
 		// Verify update
-		cam, _ := svc.GetCamera("web-test-cam")
+		cam, _ := svc.GetCamera("web-test-camera")
 		if cam.Name != "Updated Camera Name" {
 			t.Errorf("Expected name 'Updated Camera Name', got %s", cam.Name)
 		}
@@ -279,13 +278,13 @@ func TestWebServerAPIWithConfigService(t *testing.T) {
 	})
 
 	t.Run("DELETE /api/cameras/{id}", func(t *testing.T) {
-		w := makeRequest("DELETE", "/api/cameras/web-test-cam", nil)
+		w := makeRequest("DELETE", "/api/cameras/web-test-camera", nil)
 		if w.Code != http.StatusNoContent {
 			t.Errorf("Expected 204, got %d", w.Code)
 		}
 
 		// Verify deletion
-		_, err := svc.GetCamera("web-test-cam")
+		_, err := svc.GetCamera("web-test-camera")
 		if err == nil {
 			t.Error("Expected camera to be deleted")
 		}

@@ -383,11 +383,12 @@
     </div>
 
     <script type="module">
-        import { buildCameraConfigFromFormValues, uploadCredentialKey, findConflictingCameraId } from '/js/form-utils.js';
+        import { buildCameraConfigFromFormValues, uploadCredentialKey, findConflictingCameraId, slugCameraIdFromName } from '/js/form-utils.js';
         import { shouldRefreshPreview } from '/js/preview-refresh.js';
         window.buildCameraConfigFromFormValues = buildCameraConfigFromFormValues;
         window.uploadCredentialKey = uploadCredentialKey;
         window.findConflictingCameraId = findConflictingCameraId;
+        window.slugCameraIdFromName = slugCameraIdFromName;
         window.shouldRefreshPreview = shouldRefreshPreview;
     </script>
     <script src="/js/app.js" defer></script>

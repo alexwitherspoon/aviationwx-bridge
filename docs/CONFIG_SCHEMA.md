@@ -55,7 +55,7 @@
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `id` | string | Yes | - | Unique ID (alphanumeric, hyphens) |
+| `id` | string | Yes | - | Unique ID (alphanumeric, hyphens). Stored in JSON; when adding a camera via the web UI, the id is generated from the display name with automatic suffixing if needed |
 | `name` | string | Yes | - | Human-readable name |
 | `type` | string | Yes | - | `"http"`, `"rtsp"`, or `"onvif"` |
 | `enabled` | boolean | No | `true` | Enable/disable camera |

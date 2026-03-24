@@ -4,7 +4,12 @@
  */
 import test from 'node:test';
 import assert from 'node:assert';
-import { buildCameraConfigFromFormValues, uploadCredentialKey, findConflictingCameraId } from './form-utils.js';
+import {
+    buildCameraConfigFromFormValues,
+    uploadCredentialKey,
+    findConflictingCameraId,
+    slugCameraIdFromName,
+} from './form-utils.js';
 
 test('buildCameraConfigFromFormValues returns null when type is missing', () => {
     assert.strictEqual(buildCameraConfigFromFormValues({}), null);
@@ -117,6 +122,13 @@ test('buildCameraConfigFromFormValues omits profile_token when empty', () => {
         onvif_endpoint: 'http://192.168.1.100/onvif',
     });
     assert.strictEqual(result.onvif.profile_token, undefined);
+});
+
+test('slugCameraIdFromName matches server rules', () => {
+    assert.strictEqual(slugCameraIdFromName('KORD West Camera'), 'kord-west-camera');
+    assert.strictEqual(slugCameraIdFromName('Test_Camera'), 'test-camera');
+    assert.strictEqual(slugCameraIdFromName('a  -  b'), 'a-b');
+    assert.strictEqual(slugCameraIdFromName(''), '');
 });
 
 test('uploadCredentialKey matches server normalization', () => {

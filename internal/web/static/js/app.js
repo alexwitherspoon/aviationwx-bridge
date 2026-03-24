@@ -696,22 +696,18 @@ function getCameraFormHtml(cam = null) {
             <div class="form-section">
                 <div class="form-section-title">Camera Details</div>
                 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="camId">Camera ID</label>
-                        <input type="text" id="camId" class="form-control" 
-                               value="${cam?.id || ''}" 
-                               ${isEdit ? 'readonly' : 'required'}
-                               placeholder="e.g., kord-west">
-                        <p class="form-help">Unique identifier (lowercase, no spaces)</p>
-                    </div>
-                    <div class="form-group">
-                        <label for="camName">Display Name</label>
-                        <input type="text" id="camName" class="form-control" 
-                               value="${cam?.name || ''}"
-                               placeholder="e.g., KORD West Camera">
-                    </div>
+                <div class="form-group">
+                    <label for="camName">Display Name</label>
+                    <input type="text" id="camName" class="form-control" required
+                           value="${cam?.name || ''}"
+                           placeholder="e.g., KORD West Camera">
+                    <p class="form-help">
+                        ${isEdit
+        ? `Internal id <code>${escapeHtml(cam.id)}</code> is fixed (queue and paths).`
+        : 'A unique camera id is generated from this name (e.g. &quot;KORD West&quot; → <code>kord-west</code>). If the name matches an existing camera, a suffix is added automatically.'}
+                    </p>
                 </div>
+                <input type="hidden" id="camExistingId" value="${isEdit ? escapeHtml(cam.id) : ''}">
                 
                 <div class="form-group">
                     <label for="camType">Camera Type</label>
@@ -968,11 +964,16 @@ async function saveCamera(event, existingId = null) {
         }
     }
     
+    const displayName = document.getElementById('camName').value.trim();
+    if (!displayName) {
+        alert('Please enter a display name.');
+        return;
+    }
+
     const type = document.getElementById('camType').value;
     const basePath = document.getElementById('uploadBasePath')?.value || '/files';
     const camera = {
-        id: document.getElementById('camId').value.toLowerCase().replace(/\s+/g, '-'),
-        name: document.getElementById('camName').value || document.getElementById('camId').value,
+        name: displayName,
         type: type,
         enabled: document.getElementById('camEnabled').checked,
         capture_interval_seconds: parseInt(document.getElementById('camInterval').value, 10),
@@ -985,6 +986,9 @@ async function saveCamera(event, existingId = null) {
             base_path: basePath,
         }
     };
+    if (existingId) {
+        camera.id = existingId;
+    }
     
     // Image processing settings
     const maxWidth = parseInt(document.getElementById('imageMaxWidth').value, 10) || 0;
@@ -1107,9 +1111,15 @@ function buildCameraConfigFromForm() {
     const type = document.getElementById('camType')?.value;
     if (!type) return null;
 
+    const name = document.getElementById('camName')?.value?.trim();
+    const existing = document.getElementById('camExistingId')?.value?.trim();
+    let provisionalId = existing;
+    if (!provisionalId && typeof window.slugCameraIdFromName === 'function') {
+        provisionalId = window.slugCameraIdFromName(name);
+    }
     const values = {
         type,
-        id: document.getElementById('camId')?.value,
+        id: provisionalId || undefined,
         snapshot_url: document.getElementById('camSnapshotUrl')?.value,
         auth_user: document.getElementById('camAuthUser')?.value,
         auth_pass: document.getElementById('camAuthPass')?.value,

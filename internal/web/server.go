@@ -277,13 +277,12 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
-	if cam.ID == "" {
-		cam.ID = fmt.Sprintf("cam-%d", time.Now().Unix())
+	// Display name is required; camera id is derived from it (client-supplied id is ignored)
+	if strings.TrimSpace(cam.Name) == "" {
+		http.Error(w, "Display name is required", http.StatusBadRequest)
+		return
 	}
-	if cam.Name == "" {
-		cam.Name = cam.ID
-	}
+	cam.ID = ""
 	if cam.Upload == nil {
 		http.Error(w, "Upload credentials are required", http.StatusBadRequest)
 		return

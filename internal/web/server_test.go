@@ -266,10 +266,9 @@ func TestAddCamera_DuplicateUploadCredentialsHTTP409(t *testing.T) {
 			return map[string]interface{}{"status": "ok"}
 		},
 	})
-	camJSON := func(id string) string {
+	camJSON := func(displayName string) string {
 		return fmt.Sprintf(`{
-			"id": %q,
-			"name": "Cam",
+			"name": %q,
 			"type": "http",
 			"enabled": true,
 			"snapshot_url": "http://example.com/s.jpg",
@@ -280,7 +279,7 @@ func TestAddCamera_DuplicateUploadCredentialsHTTP409(t *testing.T) {
 				"username": "shared-sftp-user",
 				"password": "p"
 			}
-		}`, id)
+		}`, displayName)
 	}
 	post := func(body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(body))
@@ -290,10 +289,10 @@ func TestAddCamera_DuplicateUploadCredentialsHTTP409(t *testing.T) {
 		server.GetMux().ServeHTTP(w, req)
 		return w
 	}
-	if w := post(camJSON("cam-first")); w.Code != http.StatusCreated {
+	if w := post(camJSON("Camera One")); w.Code != http.StatusCreated {
 		t.Fatalf("first POST: %d %s", w.Code, w.Body.String())
 	}
-	if w := post(camJSON("cam-second")); w.Code != http.StatusConflict {
+	if w := post(camJSON("Camera Two")); w.Code != http.StatusConflict {
 		t.Fatalf("duplicate upload: want 409, got %d: %s", w.Code, w.Body.String())
 	}
 }
@@ -333,7 +332,6 @@ func TestCameraAddUpdateDelete(t *testing.T) {
 	// Add camera
 	t.Run("AddCamera", func(t *testing.T) {
 		camJSON := `{
-			"id": "test-cam",
 			"name": "Test Camera",
 			"type": "http",
 			"enabled": true,
@@ -352,8 +350,8 @@ func TestCameraAddUpdateDelete(t *testing.T) {
 			t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
 		}
 
-		// Verify persisted
-		cam, err := svc.GetCamera("test-cam")
+		// Verify persisted (id derived from display name)
+		cam, err := svc.GetCamera("test-camera")
 		if err != nil {
 			t.Fatalf("Camera not found: %v", err)
 		}
@@ -365,7 +363,7 @@ func TestCameraAddUpdateDelete(t *testing.T) {
 	// Update camera (preserve password)
 	t.Run("UpdateCamera_PreservePassword", func(t *testing.T) {
 		updateJSON := `{
-			"id": "test-cam",
+			"id": "test-camera",
 			"name": "Updated Camera",
 			"type": "http",
 			"enabled": true,
@@ -379,13 +377,13 @@ func TestCameraAddUpdateDelete(t *testing.T) {
 			}
 		}`
 
-		w := makeRequest("PUT", "/api/cameras/test-cam", []byte(updateJSON))
+		w := makeRequest("PUT", "/api/cameras/test-camera", []byte(updateJSON))
 		if w.Code != http.StatusOK {
 			t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
 		}
 
 		// Verify password was preserved
-		cam, _ := svc.GetCamera("test-cam")
+		cam, _ := svc.GetCamera("test-camera")
 		if cam.Upload.Password != "pass" {
 			t.Errorf("Expected password to be preserved, got %s", cam.Upload.Password)
 		}
@@ -413,13 +411,13 @@ func TestCameraAddUpdateDelete(t *testing.T) {
 
 	// Delete camera
 	t.Run("DeleteCamera", func(t *testing.T) {
-		w := makeRequest("DELETE", "/api/cameras/test-cam", nil)
+		w := makeRequest("DELETE", "/api/cameras/test-camera", nil)
 		if w.Code != http.StatusNoContent {
 			t.Fatalf("Expected 204, got %d", w.Code)
 		}
 
 		// Verify deleted
-		_, err := svc.GetCamera("test-cam")
+		_, err := svc.GetCamera("test-camera")
 		if err == nil {
 			t.Error("Camera should have been deleted")
 		}

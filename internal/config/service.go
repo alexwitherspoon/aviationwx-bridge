@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/hardware"
@@ -217,6 +218,13 @@ func (s *Service) ListCameras() []Camera {
 func (s *Service) AddCamera(cam Camera) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if strings.TrimSpace(cam.Name) == "" {
+		return fmt.Errorf("camera name is required")
+	}
+	if cam.ID == "" {
+		cam.ID = s.allocateUniqueCameraIDLocked(cam.Name)
+	}
 
 	// Check for duplicate
 	if _, exists := s.cameras[cam.ID]; exists {

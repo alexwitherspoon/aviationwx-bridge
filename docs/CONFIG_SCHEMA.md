@@ -221,6 +221,10 @@ Each camera has its own upload credentials. SFTP only (protocol "ftps"/"ftp" in 
 | `port` | integer | `1229` | Web console port |
 | `password` | string | `"aviationwx"` | Login password |
 
+### Web console and network exposure
+
+The bridge targets a **private LAN** (for example a Raspberry Pi at a field or home), not a public internet-facing service. Authenticated JSON APIs and unauthenticated health endpoints (`GET /healthz`, `GET /readyz`) assume **trusted local access**: operators on the same network, or host-side automation (for example watchdog scripts using `127.0.0.1`). They are **not** hardened for anonymous access from the internet. Do not port-forward the web console port or place the host on an untrusted network without firewall rules and a deliberate security review.
+
 ## Complete Example
 
 ```json

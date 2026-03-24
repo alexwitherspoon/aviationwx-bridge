@@ -18,6 +18,8 @@ go run ./cmd/bridge
 
 Web console: http://localhost:1229 (password: aviationwx)
 
+**Network model:** The bridge is intended for **private LAN** deployment only. See [DEPLOYMENT.md — Network exposure](DEPLOYMENT.md#network-exposure) and [CONFIG_SCHEMA.md — Web console and network exposure](CONFIG_SCHEMA.md#web-console-and-network-exposure).
+
 ## Test
 
 ```bash

@@ -34,6 +34,10 @@ This script:
 - **Default Password**: `aviationwx` (change immediately!)
 - **Health Check**: `http://<device-ip>:1229/healthz`
 
+### Network exposure
+
+AviationWX.org Bridge is a **local LAN utility**: the web console and health endpoints are for trusted local operators and on-device scripts, not for the public internet. **Do not** expose port `1229` to the WAN (avoid router port forwarding and public binding). Use normal firewall or router rules so only your intended LAN (or VPN) can reach the device, consistent with any other admin UI on a small embedded host.
+
 ### Automatic Updates
 
 The supervisor checks for updates every 6 hours:

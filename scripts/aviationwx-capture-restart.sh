@@ -54,12 +54,16 @@ ensure_state_json() {
 }
 
 acquire_lock_or_exit() {
-	if command -v flock >/dev/null 2>&1; then
-		exec 200>>"$LOCK_FILE" || true
-		if ! flock -n 200; then
-			log_event "INFO" "another capture-restart run in progress; exiting"
-			exit 0
-		fi
+	if ! command -v flock >/dev/null 2>&1; then
+		return
+	fi
+	if ! exec 200>>"$LOCK_FILE"; then
+		log_event "ERROR" "cannot open lock file $LOCK_FILE (permissions or disk full)"
+		exit 1
+	fi
+	if ! flock -n 200; then
+		log_event "INFO" "another capture-restart run in progress; exiting"
+		exit 0
 	fi
 }
 

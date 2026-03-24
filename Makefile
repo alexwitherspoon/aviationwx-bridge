@@ -18,8 +18,8 @@ build: ## Build the Go binary
 test: ## Run Go tests
 	go test -v -race -coverprofile=coverage.out ./...
 
-test-js: ## Run frontend JS tests
-	node --test internal/web/static/js/form-utils.test.js
+test-js: ## Run frontend JS tests (matches CI: npm run test:js)
+	npm run test:js
 
 test-sh: ## Run Bats tests for shell scripts (npm install required)
 	npm run test:sh

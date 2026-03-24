@@ -43,6 +43,7 @@ type CaptureWorker struct {
 	onGateReleased func()
 	pendingCapture bool
 	wakeCapture    chan struct{}
+	wakeRetryTimer *time.Timer // single deferred wake after backoff (dedupes stacked AfterFuncs)
 }
 
 // CaptureWorkerConfig configures a capture worker
@@ -105,6 +106,51 @@ func (w *CaptureWorker) hasPendingCapture() bool {
 	return w.pendingCapture
 }
 
+// eligibleForPendingGateWake reports whether a pending deferred capture can run now when a gate slot frees.
+func (w *CaptureWorker) eligibleForPendingGateWake() bool {
+	if !w.hasPendingCapture() {
+		return false
+	}
+	w.mu.RLock()
+	busy := w.currentlyCapturing
+	w.mu.RUnlock()
+	if busy {
+		return false
+	}
+	if w.queue.IsCapturePaused() {
+		return false
+	}
+	w.mu.RLock()
+	next := w.state.NextAttempt
+	w.mu.RUnlock()
+	return !time.Now().Before(next)
+}
+
+// scheduleWakeAfter sends a non-blocking wake after d (deduping timers on the worker).
+func (w *CaptureWorker) scheduleWakeAfter(d time.Duration) {
+	if d <= 0 {
+		select {
+		case w.wakeCapture <- struct{}{}:
+		default:
+		}
+		return
+	}
+	w.mu.Lock()
+	if w.wakeRetryTimer != nil {
+		w.wakeRetryTimer.Stop()
+	}
+	w.wakeRetryTimer = time.AfterFunc(d, func() {
+		w.mu.Lock()
+		w.wakeRetryTimer = nil
+		w.mu.Unlock()
+		select {
+		case w.wakeCapture <- struct{}{}:
+		default:
+		}
+	})
+	w.mu.Unlock()
+}
+
 // Start begins the capture loop
 func (w *CaptureWorker) Start() {
 	go w.run()
@@ -112,6 +158,12 @@ func (w *CaptureWorker) Start() {
 
 // Stop stops the capture worker gracefully
 func (w *CaptureWorker) Stop() {
+	w.mu.Lock()
+	if w.wakeRetryTimer != nil {
+		w.wakeRetryTimer.Stop()
+		w.wakeRetryTimer = nil
+	}
+	w.mu.Unlock()
 	w.cancel()
 }
 
@@ -208,14 +260,11 @@ func (w *CaptureWorker) run() {
 			w.mu.RUnlock()
 			if time.Now().Before(nextWake) {
 				d := time.Until(nextWake)
-				if d > 0 {
-					time.AfterFunc(d, func() {
-						select {
-						case w.wakeCapture <- struct{}{}:
-						default:
-						}
-					})
-				}
+				// Clear pending so the ticker path can run after backoff; dedupe wake via scheduleWakeAfter.
+				w.mu.Lock()
+				w.pendingCapture = false
+				w.mu.Unlock()
+				w.scheduleWakeAfter(d)
 				continue
 			}
 			w.capture()
@@ -233,6 +282,23 @@ func (w *CaptureWorker) run() {
 					"interval", w.interval)
 				continue
 			}
+
+			// Apply pause/backoff before the pending-gate skip so a deferred capture is not
+			// stuck forever when only backoff was blocking the wake path.
+			if w.queue.IsCapturePaused() {
+				w.logger.Debug("Capture paused due to queue pressure",
+					"camera", w.camera.ID())
+				continue
+			}
+
+			w.mu.RLock()
+			nextAttempt := w.state.NextAttempt
+			w.mu.RUnlock()
+
+			if time.Now().Before(nextAttempt) {
+				continue
+			}
+
 			if w.captureGate != nil && pending {
 				// Already queued one deferred capture when gate was full (depth 1)
 				continue
@@ -242,22 +308,6 @@ func (w *CaptureWorker) run() {
 			w.mu.Lock()
 			w.nextCaptureTime = time.Now().Add(w.interval)
 			w.mu.Unlock()
-
-			// Check if queue has paused capture due to pressure
-			if w.queue.IsCapturePaused() {
-				w.logger.Debug("Capture paused due to queue pressure",
-					"camera", w.camera.ID())
-				continue
-			}
-
-			// Check backoff
-			w.mu.RLock()
-			nextAttempt := w.state.NextAttempt
-			w.mu.RUnlock()
-
-			if time.Now().Before(nextAttempt) {
-				continue
-			}
 
 			w.capture()
 

@@ -405,6 +405,61 @@ func TestAddCamera_NormalizesUploadFields(t *testing.T) {
 	}
 }
 
+func TestAddCamera_ONVIF_RejectInvalidEndpoint(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	body := `{"name":"Bad Onvif","type":"onvif","enabled":true,"capture_interval_seconds":60,"onvif":{"endpoint":"   ","username":"u","password":"p"},"upload":{"host":"upload.example.com","port":2222,"username":"u1","password":"p1"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(body))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("POST onvif whitespace endpoint: want 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateCamera_PUT_Upload_RequiresUsername(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	postJSON := `{"name":"HTTP Cam","type":"http","enabled":true,"snapshot_url":"http://x/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"u","password":"p"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(postJSON))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", w.Code, w.Body.String())
+	}
+	putJSON := `{"name":"HTTP Cam","type":"http","enabled":true,"snapshot_url":"http://x/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"   ","password":"p"}}`
+	req2 := httptest.NewRequest(http.MethodPut, "/api/cameras/http-cam", bytes.NewBufferString(putJSON))
+	req2.SetBasicAuth("admin", svc.GetWebPassword())
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Fatalf("PUT blank upload username: want 400, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
 func TestUpdateCamera_ONVIF_RejectEmptyEndpointWhenNoExistingEndpoint(t *testing.T) {
 	tmpDir := t.TempDir()
 	svc, err := config.NewService(tmpDir)

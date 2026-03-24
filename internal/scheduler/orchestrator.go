@@ -305,7 +305,7 @@ func (o *Orchestrator) notifyCaptureGateReleased() {
 	var toWake *CaptureWorker
 	for _, id := range ids {
 		w := o.captureWorkers[id]
-		if w != nil && w.hasPendingCapture() {
+		if w != nil && w.eligibleForPendingGateWake() {
 			toWake = w
 			break
 		}

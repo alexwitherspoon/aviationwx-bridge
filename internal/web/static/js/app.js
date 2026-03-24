@@ -871,7 +871,7 @@ function getCameraFormHtml(cam = null) {
                             <input type="password" id="uploadPass" class="form-control" spellcheck="false"
                                    ${isEdit ? 'autocomplete="current-password" placeholder="Leave blank to keep current password"' : 'autocomplete="new-password" required placeholder="Password for this camera account"'}
                             >
-                            <button type="button" class="btn btn-secondary btn-sm" id="uploadPassToggle" aria-pressed="false" aria-label="Show SFTP password" onclick="togglePasswordField('uploadPass', 'uploadPassToggle')">Show</button>
+                            <button type="button" class="btn btn-secondary btn-sm" id="uploadPassToggle" aria-pressed="false" aria-label="Show SFTP password" onclick="togglePasswordField('uploadPass', 'uploadPassToggle', 'SFTP password')">Show</button>
                         </div>
                     </div>
                 </div>
@@ -1603,21 +1603,23 @@ async function triggerUpdate() {
  * Toggle visibility for a password input paired with a Show/Hide button.
  * @param {string} inputId
  * @param {string} buttonId
+ * @param {string} [fieldLabel] Human-readable field name for aria-label (e.g. "SFTP password").
  */
-function togglePasswordField(inputId, buttonId) {
+function togglePasswordField(inputId, buttonId, fieldLabel) {
     const input = document.getElementById(inputId);
     const btn = document.getElementById(buttonId);
     if (!input || !btn) return;
+    const base = (fieldLabel && String(fieldLabel).trim()) || 'Password';
     if (input.type === 'password') {
         input.type = 'text';
         btn.textContent = 'Hide';
         btn.setAttribute('aria-pressed', 'true');
-        btn.setAttribute('aria-label', 'Hide password');
+        btn.setAttribute('aria-label', `Hide ${base}`);
     } else {
         input.type = 'password';
         btn.textContent = 'Show';
         btn.setAttribute('aria-pressed', 'false');
-        btn.setAttribute('aria-label', 'Show password');
+        btn.setAttribute('aria-label', `Show ${base}`);
     }
 }
 

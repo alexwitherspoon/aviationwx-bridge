@@ -36,6 +36,31 @@ func normalizeUploadForAPI(u *config.Upload) {
 	u.Host = strings.ToLower(u.Host)
 }
 
+// validateONVIFCameraForPost ensures ONVIF cameras have a usable endpoint and credentials after normalization.
+func validateONVIFCameraForPost(cam *config.Camera) error {
+	if cam.ONVIF == nil {
+		return errors.New("ONVIF settings are required for type onvif")
+	}
+	ep := strings.TrimSpace(cam.ONVIF.Endpoint)
+	if ep != "" {
+		ep = camera.NormalizeONVIFEndpoint(ep)
+	}
+	cam.ONVIF.Endpoint = ep
+	if ep == "" {
+		return errors.New("ONVIF endpoint is required for type onvif")
+	}
+	u := strings.TrimSpace(cam.ONVIF.Username)
+	if u == "" {
+		return errors.New("ONVIF username is required for type onvif")
+	}
+	if strings.TrimSpace(cam.ONVIF.Password) == "" {
+		return errors.New("ONVIF password is required for type onvif")
+	}
+	cam.ONVIF.Username = u
+	cam.ONVIF.Password = strings.TrimSpace(cam.ONVIF.Password)
+	return nil
+}
+
 // Server provides the web console HTTP server
 type Server struct {
 	configService *config.Service
@@ -322,7 +347,12 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if cam.ONVIF != nil && cam.ONVIF.Endpoint != "" {
+	if strings.EqualFold(strings.TrimSpace(cam.Type), "onvif") {
+		if err := validateONVIFCameraForPost(&cam); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	} else if cam.ONVIF != nil && strings.TrimSpace(cam.ONVIF.Endpoint) != "" {
 		cam.ONVIF.Endpoint = camera.NormalizeONVIFEndpoint(cam.ONVIF.Endpoint)
 	}
 
@@ -418,6 +448,19 @@ func (s *Server) updateCamera(w http.ResponseWriter, r *http.Request, cameraID s
 		if strings.TrimSpace(updates.ONVIF.Endpoint) == "" {
 			http.Error(w, "ONVIF endpoint is required when ONVIF settings are present", http.StatusBadRequest)
 			return
+		}
+	}
+
+	if updates.Upload != nil {
+		if strings.TrimSpace(updates.Upload.Username) == "" {
+			http.Error(w, "Upload username is required", http.StatusBadRequest)
+			return
+		}
+		if updates.Upload.Password == "" {
+			if existing.Upload == nil || strings.TrimSpace(existing.Upload.Password) == "" {
+				http.Error(w, "Upload password is required", http.StatusBadRequest)
+				return
+			}
 		}
 	}
 

@@ -74,7 +74,16 @@ run_tests_native() {
     fi
     
     go test -v ./...
-    log_success "All tests passed"
+    log_success "All Go tests passed"
+
+    if [ -f package-lock.json ] && command -v npm &> /dev/null; then
+        log_info "Running npm ci and shell (Bats) tests..."
+        npm ci
+        npm run test:sh
+        log_success "Shell (Bats) tests passed"
+    else
+        log_warn "Skipping npm/Bats tests (npm or package-lock.json missing)"
+    fi
 }
 
 # Run linting locally

@@ -5,8 +5,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-
-	"golang.org/x/sys/unix"
 )
 
 // Budget: ~500 MB total RAM per concurrent capture (e.g. 512 MB system → 1; 1 GiB → 2).
@@ -55,20 +53,8 @@ func computeDefaultMaxConcurrentCaptures(totalMB, numCPU int, maxFreqMHz float64
 	return memSlots
 }
 
-func totalMemoryMB() int {
-	switch runtime.GOOS {
-	case "linux":
-		return memTotalMBLinux()
-	case "darwin":
-		v, err := unix.SysctlUint64("hw.memsize")
-		if err != nil || v == 0 {
-			return 0
-		}
-		return int(v / (1024 * 1024))
-	default:
-		return 0
-	}
-}
+// totalMemoryMB and maxCPUFrequencyMHz are implemented per-GOOS in captures_*.go
+// (Darwin uses sysctl APIs that are not in golang.org/x/sys/unix on Linux.)
 
 func memTotalMBLinux() int {
 	data, err := os.ReadFile("/proc/meminfo")
@@ -93,25 +79,6 @@ func parseMemTotalMBFromMeminfo(data []byte) int {
 		}
 	}
 	return 0
-}
-
-func maxCPUFrequencyMHz() float64 {
-	switch runtime.GOOS {
-	case "linux":
-		return linuxMaxCPUFrequencyMHz()
-	case "darwin":
-		// Hz on Intel; often 0 on Apple Silicon — treat as unknown (memory-only rule).
-		v, err := unix.SysctlUint64("hw.cpufrequency_max")
-		if err != nil || v == 0 {
-			v, err = unix.SysctlUint64("hw.cpufrequency")
-		}
-		if err != nil || v == 0 {
-			return 0
-		}
-		return float64(v) / 1e6
-	default:
-		return 0
-	}
 }
 
 func linuxMaxCPUFrequencyMHz() float64 {

@@ -9,6 +9,8 @@ let status = null;
 let previousCameraIds = null;
 let cameras = [];
 let timeUpdateInterval = null;
+/** True when the timezone selector differs from last applied server value (unsaved edit). */
+let timezoneDirty = false;
 
 // Timezone list (IANA timezones for US and common international)
 const TIMEZONES = [
@@ -175,8 +177,8 @@ function updateStatusDisplay() {
     // Update basic stats
     document.getElementById('statCameras').textContent = status.cameras || 0;
     
-    // Update timezone selector
-    if (status.timezone) {
+    // Update timezone selector from server unless the user has unsaved edits
+    if (status.timezone && !timezoneDirty) {
         document.getElementById('timezone').value = status.timezone;
     }
     
@@ -608,18 +610,22 @@ function formatTime(date, timezone) {
     }
 }
 
-async function updateTimezone() {
+function markTimezoneDirty() {
+    timezoneDirty = true;
+}
+
+async function saveTimezone() {
     const timezone = document.getElementById('timezone').value;
     try {
         await api('/time', {
             method: 'PUT',
             body: JSON.stringify({ timezone }),
         });
+        timezoneDirty = false;
         updateTimeDisplay();
-        // Show success message with hot-reload confirmation
         showNotification('✅ Timezone updated! Workers reloaded automatically.', 'success');
     } catch (err) {
-        alert('Failed to update timezone: ' + err.message);
+        alert('Failed to save timezone: ' + err.message);
     }
 }
 

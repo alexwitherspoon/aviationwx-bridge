@@ -172,16 +172,20 @@
                     <div class="card-body">
                         <div class="form-group">
                             <label for="timezone">Local Timezone</label>
-                            <select id="timezone" class="form-control" onchange="updateTimezone()">
+                            <select id="timezone" class="form-control" onchange="markTimezoneDirty()">
                                 <option value="">-- Select Timezone --</option>
                             </select>
                             <p class="form-help">
-                                Select the timezone where your cameras are located. 
+                                Select the timezone where your cameras are located.
                                 Camera timestamps will be interpreted in this timezone and converted to UTC.
+                                Click Save to apply changes.
                             </p>
                         </div>
+                        <div style="margin-top: var(--space-md);">
+                            <button type="button" class="btn btn-primary" onclick="saveTimezone()">Save timezone</button>
+                        </div>
 
-                        <div class="time-preview">
+                        <div class="time-preview" style="margin-top: var(--space-lg);">
                             <div class="time-box">
                                 <label>Local Time</label>
                                 <span id="localTime" class="time-value">--:--:--</span>

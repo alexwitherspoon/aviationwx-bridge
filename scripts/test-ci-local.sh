@@ -131,8 +131,8 @@ run_docker_build() {
     
     # Quick smoke test
     log_info "Running smoke test..."
-    docker run --rm aviationwx-org-bridge:local-test --version 2>/dev/null || \
-        docker run --rm aviationwx-org-bridge:local-test exiftool -ver
+    docker run --rm aviationwx-org-bridge:local-test --version || \
+        docker run --rm --entrypoint exiftool aviationwx-org-bridge:local-test -ver
     
     log_success "Docker smoke test passed"
 }

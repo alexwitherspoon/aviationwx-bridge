@@ -28,6 +28,14 @@ import (
 )
 
 func init() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-version", "--version":
+			fmt.Printf("%s (%s)\n", Version, GitCommit)
+			os.Exit(0)
+		}
+	}
+
 	// Resource management - dynamically set based on Docker container limits
 	// GOMEMLIMIT is passed as environment variable by container startup script
 	// which calculates appropriate limits based on system resources

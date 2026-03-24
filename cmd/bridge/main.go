@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -206,12 +208,13 @@ func main() {
 
 	// Create web server (no callbacks - uses ConfigService directly)
 	bridge.webServer = web.NewServer(web.ServerConfig{
-		ConfigService:   configService,
-		GetStatus:       bridge.getStatus,
-		TestCamera:      bridge.testCamera,
-		TestUpload:      bridge.testUpload,
-		GetCameraImage:  bridge.getCameraImage,
-		GetWorkerStatus: bridge.getWorkerStatus,
+		ConfigService:       configService,
+		GetStatus:           bridge.getStatus,
+		GetCaptureReadiness: bridge.getCaptureReadiness,
+		TestCamera:          bridge.testCamera,
+		TestUpload:          bridge.testUpload,
+		GetCameraImage:      bridge.getCameraImage,
+		GetWorkerStatus:     bridge.getWorkerStatus,
 	})
 
 	// Subscribe to config changes
@@ -809,6 +812,65 @@ func (b *Bridge) getStatus() interface{} {
 	}
 
 	return status
+}
+
+// getCaptureReadiness implements /readyz: reports not-ready (503) when enabled cameras have no recent successful capture.
+// Uses AVIATIONWX_READYZ_GRACE_SECONDS (default 600) after orchestrator start before enforcing staleness,
+// and AVIATIONWX_READYZ_STALE_SECONDS (default 900) as a minimum staleness window; per-camera threshold is
+// max(stale, 3×capture interval) so long-interval cameras are not flagged incorrectly.
+func (b *Bridge) getCaptureReadiness() (bool, string) {
+	grace := envDurationSeconds("AVIATIONWX_READYZ_GRACE_SECONDS", 600)
+	minStale := envDurationSeconds("AVIATIONWX_READYZ_STALE_SECONDS", 900)
+
+	if b.orchestrator == nil {
+		return true, ""
+	}
+
+	orch := b.orchestrator.GetStatus()
+	if !orch.Running {
+		return false, "orchestrator not running"
+	}
+	if orch.CameraCount == 0 {
+		return true, ""
+	}
+	if orch.Uptime < grace {
+		return true, ""
+	}
+
+	for _, cs := range orch.CameraStats {
+		if cs.LastSuccess.IsZero() {
+			return false, fmt.Sprintf("camera %s: no successful capture yet", cs.CameraID)
+		}
+		interval := cs.CaptureStats.Interval
+		if interval <= 0 {
+			interval = 60 * time.Second
+		}
+		threshold := maxDuration(minStale, 3*interval)
+		if time.Since(cs.LastSuccess) > threshold {
+			return false, fmt.Sprintf("camera %s: last success %s ago (threshold %s)", cs.CameraID, time.Since(cs.LastSuccess).Round(time.Second), threshold)
+		}
+	}
+
+	return true, ""
+}
+
+func envDurationSeconds(key string, defaultSec int) time.Duration {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return time.Duration(defaultSec) * time.Second
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return time.Duration(defaultSec) * time.Second
+	}
+	return time.Duration(n) * time.Second
+}
+
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // getUpdateChannel normalizes the update channel value

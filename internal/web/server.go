@@ -27,34 +27,37 @@ type Server struct {
 	log           *logger.Logger
 
 	// Callbacks to bridge services
-	getStatus       func() interface{}
-	testCamera      func(camConfig config.Camera) ([]byte, error)
-	testUpload      func(uploadConfig config.Upload) error
-	getCameraImage  func(cameraID string) ([]byte, error)
-	getWorkerStatus func(cameraID string) map[string]interface{}
+	getStatus           func() interface{}
+	getCaptureReadiness func() (ok bool, reason string)
+	testCamera          func(camConfig config.Camera) ([]byte, error)
+	testUpload          func(uploadConfig config.Upload) error
+	getCameraImage      func(cameraID string) ([]byte, error)
+	getWorkerStatus     func(cameraID string) map[string]interface{}
 }
 
 // ServerConfig configures the web server
 type ServerConfig struct {
-	ConfigService   *config.Service
-	GetStatus       func() interface{}
-	TestCamera      func(camConfig config.Camera) ([]byte, error)
-	TestUpload      func(uploadConfig config.Upload) error
-	GetCameraImage  func(cameraID string) ([]byte, error)
-	GetWorkerStatus func(cameraID string) map[string]interface{}
+	ConfigService       *config.Service
+	GetStatus           func() interface{}
+	GetCaptureReadiness func() (ok bool, reason string)
+	TestCamera          func(camConfig config.Camera) ([]byte, error)
+	TestUpload          func(uploadConfig config.Upload) error
+	GetCameraImage      func(cameraID string) ([]byte, error)
+	GetWorkerStatus     func(cameraID string) map[string]interface{}
 }
 
 // NewServer creates a new web server
 func NewServer(cfg ServerConfig) *Server {
 	s := &Server{
-		configService:   cfg.ConfigService,
-		mux:             http.NewServeMux(),
-		log:             logger.Default(),
-		getStatus:       cfg.GetStatus,
-		testCamera:      cfg.TestCamera,
-		testUpload:      cfg.TestUpload,
-		getCameraImage:  cfg.GetCameraImage,
-		getWorkerStatus: cfg.GetWorkerStatus,
+		configService:       cfg.ConfigService,
+		mux:                 http.NewServeMux(),
+		log:                 logger.Default(),
+		getStatus:           cfg.GetStatus,
+		getCaptureReadiness: cfg.GetCaptureReadiness,
+		testCamera:          cfg.TestCamera,
+		testUpload:          cfg.TestUpload,
+		getCameraImage:      cfg.GetCameraImage,
+		getWorkerStatus:     cfg.GetWorkerStatus,
 	}
 
 	s.setupRoutes()
@@ -74,6 +77,7 @@ func (s *Server) setupRoutes() {
 
 	// Health check (no auth)
 	s.mux.HandleFunc("/healthz", s.handleHealthz)
+	s.mux.HandleFunc("/readyz", s.handleReadyz)
 	s.mux.HandleFunc("/api/logs", s.authMiddleware(http.HandlerFunc(s.handleLogs)))
 
 	// Static files (require auth except for login assets)
@@ -539,6 +543,44 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(status)
+}
+
+// handleReadyz reports whether capture pipelines are healthy enough to serve traffic.
+// Returns 503 when enabled cameras have no recent successful capture (optional hook from bridge).
+// No authentication — intended for host-side watchdog scripts.
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.getCaptureReadiness == nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status": "unknown",
+			"detail": "capture readiness not configured",
+		})
+		return
+	}
+
+	ok, reason := s.getCaptureReadiness()
+	body := map[string]interface{}{
+		"status":    "ready",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+	if !ok {
+		body["status"] = "not_ready"
+		if reason != "" {
+			body["reason"] = reason
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(body)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 func (s *Server) buildHealthStatus() map[string]interface{} {

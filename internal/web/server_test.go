@@ -116,6 +116,69 @@ func TestConfigPutTopLevelFields(t *testing.T) {
 	}
 }
 
+func TestReadyz(t *testing.T) {
+	t.Run("notConfiguredReturns200", func(t *testing.T) {
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				return map[string]interface{}{"status": "ok"}
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+	})
+
+	t.Run("callbackNotReadyReturns503", func(t *testing.T) {
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				return map[string]interface{}{"status": "ok"}
+			},
+			GetCaptureReadiness: func() (bool, string) {
+				return false, "test reason"
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503, got %d", w.Code)
+		}
+	})
+
+	t.Run("callbackReadyReturns200", func(t *testing.T) {
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				return map[string]interface{}{"status": "ok"}
+			},
+			GetCaptureReadiness: func() (bool, string) {
+				return true, ""
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+	})
+}
+
+func testServerConfigService(t *testing.T) *config.Service {
+	t.Helper()
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	return svc
+}
+
 // TestCameraAddUpdateDelete tests full camera lifecycle
 func TestCameraAddUpdateDelete(t *testing.T) {
 	tmpDir := t.TempDir()

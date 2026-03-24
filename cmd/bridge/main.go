@@ -844,32 +844,7 @@ func (b *Bridge) getCaptureReadiness() (bool, string) {
 		return true, ""
 	}
 
-	orch := b.orchestrator.GetStatus()
-	if !orch.Running {
-		return false, "orchestrator not running"
-	}
-	if orch.CameraCount == 0 {
-		return true, ""
-	}
-	if orch.Uptime < grace {
-		return true, ""
-	}
-
-	for _, cs := range orch.CameraStats {
-		if cs.LastSuccess.IsZero() {
-			return false, fmt.Sprintf("camera %s: no successful capture yet", cs.CameraID)
-		}
-		interval := cs.CaptureStats.Interval
-		if interval <= 0 {
-			interval = 60 * time.Second
-		}
-		threshold := maxDuration(minStale, 3*interval)
-		if time.Since(cs.LastSuccess) > threshold {
-			return false, fmt.Sprintf("camera %s: last success %s ago (threshold %s)", cs.CameraID, time.Since(cs.LastSuccess).Round(time.Second), threshold)
-		}
-	}
-
-	return true, ""
+	return evalCaptureReadiness(grace, minStale, b.orchestrator.GetStatus(), time.Now())
 }
 
 func envDurationSeconds(key string, defaultSec int) time.Duration {
@@ -882,13 +857,6 @@ func envDurationSeconds(key string, defaultSec int) time.Duration {
 		return time.Duration(defaultSec) * time.Second
 	}
 	return time.Duration(n) * time.Second
-}
-
-func maxDuration(a, b time.Duration) time.Duration {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // getUpdateChannel normalizes the update channel value

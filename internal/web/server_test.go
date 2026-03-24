@@ -297,6 +297,36 @@ func TestAddCamera_DuplicateUploadCredentialsHTTP409(t *testing.T) {
 	}
 }
 
+func TestAddCamera_POST_RequiresUploadUsernameAndPassword(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	post := func(body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(body))
+		req.SetBasicAuth("admin", svc.GetWebPassword())
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		server.GetMux().ServeHTTP(w, req)
+		return w.Code
+	}
+	noUser := `{"name":"Cam","type":"http","enabled":true,"snapshot_url":"http://example.com/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"","password":"secret"}}`
+	if code := post(noUser); code != http.StatusBadRequest {
+		t.Fatalf("empty username: want 400, got %d", code)
+	}
+	noPass := `{"name":"Cam","type":"http","enabled":true,"snapshot_url":"http://example.com/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"u1","password":""}}`
+	if code := post(noPass); code != http.StatusBadRequest {
+		t.Fatalf("empty password: want 400, got %d", code)
+	}
+}
+
 // TestAddCamera_ONVIF_NormalizesDuplicateEndpoint verifies POST /api/cameras persists a
 // single-scheme ONVIF endpoint when the client sends duplicated http:// prefixes.
 func TestAddCamera_ONVIF_NormalizesDuplicateEndpoint(t *testing.T) {

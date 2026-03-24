@@ -42,16 +42,14 @@ func (g *CaptureGate) Release() {
 	}
 }
 
-// SetLimit updates the maximum concurrent captures. If n is below the number of
-// captures currently in progress, the limit is raised to that count until they finish.
+// SetLimit updates the maximum concurrent captures (minimum 1). If the new limit is
+// below the number of captures currently in flight, TryAcquire blocks new work until
+// Release brings inUse below the new limit; in-flight captures are not interrupted.
 func (g *CaptureGate) SetLimit(n int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if n < 1 {
 		n = 1
-	}
-	if n < g.inUse {
-		n = g.inUse
 	}
 	g.limit = n
 }

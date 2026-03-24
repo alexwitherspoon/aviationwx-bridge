@@ -299,6 +299,14 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 	if cam.Upload.Port == 0 {
 		cam.Upload.Port = 2222
 	}
+	if strings.TrimSpace(cam.Upload.Username) == "" {
+		http.Error(w, "Upload username is required", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(cam.Upload.Password) == "" {
+		http.Error(w, "Upload password is required", http.StatusBadRequest)
+		return
+	}
 
 	if cam.ONVIF != nil && cam.ONVIF.Endpoint != "" {
 		cam.ONVIF.Endpoint = camera.NormalizeONVIFEndpoint(cam.ONVIF.Endpoint)
@@ -312,10 +320,10 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log.Error("Failed to add camera via API",
-			"camera", cam.ID,
+			"camera_name", cam.Name,
 			"error", err,
 			"camera_type", cam.Type)
-		http.Error(w, fmt.Sprintf("Failed to add camera %s: %v", cam.ID, err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to add camera %q: %v", cam.Name, err), http.StatusInternalServerError)
 		return
 	}
 

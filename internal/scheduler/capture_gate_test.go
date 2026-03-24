@@ -24,7 +24,7 @@ func TestCaptureGate_TryAcquireRelease(t *testing.T) {
 	g.Release()
 }
 
-func TestCaptureGate_SetLimitShrinkRespectsInUse(t *testing.T) {
+func TestCaptureGate_SetLimitShrinkBlocksUntilInUseFalls(t *testing.T) {
 	g := NewCaptureGate(3)
 	if !g.TryAcquire() {
 		t.Fatal("want first acquire")
@@ -33,14 +33,14 @@ func TestCaptureGate_SetLimitShrinkRespectsInUse(t *testing.T) {
 		t.Fatal("want second acquire")
 	}
 	g.SetLimit(1)
-	// inUse=2, limit is clamped to >= inUse so no third slot
+	// inUse=2, limit=1: no new acquires until releases drop inUse
 	if g.TryAcquire() {
-		t.Fatal("should not acquire third slot while two in flight")
+		t.Fatal("should not acquire while inUse exceeds limit")
 	}
 	g.Release()
 	g.Release()
 	if !g.TryAcquire() {
-		t.Fatal("should acquire after releases")
+		t.Fatal("should acquire after inUse drops to 0")
 	}
 	g.Release()
 }

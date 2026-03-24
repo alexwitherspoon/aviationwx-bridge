@@ -179,6 +179,7 @@ func main() {
 			CheckIntervalSeconds: global.SNTP.CheckIntervalSeconds,
 			MaxOffsetSeconds:     global.SNTP.MaxOffsetSeconds,
 			TimeoutSeconds:       global.SNTP.TimeoutSeconds,
+			StaleThresholdHours:  global.SNTP.StaleThresholdHours,
 		})
 		timeHealth.Start()
 		log.Info("Time health monitoring started", "servers", global.SNTP.Servers)
@@ -295,15 +296,17 @@ func (b *Bridge) initOrchestrator() error {
 
 	global := b.configService.GetGlobal()
 	maxConcurrent := config.EffectiveMaxConcurrentUploads(global)
+	maxCaptures := config.EffectiveMaxConcurrentCaptures(global)
 
 	orch, err := scheduler.NewOrchestrator(scheduler.OrchestratorConfig{
-		QueueBasePath:        queuePath,
-		QueueMaxTotalMB:      100,
-		QueueMaxHeapMB:       400,
-		Timezone:             global.Timezone,
-		MaxConcurrentUploads: maxConcurrent,
-		ResourceLimiter:      b.resourceLimiter,
-		Logger:               b.log,
+		QueueBasePath:         queuePath,
+		QueueMaxTotalMB:       100,
+		QueueMaxHeapMB:        400,
+		Timezone:              global.Timezone,
+		MaxConcurrentUploads:  maxConcurrent,
+		MaxConcurrentCaptures: maxCaptures,
+		ResourceLimiter:       b.resourceLimiter,
+		Logger:                b.log,
 	})
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)
@@ -382,6 +385,7 @@ func (b *Bridge) restartSNTP(sntpConfig *config.SNTP) error {
 			CheckIntervalSeconds: sntpConfig.CheckIntervalSeconds,
 			MaxOffsetSeconds:     sntpConfig.MaxOffsetSeconds,
 			TimeoutSeconds:       sntpConfig.TimeoutSeconds,
+			StaleThresholdHours:  sntpConfig.StaleThresholdHours,
 		})
 		b.timeHealth.Start()
 
@@ -671,13 +675,15 @@ func (b *Bridge) handleConfigEvent(event config.ConfigEvent) {
 
 		if b.orchestrator != nil {
 			b.orchestrator.SetMaxConcurrentUploads(config.EffectiveMaxConcurrentUploads(global))
+			b.orchestrator.SetMaxConcurrentCaptures(config.EffectiveMaxConcurrentCaptures(global))
 			b.refreshUploadersFromGlobal()
 		}
 
 		b.log.Info("Global config updated",
 			"timezone", global.Timezone,
 			"sntp_enabled", global.SNTP != nil && global.SNTP.Enabled,
-			"max_concurrent_uploads", config.EffectiveMaxConcurrentUploads(global))
+			"max_concurrent_uploads", config.EffectiveMaxConcurrentUploads(global),
+			"max_concurrent_captures", config.EffectiveMaxConcurrentCaptures(global))
 	}
 }
 
@@ -800,11 +806,15 @@ func (b *Bridge) getStatus() interface{} {
 	// Add time health if available
 	if b.timeHealth != nil {
 		timeStatus := b.timeHealth.GetStatus()
-		status["time_health"] = map[string]interface{}{
+		th := map[string]interface{}{
 			"healthy":    timeStatus.Healthy,
 			"offset_ms":  timeStatus.Offset.Milliseconds(),
 			"last_check": timeStatus.LastCheck.Format(time.RFC3339),
 		}
+		if !timeStatus.LastGoodSync.IsZero() {
+			th["last_good_sync"] = timeStatus.LastGoodSync.UTC().Format(time.RFC3339)
+		}
+		status["time_health"] = th
 	}
 
 	// Add update checker status if available

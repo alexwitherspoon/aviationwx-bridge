@@ -1146,6 +1146,14 @@ async function loadGlobalSettings() {
     if (maxConcurrentSelect) {
         maxConcurrentSelect.value = maxConcurrent.toString();
     }
+
+    const maxCaptures = (typeof config.max_concurrent_captures === 'number' && config.max_concurrent_captures >= 1 && config.max_concurrent_captures <= 10)
+        ? config.max_concurrent_captures
+        : 2;
+    const maxCapturesSelect = document.getElementById('maxConcurrentCaptures');
+    if (maxCapturesSelect) {
+        maxCapturesSelect.value = maxCaptures.toString();
+    }
     
     // Load update channel
     const updateChannel = config.update_channel || 'latest';
@@ -1170,12 +1178,18 @@ async function loadGlobalSettings() {
 
 async function saveGlobalSettings() {
     const maxConcurrent = parseInt(document.getElementById('maxConcurrentUploads').value);
+    const maxCaptures = parseInt(document.getElementById('maxConcurrentCaptures').value);
     const updateChannel = document.getElementById('updateChannel').value;
     const timeoutConnect = parseInt(document.getElementById('timeoutConnect').value);
     const timeoutUpload = parseInt(document.getElementById('timeoutUpload').value);
     
     if (maxConcurrent < 1 || maxConcurrent > 10) {
         alert('Concurrent uploads must be between 1 and 10');
+        return;
+    }
+
+    if (maxCaptures < 1 || maxCaptures > 10) {
+        alert('Concurrent captures must be between 1 and 10');
         return;
     }
     
@@ -1195,6 +1209,7 @@ async function saveGlobalSettings() {
             ...config,
             update_channel: updateChannel,
             max_concurrent_uploads: maxConcurrent,
+            max_concurrent_captures: maxCaptures,
             timeout_connect_seconds: timeoutConnect,
             timeout_upload_seconds: timeoutUpload
         };
@@ -1205,7 +1220,7 @@ async function saveGlobalSettings() {
         });
         
         showNotification(
-            '✅ Settings saved. Upload limits, SFTP timeouts, and update channel apply immediately. Restart the bridge only if you changed the web console listen port.',
+            '✅ Settings saved. Upload/capture limits, SFTP timeouts, and update channel apply immediately. Restart the bridge only if you changed the web console listen port.',
             'success'
         );
         

@@ -308,6 +308,21 @@ func TestOrchestrator_GetStatus(t *testing.T) {
 	}
 }
 
+func TestNewOrchestrator_ExplicitMaxConcurrentCapturesUsesConfiguredValue(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := DefaultOrchestratorConfig()
+	cfg.QueueBasePath = tmpDir
+	cfg.MaxConcurrentCaptures = 7
+	orch, err := NewOrchestrator(cfg)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	defer orch.Stop()
+	if orch.config.MaxConcurrentCaptures != 7 {
+		t.Errorf("MaxConcurrentCaptures: want 7 (user config), got %d", orch.config.MaxConcurrentCaptures)
+	}
+}
+
 // TestDefaultOrchestratorConfig tests the default configuration
 func TestDefaultOrchestratorConfig(t *testing.T) {
 	config := DefaultOrchestratorConfig()
@@ -326,6 +341,9 @@ func TestDefaultOrchestratorConfig(t *testing.T) {
 	}
 	if config.AuthBackoffSecs != 60 {
 		t.Errorf("AuthBackoffSecs = %d, want 60", config.AuthBackoffSecs)
+	}
+	if config.MaxConcurrentCaptures != 0 {
+		t.Errorf("MaxConcurrentCaptures = %d, want 0 (unset)", config.MaxConcurrentCaptures)
 	}
 }
 

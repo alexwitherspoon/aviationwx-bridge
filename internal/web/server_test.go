@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +79,7 @@ func TestConfigPutTopLevelFields(t *testing.T) {
 		"timezone":                base.Timezone,
 		"update_channel":          "edge",
 		"max_concurrent_uploads":  5,
+		"max_concurrent_captures": 3,
 		"timeout_connect_seconds": 45,
 		"timeout_upload_seconds":  400,
 		"web_console":             base.WebConsole,
@@ -108,11 +111,83 @@ func TestConfigPutTopLevelFields(t *testing.T) {
 	if g.Global == nil || g.Global.MaxConcurrentUploads != 5 {
 		t.Errorf("global.max_concurrent_uploads should mirror top-level, got %+v", g.Global)
 	}
+	if g.MaxConcurrentCaptures != 3 {
+		t.Errorf("max_concurrent_captures: want 3, got %d", g.MaxConcurrentCaptures)
+	}
+	if g.Global == nil || g.Global.MaxConcurrentCaptures != 3 {
+		t.Errorf("global.max_concurrent_captures should mirror top-level, got %+v", g.Global)
+	}
 	if g.TimeoutConnectSeconds != 45 {
 		t.Errorf("timeout_connect_seconds: want 45, got %d", g.TimeoutConnectSeconds)
 	}
 	if g.TimeoutUploadSeconds != 400 {
 		t.Errorf("timeout_upload_seconds: want 400, got %d", g.TimeoutUploadSeconds)
+	}
+}
+
+func TestConfigGetPreservesUserMaxConcurrentCaptures(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	if err := os.WriteFile(globalPath, []byte(`{"version":2,"timezone":"UTC","max_concurrent_captures":7}`), 0644); err != nil {
+		t.Fatalf("write global.json: %v", err)
+	}
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/config: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got config.GlobalSettings
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+	if got.MaxConcurrentCaptures != 7 {
+		t.Errorf("max_concurrent_captures: want 7 (stored), got %d", got.MaxConcurrentCaptures)
+	}
+}
+
+func TestConfigGetFillsProfiledWhenMaxConcurrentCapturesUnset(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	if err := os.WriteFile(globalPath, []byte(`{"version":2,"timezone":"UTC"}`), 0644); err != nil {
+		t.Fatalf("write global.json: %v", err)
+	}
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	pre := svc.GetGlobal()
+	want := config.EffectiveMaxConcurrentCaptures(pre)
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/config: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got config.GlobalSettings
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+	if got.MaxConcurrentCaptures != want {
+		t.Errorf("max_concurrent_captures: want %d (effective when unset), got %d", want, got.MaxConcurrentCaptures)
 	}
 }
 

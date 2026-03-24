@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/hardware"
 )
 
 // Service provides centralized config management with file-per-camera storage
@@ -44,6 +46,7 @@ type GlobalSettings struct {
 	Timezone              string       `json:"timezone,omitempty"`                // IANA timezone
 	UpdateChannel         string       `json:"update_channel,omitempty"`          // Update channel: "latest" or "edge"
 	MaxConcurrentUploads  int          `json:"max_concurrent_uploads,omitempty"`  // Max concurrent uploads (default: 2)
+	MaxConcurrentCaptures int          `json:"max_concurrent_captures,omitempty"` // If unset: profiled default (see EffectiveMaxConcurrentCaptures)
 	TimeoutConnectSeconds int          `json:"timeout_connect_seconds,omitempty"` // SFTP connect timeout (default: 60)
 	TimeoutUploadSeconds  int          `json:"timeout_upload_seconds,omitempty"`  // SFTP upload timeout (default: 300)
 	Global                *Global      `json:"global,omitempty"`                  // Global operational settings
@@ -80,6 +83,7 @@ func NewService(baseDir string) (*Service, error) {
 			Timezone:              "UTC",
 			UpdateChannel:         "latest",
 			MaxConcurrentUploads:  2,
+			MaxConcurrentCaptures: hardware.DefaultMaxConcurrentCaptures(),
 			TimeoutConnectSeconds: 60,
 			TimeoutUploadSeconds:  300,
 			SNTP:                  &defaultSNTP,
@@ -116,6 +120,24 @@ func EffectiveMaxConcurrentUploads(g GlobalSettings) int {
 		return n
 	}
 	return 2
+}
+
+// EffectiveMaxConcurrentCaptures returns the configured maximum concurrent capture jobs,
+// or a profiled default when unset (RAM-based slots ~500 MB each, max 10; if max CPU
+// frequency is below 2 GHz, also capped to about one concurrent capture per two logical CPUs).
+//
+// Hardware profiling is used only when both top-level and global.global max_concurrent_captures
+// are unset (<= 0). Any positive configured value is returned unchanged.
+// Top-level max_concurrent_captures takes precedence over global.global.
+func EffectiveMaxConcurrentCaptures(g GlobalSettings) int {
+	n := g.MaxConcurrentCaptures
+	if n <= 0 && g.Global != nil {
+		n = g.Global.MaxConcurrentCaptures
+	}
+	if n > 0 {
+		return n
+	}
+	return hardware.DefaultMaxConcurrentCaptures()
 }
 
 // GetGlobal returns a copy of global config (thread-safe)

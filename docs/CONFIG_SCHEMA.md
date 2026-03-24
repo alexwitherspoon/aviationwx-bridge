@@ -43,6 +43,8 @@
 |-------|------|----------|---------|-------------|
 | `version` | integer | Yes | - | Schema version (must be `2`) |
 | `timezone` | string | No | `"UTC"` | IANA timezone (e.g., `"America/Chicago"`) |
+| `max_concurrent_uploads` | integer | No | `2` | Parallel SFTP uploads (also mirrored under `global`) |
+| `max_concurrent_captures` | integer | No | (profile) | Parallel capture jobs (also mirrored under `global`); if omitted, derived from RAM (~500 MB per slot, max 10) and, when max CPU frequency &lt; 2 GHz, capped to about one concurrent capture per two logical CPUs; if RAM cannot be detected, default **1**. An explicit value (1–10) is used as-is and is not adjusted by profiling |
 | `cameras` | array | Yes | - | Array of camera configurations |
 | `global` | object | No | (defaults) | Global settings |
 | `queue` | object | No | (defaults) | Queue management settings |
@@ -149,6 +151,8 @@ Each camera has its own upload credentials. SFTP only (protocol "ftps"/"ftp" in 
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `max_concurrent_uploads` | integer | `2` | Parallel SFTP uploads |
+| `max_concurrent_captures` | integer | (profile) | Same as root; see root row for default formula |
 | `capture_timeout_seconds` | integer | `30` | HTTP/ONVIF timeout |
 | `rtsp_timeout_seconds` | integer | `10` | RTSP frame timeout |
 | `backoff` | object | (below) | Backoff settings |
@@ -207,6 +211,7 @@ Each camera has its own upload credentials. SFTP only (protocol "ftps"/"ftp" in 
 | `check_interval_seconds` | integer | `300` | Check interval (5 min) |
 | `max_offset_seconds` | integer | `5` | Max acceptable offset |
 | `timeout_seconds` | integer | `5` | Query timeout |
+| `stale_threshold_hours` | integer | `24` | Remain healthy this long after last good NTP sync while servers are unreachable; `0` uses default 24 |
 
 ### Web Console Object
 

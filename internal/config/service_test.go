@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/hardware"
 )
 
 func TestNewService(t *testing.T) {
@@ -272,6 +274,29 @@ func TestEffectiveMaxConcurrentUploads(t *testing.T) {
 	}
 	if n := EffectiveMaxConcurrentUploads(GlobalSettings{}); n != 2 {
 		t.Errorf("default: want 2, got %d", n)
+	}
+}
+
+func TestEffectiveMaxConcurrentCaptures(t *testing.T) {
+	if n := EffectiveMaxConcurrentCaptures(GlobalSettings{MaxConcurrentCaptures: 5}); n != 5 {
+		t.Errorf("top-level: want 5, got %d", n)
+	}
+	nested := &Global{MaxConcurrentCaptures: 3}
+	if n := EffectiveMaxConcurrentCaptures(GlobalSettings{Global: nested}); n != 3 {
+		t.Errorf("nested only: want 3, got %d", n)
+	}
+	if n := EffectiveMaxConcurrentCaptures(GlobalSettings{MaxConcurrentCaptures: 4, Global: nested}); n != 4 {
+		t.Errorf("top-level wins: want 4, got %d", n)
+	}
+	// Unset uses profiled default (depends on RAM/CPU on this machine).
+	if n := EffectiveMaxConcurrentCaptures(GlobalSettings{}); n != hardware.DefaultMaxConcurrentCaptures() {
+		t.Errorf("default: want profiled default %d, got %d", hardware.DefaultMaxConcurrentCaptures(), n)
+	}
+	// Any explicit 1–10 must match exactly; profiled default must never be blended in.
+	for want := 1; want <= 10; want++ {
+		if got := EffectiveMaxConcurrentCaptures(GlobalSettings{MaxConcurrentCaptures: want}); got != want {
+			t.Errorf("MaxConcurrentCaptures=%d: want %d, got %d", want, want, got)
+		}
 	}
 }
 

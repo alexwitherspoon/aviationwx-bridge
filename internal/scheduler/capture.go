@@ -37,6 +37,12 @@ type CaptureWorker struct {
 	nextCaptureTime    time.Time
 	currentlyCapturing bool
 	lastCaptureTime    time.Time
+
+	// Global capture concurrency (optional): at most one pending tick queued per camera when gate is full.
+	captureGate    *CaptureGate
+	onGateReleased func()
+	pendingCapture bool
+	wakeCapture    chan struct{}
 }
 
 // CaptureWorkerConfig configures a capture worker
@@ -50,6 +56,8 @@ type CaptureWorkerConfig struct {
 	IntervalSecs    int               // Capture interval in seconds (1-1800, default 60)
 	Logger          Logger
 	OnCapture       func(cameraID string, imageData []byte, captureTime time.Time) // Called after successful capture and processing
+	CaptureGate     *CaptureGate                                                   // Optional: limit simultaneous captures across all cameras
+	OnGateReleased  func()                                                         // Called after Release; wakes pending workers
 }
 
 // NewCaptureWorker creates a new capture worker for a camera
@@ -81,11 +89,20 @@ func NewCaptureWorker(cfg CaptureWorkerConfig) *CaptureWorker {
 		cancel:          cancel,
 		logger:          logger,
 		onCapture:       cfg.OnCapture,
+		captureGate:     cfg.CaptureGate,
+		onGateReleased:  cfg.OnGateReleased,
+		wakeCapture:     make(chan struct{}, 1),
 		state: &CameraState{
 			CameraID:    cfg.Camera.ID(),
 			NextAttempt: time.Now(),
 		},
 	}
+}
+
+func (w *CaptureWorker) hasPendingCapture() bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.pendingCapture
 }
 
 // Start begins the capture loop
@@ -175,16 +192,30 @@ func (w *CaptureWorker) run() {
 			w.logger.Info("Capture worker stopped", "camera", w.camera.ID())
 			return
 
+		case <-w.wakeCapture:
+			w.mu.RLock()
+			busy := w.currentlyCapturing
+			w.mu.RUnlock()
+			if busy {
+				continue
+			}
+			w.capture()
+
 		case <-ticker.C:
 			// Check if previous capture is still running
 			w.mu.RLock()
 			isCapturing := w.currentlyCapturing
+			pending := w.pendingCapture
 			w.mu.RUnlock()
 
 			if isCapturing {
 				w.logger.Warn("Skipping capture - previous job still running",
 					"camera", w.camera.ID(),
 					"interval", w.interval)
+				continue
+			}
+			if w.captureGate != nil && pending {
+				// Already queued one deferred capture when gate was full (depth 1)
 				continue
 			}
 
@@ -218,9 +249,29 @@ func (w *CaptureWorker) run() {
 }
 
 func (w *CaptureWorker) capture() {
+	if w.captureGate != nil {
+		if !w.captureGate.TryAcquire() {
+			w.mu.Lock()
+			if !w.pendingCapture {
+				w.pendingCapture = true
+			}
+			w.mu.Unlock()
+			return
+		}
+		defer func() {
+			w.captureGate.Release()
+			if w.onGateReleased != nil {
+				w.onGateReleased()
+			}
+		}()
+	}
+
 	w.mu.Lock()
 	w.capturesTotal++
 	w.currentlyCapturing = true
+	if w.captureGate != nil {
+		w.pendingCapture = false
+	}
 	captureInterval := w.interval
 	w.mu.Unlock()
 

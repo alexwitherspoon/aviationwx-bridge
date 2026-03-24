@@ -233,6 +233,24 @@
                             </p>
                         </div>
                         <div class="form-group">
+                            <label for="maxConcurrentCaptures">Concurrent Captures</label>
+                            <select id="maxConcurrentCaptures" class="form-control">
+                                <option value="1" selected>1 (Recommended for Pi Zero 2 W)</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                            </select>
+                            <p class="form-help">
+                                How many cameras may capture at the same time across the bridge. When the limit is reached, each camera queues at most one extra capture. Lower values reduce CPU and memory load on small devices.
+                            </p>
+                        </div>
+                        <div class="form-group">
                             <label for="updateChannel">Update Channel</label>
                             <select id="updateChannel" class="form-control">
                                 <option value="latest" selected>Latest (Stable releases - recommended)</option>

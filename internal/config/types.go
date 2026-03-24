@@ -149,6 +149,7 @@ type Global struct {
 	CaptureTimeoutSeconds int            `json:"capture_timeout_seconds,omitempty"` // Default: 30
 	RTSPTimeoutSeconds    int            `json:"rtsp_timeout_seconds,omitempty"`    // Default: 10
 	MaxConcurrentUploads  int            `json:"max_concurrent_uploads,omitempty"`  // Default: 2 (conservative for slow networks)
+	MaxConcurrentCaptures int            `json:"max_concurrent_captures,omitempty"` // If unset: profiled default (see EffectiveMaxConcurrentCaptures)
 	Backoff               *Backoff       `json:"backoff,omitempty"`
 	DegradedMode          *DegradedMode  `json:"degraded_mode,omitempty"`
 	TimeAuthority         *TimeAuthority `json:"time_authority,omitempty"`
@@ -177,6 +178,9 @@ type SNTP struct {
 	CheckIntervalSeconds int      `json:"check_interval_seconds,omitempty"` // Default: 300
 	MaxOffsetSeconds     int      `json:"max_offset_seconds,omitempty"`     // Default: 5
 	TimeoutSeconds       int      `json:"timeout_seconds,omitempty"`        // Default: 5
+	// StaleThresholdHours: if all NTP queries fail but the last in-bounds sync was within this
+	// many hours, time is still considered healthy (transient network loss). 0 = default 24.
+	StaleThresholdHours int `json:"stale_threshold_hours,omitempty"`
 }
 
 // DefaultSNTP returns default SNTP settings
@@ -187,6 +191,7 @@ func DefaultSNTP() SNTP {
 		CheckIntervalSeconds: 300, // 5 minutes
 		MaxOffsetSeconds:     5,
 		TimeoutSeconds:       5,
+		StaleThresholdHours:  24,
 	}
 }
 

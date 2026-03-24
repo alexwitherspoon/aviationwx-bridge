@@ -171,6 +171,11 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		global := s.configService.GetGlobal()
+		// When unset in storage, expose the profiled effective default so the UI matches runtime.
+		// Do not overwrite a user-configured positive value.
+		if global.MaxConcurrentCaptures <= 0 && (global.Global == nil || global.Global.MaxConcurrentCaptures <= 0) {
+			global.MaxConcurrentCaptures = config.EffectiveMaxConcurrentCaptures(global)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(global)
 
@@ -208,6 +213,13 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 					g.Global = &config.Global{}
 				}
 				g.Global.MaxConcurrentUploads = updates.MaxConcurrentUploads
+			}
+			if updates.MaxConcurrentCaptures != 0 {
+				g.MaxConcurrentCaptures = updates.MaxConcurrentCaptures
+				if g.Global == nil {
+					g.Global = &config.Global{}
+				}
+				g.Global.MaxConcurrentCaptures = updates.MaxConcurrentCaptures
 			}
 			if updates.TimeoutConnectSeconds != 0 {
 				g.TimeoutConnectSeconds = updates.TimeoutConnectSeconds

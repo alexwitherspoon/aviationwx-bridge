@@ -2,7 +2,7 @@
 //
 // Behavior under test:
 //   - "Good sync" = NTP response with |offset| <= max_offset (lastGoodSync advances).
-//   - Response with |offset| > max_offset does not advance lastGoodSync and is unhealthy.
+//   - Response with |offset| > max_offset is unhealthy and clears lastGoodSync (no stale grace from an older good sync).
 //   - When every server fails: unhealthy if never synced; healthy if last good sync within
 //     stale_threshold_hours; unhealthy if that window has elapsed.
 //
@@ -68,6 +68,43 @@ func TestTimeHealth_StaleSyncSpec_AllServersFail_NeverSynced(t *testing.T) {
 
 	if th.IsHealthy() {
 		t.Fatal("want unhealthy when NTP never succeeded and all servers fail")
+	}
+}
+
+func TestTimeHealth_StaleSyncSpec_OutOfBoundsAfterGoodSyncClearsLastGoodSync_AllFailThenUnhealthy(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	hook := func(string) (time.Duration, error) {
+		calls++
+		switch calls {
+		case 1:
+			return 1 * time.Second, nil
+		case 2:
+			return 100 * time.Second, nil
+		default:
+			return 0, errors.New("all servers fail")
+		}
+	}
+	th := NewTimeHealth(Config{
+		Servers:             []string{"ntp.test"},
+		MaxOffsetSeconds:    5,
+		StaleThresholdHours: 24,
+		QueryHook:           hook,
+	})
+	th.check()
+	if !th.IsHealthy() {
+		t.Fatal("want healthy after first in-bounds response")
+	}
+	th.check()
+	if th.IsHealthy() {
+		t.Fatal("want unhealthy after out-of-bounds offset")
+	}
+	if !th.GetStatus().LastGoodSync.IsZero() {
+		t.Fatal("want last_good_sync cleared after out-of-bounds (avoids false healthy on later all-fail)")
+	}
+	th.check()
+	if th.IsHealthy() {
+		t.Fatal("want unhealthy when all servers fail after out-of-bounds cleared lastGoodSync")
 	}
 }
 

@@ -160,6 +160,10 @@ func (th *TimeHealth) check() {
 		th.healthy = inBounds
 		if inBounds {
 			th.lastGoodSync = now
+		} else {
+			// Out-of-bounds offset: do not keep a prior lastGoodSync, or a later all-servers-fail cycle
+			// could incorrectly treat stale grace as healthy (see stale_sync_behavior_test.go).
+			th.lastGoodSync = time.Time{}
 		}
 		th.mu.Unlock()
 

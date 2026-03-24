@@ -191,6 +191,48 @@ func TestConfigGetFillsProfiledWhenMaxConcurrentCapturesUnset(t *testing.T) {
 	}
 }
 
+func TestConfigGetFillsTopLevelWhenOnlyNestedMaxConcurrentCapturesSet(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	// Only nested global.global.max_concurrent_captures — UI reads top-level field from GET.
+	body := `{"version":2,"timezone":"UTC","global":{"max_concurrent_captures":4}}`
+	if err := os.WriteFile(globalPath, []byte(body), 0644); err != nil {
+		t.Fatalf("write global.json: %v", err)
+	}
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	pre := svc.GetGlobal()
+	if pre.MaxConcurrentCaptures != 0 {
+		t.Fatalf("pre: want top-level 0 on disk, got %d", pre.MaxConcurrentCaptures)
+	}
+	want := config.EffectiveMaxConcurrentCaptures(pre)
+	if want != 4 {
+		t.Fatalf("EffectiveMaxConcurrentCaptures: want 4 from nested, got %d", want)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/config: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got config.GlobalSettings
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+	if got.MaxConcurrentCaptures != 4 {
+		t.Errorf("max_concurrent_captures: want 4 (effective from nested), got %d", got.MaxConcurrentCaptures)
+	}
+}
+
 func TestReadyz(t *testing.T) {
 	t.Run("notConfiguredReturns200", func(t *testing.T) {
 		s := NewServer(ServerConfig{

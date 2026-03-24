@@ -173,9 +173,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		global := s.configService.GetGlobal()
-		// When unset in storage, expose the profiled effective default so the UI matches runtime.
-		// Do not overwrite a user-configured positive value.
-		if global.MaxConcurrentCaptures <= 0 && (global.Global == nil || global.Global.MaxConcurrentCaptures <= 0) {
+		// When top-level is unset (<=0), expose EffectiveMaxConcurrentCaptures so the UI matches runtime,
+		// including when only global.global.max_concurrent_captures is set on disk.
+		// Do not overwrite a positive top-level value.
+		if global.MaxConcurrentCaptures <= 0 {
 			global.MaxConcurrentCaptures = config.EffectiveMaxConcurrentCaptures(global)
 		}
 		w.Header().Set("Content-Type", "application/json")

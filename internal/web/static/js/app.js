@@ -1210,7 +1210,15 @@ async function saveWebSettings() {
         alert('Please enter a password');
         return;
     }
-    
+
+    if (!config) {
+        await loadConfig();
+    }
+    if (!config) {
+        alert('Unable to load settings. Refresh the page and try again.');
+        return;
+    }
+
     try {
         // Handler replaces web_console wholesale; merge with GET snapshot so listen port is not cleared.
         const wc = { ...((config && config.web_console) || {}) };

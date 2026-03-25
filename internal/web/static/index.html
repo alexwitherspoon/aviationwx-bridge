@@ -389,11 +389,14 @@
     <script type="module">
         import { buildCameraConfigFromFormValues, uploadCredentialKey, findConflictingCameraId, slugCameraIdFromName } from '/js/form-utils.js';
         import { shouldRefreshPreview } from '/js/preview-refresh.js';
+        import { shouldSkipSettingsHydrate, shouldWarnBeforePageLeave } from '/js/settings-draft.js';
         window.buildCameraConfigFromFormValues = buildCameraConfigFromFormValues;
         window.uploadCredentialKey = uploadCredentialKey;
         window.findConflictingCameraId = findConflictingCameraId;
         window.slugCameraIdFromName = slugCameraIdFromName;
         window.shouldRefreshPreview = shouldRefreshPreview;
+        window.shouldSkipSettingsHydrate = shouldSkipSettingsHydrate;
+        window.shouldWarnBeforePageLeave = shouldWarnBeforePageLeave;
     </script>
     <script src="/js/app.js" defer></script>
 </body>

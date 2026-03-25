@@ -169,8 +169,7 @@ jobs:
       - name: Prepare release assets
         run: |
           cd dist
-          # artifacts/download-artifact@v4 creates: artifact-name/artifact-name structure
-          # Move binaries from subdirectories to root
+          # download-artifact nests each artifact under dist/<name>/; flatten to dist/
           for dir in */; do
             dirname="${dir%/}"
             if [ -f "${dir}${dirname}" ]; then
@@ -191,7 +190,6 @@ jobs:
           sha256sum aviationwx-org-bridge-* > checksums.txt
 
       - name: Create Release
-        # Commit pin matches upstream tag v2.6.1 (workflow has contents: write)
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
           name: AviationWX.org Bridge ${{ steps.version.outputs.VERSION }}

@@ -13,7 +13,7 @@ AviationWX.org Bridge is a **safety-critical** Go daemon that captures webcam sn
 
 ## Build & Validate
 
-**Prerequisites:** Go 1.24+, exiftool (tests require it: `brew install exiftool` or `apt install libimage-exiftool-perl`)
+**Prerequisites:** Go 1.26+, exiftool (tests require it: `brew install exiftool` or `apt install libimage-exiftool-perl`)
 
 ```bash
 # Format (always run before commit)

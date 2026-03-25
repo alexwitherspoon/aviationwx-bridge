@@ -125,6 +125,150 @@ func TestConfigPutTopLevelFields(t *testing.T) {
 	}
 }
 
+// TestConfigPutPartialUploadSettingsPreservesTimezoneAndWebConsole verifies the settings UI pattern:
+// PUT only top-level upload/limit fields without resending nested objects or timezone.
+func TestConfigPutPartialUploadSettingsPreservesTimezoneAndWebConsole(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	payload := `{"version":2,"timezone":"America/Los_Angeles","update_channel":"latest","max_concurrent_uploads":2,"web_console":{"enabled":true,"port":3333,"password":"keepme"}}`
+	if err := os.WriteFile(globalPath, []byte(payload), 0644); err != nil {
+		t.Fatalf("write global.json: %v", err)
+	}
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	body := `{"update_channel":"edge","max_concurrent_uploads":4,"max_concurrent_captures":2,"timeout_connect_seconds":90,"timeout_upload_seconds":120}`
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewBufferString(body))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT: %d %s", w.Code, w.Body.String())
+	}
+	g := svc.GetGlobal()
+	if g.Timezone != "America/Los_Angeles" {
+		t.Errorf("timezone: want preserved America/Los_Angeles, got %q", g.Timezone)
+	}
+	if g.WebConsole == nil || g.WebConsole.Port != 3333 || g.WebConsole.Password != "keepme" {
+		t.Errorf("web_console: want port=3333 password preserved, got %+v", g.WebConsole)
+	}
+	if g.UpdateChannel != "edge" {
+		t.Errorf("update_channel: want edge, got %q", g.UpdateChannel)
+	}
+	if g.MaxConcurrentUploads != 4 {
+		t.Errorf("max_concurrent_uploads: want 4, got %d", g.MaxConcurrentUploads)
+	}
+	if g.MaxConcurrentCaptures != 2 {
+		t.Errorf("max_concurrent_captures: want 2, got %d", g.MaxConcurrentCaptures)
+	}
+	if g.TimeoutConnectSeconds != 90 || g.TimeoutUploadSeconds != 120 {
+		t.Errorf("timeouts: want 90/120, got %d/%d", g.TimeoutConnectSeconds, g.TimeoutUploadSeconds)
+	}
+}
+
+// TestTimePutThenPartialConfigPutPreservesTimezone simulates: save timezone via PUT /api/time, then
+// save upload settings with a partial PUT /api/config body that omits timezone (avoids stale UTC).
+func TestTimePutThenPartialConfigPutPreservesTimezone(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	if svc.GetGlobal().Timezone != "UTC" {
+		t.Fatalf("precondition: default timezone UTC, got %q", svc.GetGlobal().Timezone)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	auth := func(req *http.Request) {
+		req.SetBasicAuth("admin", svc.GetWebPassword())
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	reqTime := httptest.NewRequest(http.MethodPut, "/api/time", bytes.NewBufferString(`{"timezone":"America/Los_Angeles"}`))
+	auth(reqTime)
+	wTime := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(wTime, reqTime)
+	if wTime.Code != http.StatusOK {
+		t.Fatalf("PUT /api/time: %d %s", wTime.Code, wTime.Body.String())
+	}
+	if svc.GetGlobal().Timezone != "America/Los_Angeles" {
+		t.Fatalf("after PUT /api/time: want America/Los_Angeles, got %q", svc.GetGlobal().Timezone)
+	}
+
+	bodyCfg := `{"update_channel":"edge","max_concurrent_uploads":3,"max_concurrent_captures":1,"timeout_connect_seconds":60,"timeout_upload_seconds":300}`
+	reqCfg := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewBufferString(bodyCfg))
+	auth(reqCfg)
+	wCfg := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(wCfg, reqCfg)
+	if wCfg.Code != http.StatusOK {
+		t.Fatalf("PUT /api/config: %d %s", wCfg.Code, wCfg.Body.String())
+	}
+
+	g := svc.GetGlobal()
+	if g.Timezone != "America/Los_Angeles" {
+		t.Errorf("timezone: want preserved America/Los_Angeles, got %q", g.Timezone)
+	}
+	if g.UpdateChannel != "edge" || g.MaxConcurrentUploads != 3 {
+		t.Errorf("upload settings: want edge/3, got %q/%d", g.UpdateChannel, g.MaxConcurrentUploads)
+	}
+}
+
+// TestConfigPutWebConsoleOnlyPreservesOtherFields matches saveWebSettings: body contains only web_console
+// (merged with prior port); other top-level fields must not be cleared.
+func TestConfigPutWebConsoleOnlyPreservesOtherFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	payload := `{"version":2,"timezone":"America/Chicago","update_channel":"latest","max_concurrent_uploads":2,"web_console":{"enabled":true,"port":3333,"password":"oldsecret"}}`
+	if err := os.WriteFile(globalPath, []byte(payload), 0644); err != nil {
+		t.Fatalf("write global.json: %v", err)
+	}
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	// Same shape as app.js: merge existing web_console and set password
+	put := `{"web_console":{"enabled":true,"port":3333,"password":"newsecret"}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewBufferString(put))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT: %d %s", w.Code, w.Body.String())
+	}
+	g := svc.GetGlobal()
+	if g.Timezone != "America/Chicago" {
+		t.Errorf("timezone: want preserved America/Chicago, got %q", g.Timezone)
+	}
+	if g.UpdateChannel != "latest" {
+		t.Errorf("update_channel: want latest, got %q", g.UpdateChannel)
+	}
+	if g.MaxConcurrentUploads != 2 {
+		t.Errorf("max_concurrent_uploads: want 2, got %d", g.MaxConcurrentUploads)
+	}
+	if g.WebConsole == nil || g.WebConsole.Password != "newsecret" || g.WebConsole.Port != 3333 {
+		t.Errorf("web_console: want port 3333 password newsecret, got %+v", g.WebConsole)
+	}
+}
+
 func TestConfigGetPreservesUserMaxConcurrentCaptures(t *testing.T) {
 	tmpDir := t.TempDir()
 	globalPath := filepath.Join(tmpDir, "global.json")

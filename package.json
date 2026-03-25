@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:js": "node --test internal/web/static/js/form-utils.test.js internal/web/static/js/preview-refresh.test.js",
+    "test:js": "node --test internal/web/static/js/form-utils.test.js internal/web/static/js/preview-refresh.test.js internal/web/static/js/settings-draft.test.js",
     "test:sh": "bats scripts/tests"
   },
   "devDependencies": {

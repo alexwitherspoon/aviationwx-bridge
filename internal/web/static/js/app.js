@@ -13,6 +13,24 @@ let timeUpdateInterval = null;
 let timezoneDirty = false;
 let webConsoleDirty = false;
 let uploadSettingsDirty = false;
+/** Camera add/edit modal: user changed a field since the form was shown. */
+let cameraFormDirty = false;
+
+function shouldSkipHydratingSettingsForms() {
+    const fn = window.shouldSkipSettingsHydrate;
+    if (typeof fn === 'function') {
+        return fn({ timezoneDirty, webConsoleDirty, uploadSettingsDirty });
+    }
+    return timezoneDirty || webConsoleDirty || uploadSettingsDirty;
+}
+
+function shouldWarnBeforeUnload() {
+    const fn = window.shouldWarnBeforePageLeave;
+    if (typeof fn === 'function') {
+        return fn({ timezoneDirty, webConsoleDirty, uploadSettingsDirty, cameraFormDirty });
+    }
+    return timezoneDirty || webConsoleDirty || uploadSettingsDirty || cameraFormDirty;
+}
 
 // Timezone list (IANA timezones for US and common international)
 const TIMEZONES = [
@@ -47,6 +65,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (status && status.first_run) {
         document.getElementById('setupBanner').style.display = 'block';
     }
+
+    document.addEventListener('input', markCameraFormDirtyIfNeeded, true);
+    document.addEventListener('change', markCameraFormDirtyIfNeeded, true);
+
+    window.addEventListener('beforeunload', (e) => {
+        if (shouldWarnBeforeUnload()) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
 });
 
 // Navigation
@@ -120,10 +148,14 @@ async function refreshStatus() {
     }
 }
 
-/** Loads global config from the API (required for settings UI and PUT /config spreads). */
+/** Loads global config from the API (required for settings UI and form defaults). */
 async function loadConfig() {
     try {
         config = await api('/config');
+        if (shouldSkipHydratingSettingsForms()) {
+            updateSettingsUnsavedHints();
+            return;
+        }
         loadGlobalSettings();
     } catch (err) {
         console.error('Failed to load config:', err);
@@ -644,13 +676,19 @@ async function saveTimezone() {
             method: 'PUT',
             body: JSON.stringify({ timezone }),
         });
-        timezoneDirty = false;
-        updateSettingsUnsavedHints();
-        updateTimeDisplay();
-        showNotification('✅ Timezone updated! Workers reloaded automatically.', 'success');
     } catch (err) {
         alert('Failed to save timezone: ' + err.message);
+        return;
     }
+    timezoneDirty = false;
+    updateSettingsUnsavedHints();
+    try {
+        await loadConfig();
+    } catch (err) {
+        console.error('Failed to reload config after timezone save:', err);
+    }
+    updateTimeDisplay();
+    showNotification('✅ Timezone updated! Workers reloaded automatically.', 'success');
 }
 
 // Notification system
@@ -1045,7 +1083,8 @@ async function saveCamera(event, existingId = null) {
                 body: JSON.stringify(camera),
             });
         }
-        
+
+        cameraFormDirty = false;
         closeModal();
         await loadCameras();
     } catch (err) {
@@ -1174,11 +1213,13 @@ async function saveWebSettings() {
     }
     
     try {
+        // Handler replaces web_console wholesale; merge with GET snapshot so listen port is not cleared.
+        const wc = (config && config.web_console) || {};
         await api('/config', {
             method: 'PUT',
             body: JSON.stringify({
-                ...config,
                 web_console: {
+                    ...wc,
                     enabled: true,
                     password: password,
                 },
@@ -1197,7 +1238,7 @@ async function saveWebSettings() {
 // Global Settings (concurrent uploads, update channel, timeouts)
 async function loadGlobalSettings() {
     if (!config) return;
-    if (uploadSettingsDirty) {
+    if (shouldSkipHydratingSettingsForms()) {
         updateSettingsUnsavedHints();
         return;
     }
@@ -1272,19 +1313,16 @@ async function saveGlobalSettings() {
     }
     
     try {
-        // Update config with new global settings
-        const updatedConfig = {
-            ...config,
-            update_channel: updateChannel,
-            max_concurrent_uploads: maxConcurrent,
-            max_concurrent_captures: maxCaptures,
-            timeout_connect_seconds: timeoutConnect,
-            timeout_upload_seconds: timeoutUpload
-        };
-        
+        // Omit nested globals from the body: the server replaces several structs wholesale if present.
         await api('/config', {
             method: 'PUT',
-            body: JSON.stringify(updatedConfig),
+            body: JSON.stringify({
+                update_channel: updateChannel,
+                max_concurrent_uploads: maxConcurrent,
+                max_concurrent_captures: maxCaptures,
+                timeout_connect_seconds: timeoutConnect,
+                timeout_upload_seconds: timeoutUpload,
+            }),
         });
 
         uploadSettingsDirty = false;
@@ -1344,12 +1382,18 @@ async function wizardStep2() {
             method: 'PUT',
             body: JSON.stringify({ timezone }),
         });
-        timezoneDirty = false;
-        const tzMain = document.getElementById('timezone');
-        if (tzMain) tzMain.value = timezone;
-        updateSettingsUnsavedHints();
     } catch (err) {
         console.error('Failed to set timezone:', err);
+        return;
+    }
+    timezoneDirty = false;
+    const tzMain = document.getElementById('timezone');
+    if (tzMain) tzMain.value = timezone;
+    updateSettingsUnsavedHints();
+    try {
+        await loadConfig();
+    } catch (err) {
+        console.error('Failed to reload config after wizard timezone save:', err);
     }
     
     // Show add camera form
@@ -1361,12 +1405,29 @@ async function wizardStep2() {
 
 // Modal management
 function showModal(title, content) {
+    if (document.getElementById('cameraForm') && cameraFormDirty) {
+        if (!confirm('Discard unsaved changes to this camera?')) {
+            return;
+        }
+    }
+    cameraFormDirty = false;
     document.getElementById('modalTitle').textContent = title;
     document.getElementById('modalBody').innerHTML = content;
     document.getElementById('modal').style.display = 'flex';
 }
 
+function markCameraFormDirtyIfNeeded(e) {
+    if (!e.target.closest('#cameraForm')) return;
+    cameraFormDirty = true;
+}
+
 function closeModal() {
+    if (document.getElementById('cameraForm') && cameraFormDirty) {
+        if (!confirm('Discard unsaved changes to this camera?')) {
+            return;
+        }
+    }
+    cameraFormDirty = false;
     if (lastCameraPreviewUrl) {
         URL.revokeObjectURL(lastCameraPreviewUrl);
         lastCameraPreviewUrl = null;

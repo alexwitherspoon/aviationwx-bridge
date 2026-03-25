@@ -197,7 +197,7 @@ jobs:
           body: |
             ## AviationWX.org Bridge ${{ steps.version.outputs.VERSION }}
             
-            <!-- AVIATIONWX_RELEASE_META {"version": "${{ steps.version.outputs.VERSION_NUM }}", "min_host_version": "2.0", "critical": ${{ steps.version.outputs.CRITICAL }}, "force_update": false, "rollback_safe": true} -->
+            <!-- AVIATIONWX_RELEASE_META {"version": "${{ steps.version.outputs.VERSION_NUM }}", "min_host_version": "2.1", "critical": ${{ steps.version.outputs.CRITICAL }}, "force_update": false, "rollback_safe": true} -->
             
             ### Installation
             

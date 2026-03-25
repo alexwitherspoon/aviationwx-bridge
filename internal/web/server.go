@@ -5,19 +5,80 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/camera"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/logger"
 )
 
 //go:embed static/*
 var staticFiles embed.FS
+
+// normalizeUploadForAPI trims upload host/username/password, lowercases host, and applies the
+// default host when the trimmed value is empty so SFTP identity keys stay consistent.
+func normalizeUploadForAPI(u *config.Upload) {
+	if u == nil {
+		return
+	}
+	u.Host = strings.TrimSpace(u.Host)
+	u.Username = strings.TrimSpace(u.Username)
+	u.Password = strings.TrimSpace(u.Password)
+	if u.Host == "" {
+		u.Host = "upload.aviationwx.org"
+	}
+	u.Host = strings.ToLower(u.Host)
+}
+
+var allowedCameraTypes = map[string]struct{}{
+	"http":  {},
+	"onvif": {},
+	"rtsp":  {},
+}
+
+// normalizeCameraType trims, lowercases, and validates camera type for persistence (factory expects lowercase).
+func normalizeCameraType(t string) (string, error) {
+	t = strings.ToLower(strings.TrimSpace(t))
+	if t == "" {
+		return "", errors.New("camera type is required")
+	}
+	if _, ok := allowedCameraTypes[t]; !ok {
+		return "", fmt.Errorf("unsupported camera type %q (use http, onvif, or rtsp)", t)
+	}
+	return t, nil
+}
+
+// validateONVIFCameraForPost ensures ONVIF cameras have a usable endpoint and credentials after normalization.
+func validateONVIFCameraForPost(cam *config.Camera) error {
+	if cam.ONVIF == nil {
+		return errors.New("ONVIF settings are required for type onvif")
+	}
+	ep := strings.TrimSpace(cam.ONVIF.Endpoint)
+	if ep != "" {
+		ep = camera.NormalizeONVIFEndpoint(ep)
+	}
+	cam.ONVIF.Endpoint = ep
+	if ep == "" {
+		return errors.New("ONVIF endpoint is required for type onvif")
+	}
+	u := strings.TrimSpace(cam.ONVIF.Username)
+	if u == "" {
+		return errors.New("ONVIF username is required for type onvif")
+	}
+	if strings.TrimSpace(cam.ONVIF.Password) == "" {
+		return errors.New("ONVIF password is required for type onvif")
+	}
+	cam.ONVIF.Username = u
+	cam.ONVIF.Password = strings.TrimSpace(cam.ONVIF.Password)
+	return nil
+}
 
 // Server provides the web console HTTP server
 type Server struct {
@@ -27,34 +88,38 @@ type Server struct {
 	log           *logger.Logger
 
 	// Callbacks to bridge services
-	getStatus       func() interface{}
-	testCamera      func(camConfig config.Camera) ([]byte, error)
-	testUpload      func(uploadConfig config.Upload) error
-	getCameraImage  func(cameraID string) ([]byte, error)
-	getWorkerStatus func(cameraID string) map[string]interface{}
+	getStatus           func() interface{}
+	getCaptureReadiness func() (ok bool, reason string)
+	testCamera          func(camConfig config.Camera) ([]byte, error)
+	testUpload          func(uploadConfig config.Upload) error
+	getCameraImage      func(cameraID string) ([]byte, error)
+	getWorkerStatus     func(cameraID string) map[string]interface{}
 }
 
 // ServerConfig configures the web server
 type ServerConfig struct {
-	ConfigService   *config.Service
-	GetStatus       func() interface{}
-	TestCamera      func(camConfig config.Camera) ([]byte, error)
-	TestUpload      func(uploadConfig config.Upload) error
-	GetCameraImage  func(cameraID string) ([]byte, error)
-	GetWorkerStatus func(cameraID string) map[string]interface{}
+	ConfigService *config.Service
+	GetStatus     func() interface{}
+	// GetCaptureReadiness, if non-nil, backs GET /readyz for host-side capture health checks (no auth).
+	GetCaptureReadiness func() (ok bool, reason string)
+	TestCamera          func(camConfig config.Camera) ([]byte, error)
+	TestUpload          func(uploadConfig config.Upload) error
+	GetCameraImage      func(cameraID string) ([]byte, error)
+	GetWorkerStatus     func(cameraID string) map[string]interface{}
 }
 
 // NewServer creates a new web server
 func NewServer(cfg ServerConfig) *Server {
 	s := &Server{
-		configService:   cfg.ConfigService,
-		mux:             http.NewServeMux(),
-		log:             logger.Default(),
-		getStatus:       cfg.GetStatus,
-		testCamera:      cfg.TestCamera,
-		testUpload:      cfg.TestUpload,
-		getCameraImage:  cfg.GetCameraImage,
-		getWorkerStatus: cfg.GetWorkerStatus,
+		configService:       cfg.ConfigService,
+		mux:                 http.NewServeMux(),
+		log:                 logger.Default(),
+		getStatus:           cfg.GetStatus,
+		getCaptureReadiness: cfg.GetCaptureReadiness,
+		testCamera:          cfg.TestCamera,
+		testUpload:          cfg.TestUpload,
+		getCameraImage:      cfg.GetCameraImage,
+		getWorkerStatus:     cfg.GetWorkerStatus,
 	}
 
 	s.setupRoutes()
@@ -74,6 +139,7 @@ func (s *Server) setupRoutes() {
 
 	// Health check (no auth)
 	s.mux.HandleFunc("/healthz", s.handleHealthz)
+	s.mux.HandleFunc("/readyz", s.handleReadyz)
 	s.mux.HandleFunc("/api/logs", s.authMiddleware(http.HandlerFunc(s.handleLogs)))
 
 	// Static files (require auth except for login assets)
@@ -166,17 +232,57 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		global := s.configService.GetGlobal()
+		autoMCC := global.MaxConcurrentCaptures <= 0 &&
+			(global.Global == nil || global.Global.MaxConcurrentCaptures <= 0)
+		effectiveMCC := global.MaxConcurrentCaptures
+		if effectiveMCC <= 0 {
+			effectiveMCC = config.EffectiveMaxConcurrentCaptures(global)
+		}
+		raw, err := json.Marshal(global)
+		if err != nil {
+			http.Error(w, "Failed to encode config", http.StatusInternalServerError)
+			return
+		}
+		var out map[string]interface{}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			http.Error(w, "Failed to encode config", http.StatusInternalServerError)
+			return
+		}
+		out["max_concurrent_captures"] = effectiveMCC
+		out["max_concurrent_captures_auto"] = autoMCC
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(global)
+		json.NewEncoder(w).Encode(out)
 
 	case http.MethodPut:
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+		var keyPresence map[string]json.RawMessage
+		if err := json.Unmarshal(bodyBytes, &keyPresence); err != nil {
+			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
 		var updates config.GlobalSettings
-		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		if err := json.Unmarshal(bodyBytes, &updates); err != nil {
 			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		err := s.configService.UpdateGlobal(func(g *config.GlobalSettings) error {
+		if raw, ok := keyPresence["max_concurrent_captures"]; ok {
+			var ptr *int
+			if err := json.Unmarshal(raw, &ptr); err != nil {
+				http.Error(w, "max_concurrent_captures: invalid value", http.StatusBadRequest)
+				return
+			}
+			if ptr != nil && *ptr != 0 && (*ptr < 1 || *ptr > 10) {
+				http.Error(w, fmt.Sprintf("max_concurrent_captures must be 0 (auto), null, or 1–10, got %d", *ptr), http.StatusBadRequest)
+				return
+			}
+		}
+
+		err = s.configService.UpdateGlobal(func(g *config.GlobalSettings) error {
 			// Nested sections first (full replacements from JSON)
 			if updates.Timezone != "" {
 				g.Timezone = updates.Timezone
@@ -203,6 +309,24 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 					g.Global = &config.Global{}
 				}
 				g.Global.MaxConcurrentUploads = updates.MaxConcurrentUploads
+			}
+			if raw, ok := keyPresence["max_concurrent_captures"]; ok {
+				var ptr *int
+				if err := json.Unmarshal(raw, &ptr); err != nil {
+					return err
+				}
+				if ptr == nil || *ptr == 0 {
+					g.MaxConcurrentCaptures = 0
+					if g.Global != nil {
+						g.Global.MaxConcurrentCaptures = 0
+					}
+				} else {
+					g.MaxConcurrentCaptures = *ptr
+					if g.Global == nil {
+						g.Global = &config.Global{}
+					}
+					g.Global.MaxConcurrentCaptures = *ptr
+				}
 			}
 			if updates.TimeoutConnectSeconds != 0 {
 				g.TimeoutConnectSeconds = updates.TimeoutConnectSeconds
@@ -259,45 +383,70 @@ func (s *Server) addCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
-	if cam.ID == "" {
-		cam.ID = fmt.Sprintf("cam-%d", time.Now().Unix())
+	// Display name is required; camera id is derived from it (client-supplied id is ignored)
+	if strings.TrimSpace(cam.Name) == "" {
+		http.Error(w, "Display name is required", http.StatusBadRequest)
+		return
 	}
-	if cam.Name == "" {
-		cam.Name = cam.ID
+	camType, err := normalizeCameraType(cam.Type)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
+	cam.Type = camType
+	cam.ID = ""
 	if cam.Upload == nil {
 		http.Error(w, "Upload credentials are required", http.StatusBadRequest)
 		return
 	}
+	normalizeUploadForAPI(cam.Upload)
 
 	// Set defaults
 	if cam.CaptureIntervalSeconds == 0 {
 		cam.CaptureIntervalSeconds = 60
 	}
-	if cam.Upload.Host == "" {
-		cam.Upload.Host = "upload.aviationwx.org"
-	}
 	if cam.Upload.Port == 0 {
 		cam.Upload.Port = 2222
 	}
-
-	// Add camera via ConfigService
-	if err := s.configService.AddCamera(cam); err != nil {
-		s.log.Error("Failed to add camera via API",
-			"camera", cam.ID,
-			"error", err,
-			"camera_type", cam.Type)
-		http.Error(w, fmt.Sprintf("Failed to add camera %s: %v", cam.ID, err), http.StatusInternalServerError)
+	if strings.TrimSpace(cam.Upload.Username) == "" {
+		http.Error(w, "Upload username is required", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(cam.Upload.Password) == "" {
+		http.Error(w, "Upload password is required", http.StatusBadRequest)
 		return
 	}
 
-	s.log.Info("Camera added via API", "camera", cam.ID, "type", cam.Type)
+	if cam.Type == "onvif" {
+		if err := validateONVIFCameraForPost(&cam); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	} else if cam.ONVIF != nil && strings.TrimSpace(cam.ONVIF.Endpoint) != "" {
+		cam.ONVIF.Endpoint = camera.NormalizeONVIFEndpoint(cam.ONVIF.Endpoint)
+	}
+
+	// Add camera via ConfigService (returns persisted camera with generated id)
+	added, err := s.configService.AddCamera(cam)
+	if err != nil {
+		if errors.Is(err, config.ErrDuplicateUploadCredentials) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		s.log.Error("Failed to add camera via API",
+			"camera_name", cam.Name,
+			"error", err,
+			"camera_type", cam.Type)
+		http.Error(w, fmt.Sprintf("Failed to add camera %q: %v", cam.Name, err), http.StatusInternalServerError)
+		return
+	}
+
+	s.log.Info("Camera added via API", "camera", added.ID, "type", added.Type)
 
 	global := s.configService.GetGlobal()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(s.cameraToMap(cam, global.Timezone))
+	json.NewEncoder(w).Encode(s.cameraToMap(added, global.Timezone))
 }
 
 func (s *Server) handleCamera(w http.ResponseWriter, r *http.Request) {
@@ -348,7 +497,55 @@ func (s *Server) updateCamera(w http.ResponseWriter, r *http.Request, cameraID s
 		return
 	}
 
-	err := s.configService.UpdateCamera(cameraID, func(cam *config.Camera) error {
+	existing, err := s.configService.GetCamera(cameraID)
+	if err != nil {
+		http.Error(w, "Camera not found", http.StatusNotFound)
+		return
+	}
+
+	if tt := strings.TrimSpace(updates.Type); tt != "" {
+		nt, errNorm := normalizeCameraType(tt)
+		if errNorm != nil {
+			http.Error(w, errNorm.Error(), http.StatusBadRequest)
+			return
+		}
+		updates.Type = nt
+	} else {
+		updates.Type = existing.Type
+	}
+
+	if updates.Upload != nil {
+		normalizeUploadForAPI(updates.Upload)
+	}
+
+	if updates.ONVIF != nil {
+		ep := strings.TrimSpace(updates.ONVIF.Endpoint)
+		if ep != "" {
+			ep = camera.NormalizeONVIFEndpoint(ep)
+		} else if existing.ONVIF != nil && strings.TrimSpace(existing.ONVIF.Endpoint) != "" {
+			ep = strings.TrimSpace(existing.ONVIF.Endpoint)
+		}
+		updates.ONVIF.Endpoint = ep
+		if strings.TrimSpace(updates.ONVIF.Endpoint) == "" {
+			http.Error(w, "ONVIF endpoint is required when ONVIF settings are present", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if updates.Upload != nil {
+		if strings.TrimSpace(updates.Upload.Username) == "" {
+			http.Error(w, "Upload username is required", http.StatusBadRequest)
+			return
+		}
+		if updates.Upload.Password == "" {
+			if existing.Upload == nil || strings.TrimSpace(existing.Upload.Password) == "" {
+				http.Error(w, "Upload password is required", http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	err = s.configService.UpdateCamera(cameraID, func(cam *config.Camera) error {
 		// Preserve passwords if empty
 		if updates.Upload != nil && updates.Upload.Password == "" && cam.Upload != nil {
 			updates.Upload.Password = cam.Upload.Password
@@ -380,6 +577,10 @@ func (s *Server) updateCamera(w http.ResponseWriter, r *http.Request, cameraID s
 	})
 
 	if err != nil {
+		if errors.Is(err, config.ErrDuplicateUploadCredentials) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, "Failed to update camera: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -488,6 +689,10 @@ func (s *Server) handleTestCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if cam.ONVIF != nil && cam.ONVIF.Endpoint != "" {
+		cam.ONVIF.Endpoint = camera.NormalizeONVIFEndpoint(cam.ONVIF.Endpoint)
+	}
+
 	imageData, err := s.testCamera(cam)
 	if err != nil {
 		http.Error(w, "Test failed: "+err.Error(), http.StatusInternalServerError)
@@ -539,6 +744,44 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(status)
+}
+
+// handleReadyz reports whether capture pipelines are healthy enough to serve traffic.
+// Returns 503 when enabled cameras have no recent successful capture (optional hook from bridge).
+// No authentication — intended for host-side watchdog scripts.
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.getCaptureReadiness == nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status": "unknown",
+			"detail": "capture readiness not configured",
+		})
+		return
+	}
+
+	ok, reason := s.getCaptureReadiness()
+	body := map[string]interface{}{
+		"status":    "ready",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+	if !ok {
+		body["status"] = "not_ready"
+		if reason != "" {
+			body["reason"] = reason
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(body)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 func (s *Server) buildHealthStatus() map[string]interface{} {

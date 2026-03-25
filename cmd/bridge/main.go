@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -26,6 +28,14 @@ import (
 )
 
 func init() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-version", "--version":
+			fmt.Printf("%s (%s)\n", Version, GitCommit)
+			os.Exit(0)
+		}
+	}
+
 	// Resource management - dynamically set based on Docker container limits
 	// GOMEMLIMIT is passed as environment variable by container startup script
 	// which calculates appropriate limits based on system resources
@@ -169,6 +179,7 @@ func main() {
 			CheckIntervalSeconds: global.SNTP.CheckIntervalSeconds,
 			MaxOffsetSeconds:     global.SNTP.MaxOffsetSeconds,
 			TimeoutSeconds:       global.SNTP.TimeoutSeconds,
+			StaleThresholdHours:  global.SNTP.StaleThresholdHours,
 		})
 		timeHealth.Start()
 		log.Info("Time health monitoring started", "servers", global.SNTP.Servers)
@@ -206,12 +217,13 @@ func main() {
 
 	// Create web server (no callbacks - uses ConfigService directly)
 	bridge.webServer = web.NewServer(web.ServerConfig{
-		ConfigService:   configService,
-		GetStatus:       bridge.getStatus,
-		TestCamera:      bridge.testCamera,
-		TestUpload:      bridge.testUpload,
-		GetCameraImage:  bridge.getCameraImage,
-		GetWorkerStatus: bridge.getWorkerStatus,
+		ConfigService:       configService,
+		GetStatus:           bridge.getStatus,
+		GetCaptureReadiness: bridge.getCaptureReadiness,
+		TestCamera:          bridge.testCamera,
+		TestUpload:          bridge.testUpload,
+		GetCameraImage:      bridge.getCameraImage,
+		GetWorkerStatus:     bridge.getWorkerStatus,
 	})
 
 	// Subscribe to config changes
@@ -284,15 +296,17 @@ func (b *Bridge) initOrchestrator() error {
 
 	global := b.configService.GetGlobal()
 	maxConcurrent := config.EffectiveMaxConcurrentUploads(global)
+	maxCaptures := config.EffectiveMaxConcurrentCaptures(global)
 
 	orch, err := scheduler.NewOrchestrator(scheduler.OrchestratorConfig{
-		QueueBasePath:        queuePath,
-		QueueMaxTotalMB:      100,
-		QueueMaxHeapMB:       400,
-		Timezone:             global.Timezone,
-		MaxConcurrentUploads: maxConcurrent,
-		ResourceLimiter:      b.resourceLimiter,
-		Logger:               b.log,
+		QueueBasePath:         queuePath,
+		QueueMaxTotalMB:       100,
+		QueueMaxHeapMB:        400,
+		Timezone:              global.Timezone,
+		MaxConcurrentUploads:  maxConcurrent,
+		MaxConcurrentCaptures: maxCaptures,
+		ResourceLimiter:       b.resourceLimiter,
+		Logger:                b.log,
 	})
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)
@@ -371,6 +385,7 @@ func (b *Bridge) restartSNTP(sntpConfig *config.SNTP) error {
 			CheckIntervalSeconds: sntpConfig.CheckIntervalSeconds,
 			MaxOffsetSeconds:     sntpConfig.MaxOffsetSeconds,
 			TimeoutSeconds:       sntpConfig.TimeoutSeconds,
+			StaleThresholdHours:  sntpConfig.StaleThresholdHours,
 		})
 		b.timeHealth.Start()
 
@@ -660,13 +675,15 @@ func (b *Bridge) handleConfigEvent(event config.ConfigEvent) {
 
 		if b.orchestrator != nil {
 			b.orchestrator.SetMaxConcurrentUploads(config.EffectiveMaxConcurrentUploads(global))
+			b.orchestrator.SetMaxConcurrentCaptures(config.EffectiveMaxConcurrentCaptures(global))
 			b.refreshUploadersFromGlobal()
 		}
 
 		b.log.Info("Global config updated",
 			"timezone", global.Timezone,
 			"sntp_enabled", global.SNTP != nil && global.SNTP.Enabled,
-			"max_concurrent_uploads", config.EffectiveMaxConcurrentUploads(global))
+			"max_concurrent_uploads", config.EffectiveMaxConcurrentUploads(global),
+			"max_concurrent_captures", config.EffectiveMaxConcurrentCaptures(global))
 	}
 }
 
@@ -789,11 +806,15 @@ func (b *Bridge) getStatus() interface{} {
 	// Add time health if available
 	if b.timeHealth != nil {
 		timeStatus := b.timeHealth.GetStatus()
-		status["time_health"] = map[string]interface{}{
+		th := map[string]interface{}{
 			"healthy":    timeStatus.Healthy,
 			"offset_ms":  timeStatus.Offset.Milliseconds(),
 			"last_check": timeStatus.LastCheck.Format(time.RFC3339),
 		}
+		if !timeStatus.LastGoodSync.IsZero() {
+			th["last_good_sync"] = timeStatus.LastGoodSync.UTC().Format(time.RFC3339)
+		}
+		status["time_health"] = th
 	}
 
 	// Add update checker status if available
@@ -809,6 +830,40 @@ func (b *Bridge) getStatus() interface{} {
 	}
 
 	return status
+}
+
+// getCaptureReadiness implements /readyz: reports not-ready (503) when enabled cameras have no recent successful capture.
+// Uses AVIATIONWX_READYZ_GRACE_SECONDS (default 600) after orchestrator start before enforcing staleness,
+// and AVIATIONWX_READYZ_STALE_SECONDS (default 900) as a minimum staleness window; per-camera threshold is
+// max(stale, 3*capture interval) so long-interval cameras are not flagged incorrectly.
+func (b *Bridge) getCaptureReadiness() (bool, string) {
+	grace := envDurationSeconds("AVIATIONWX_READYZ_GRACE_SECONDS", 600)
+	minStale := envDurationSeconds("AVIATIONWX_READYZ_STALE_SECONDS", 900)
+
+	if b.orchestrator == nil {
+		hasEnabled := false
+		for _, c := range b.configService.ListCameras() {
+			if c.Enabled {
+				hasEnabled = true
+				break
+			}
+		}
+		return readinessWithNilOrchestrator(hasEnabled)
+	}
+
+	return evalCaptureReadiness(grace, minStale, b.orchestrator.GetStatus(), time.Now())
+}
+
+func envDurationSeconds(key string, defaultSec int) time.Duration {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return time.Duration(defaultSec) * time.Second
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return time.Duration(defaultSec) * time.Second
+	}
+	return time.Duration(n) * time.Second
 }
 
 // getUpdateChannel normalizes the update channel value

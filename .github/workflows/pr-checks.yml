@@ -26,6 +26,18 @@ jobs:
       
       - name: Download dependencies
         run: go mod download
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run shell (Bats) tests
+        run: npm run test:sh
       
       - name: Run go vet
         run: go vet ./...

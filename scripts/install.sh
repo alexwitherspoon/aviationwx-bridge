@@ -239,6 +239,7 @@ install_host_scripts() {
         "aviationwx"
         "aviationwx-supervisor.sh"
         "aviationwx-watchdog.sh"
+        "aviationwx-capture-restart.sh"
         "aviationwx-recovery.sh"
         "aviationwx-container-start.sh"
     )
@@ -593,6 +594,7 @@ uninstall() {
         "aviationwx"
         "aviationwx-supervisor.sh"
         "aviationwx-watchdog.sh"
+        "aviationwx-capture-restart.sh"
         "aviationwx-recovery.sh"
         "aviationwx-container-start.sh"
     )

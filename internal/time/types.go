@@ -11,9 +11,12 @@ type TimeHealth struct {
 	healthy       bool
 	offset        time.Duration // Time offset from NTP server
 	lastCheck     time.Time
+	lastGoodSync  time.Time // Last successful in-bounds NTP response (wall clock)
 	checkInterval time.Duration
 	maxOffset     time.Duration
+	staleMaxAge   time.Duration // If lastGoodSync is within this age, still healthy when NTP is unreachable
 	servers       []string
+	queryHook     func(string) (time.Duration, error) // if set, replaces real NTP (tests)
 	mu            sync.RWMutex
 
 	// Context cancellation for clean shutdown
@@ -28,13 +31,19 @@ type Config struct {
 	CheckIntervalSeconds int
 	MaxOffsetSeconds     int
 	TimeoutSeconds       int
+	// StaleThresholdHours: after a successful in-bounds sync, remain healthy for this many hours
+	// while NTP is unreachable. 0 defaults to 24.
+	StaleThresholdHours int
+	// QueryHook, if non-nil, is used instead of a real NTP query. For unit tests only.
+	QueryHook func(server string) (time.Duration, error)
 }
 
 // Status represents the current time health status
 type Status struct {
-	Healthy   bool
-	Offset    time.Duration
-	LastCheck time.Time
+	Healthy      bool
+	Offset       time.Duration
+	LastCheck    time.Time
+	LastGoodSync time.Time // Zero if there has never been an in-bounds NTP sync
 }
 
 // NewTimeHealth creates a new time health manager
@@ -54,15 +63,23 @@ func NewTimeHealth(config Config) *TimeHealth {
 		servers = []string{"pool.ntp.org"} // Default NTP server
 	}
 
+	staleHours := config.StaleThresholdHours
+	if staleHours <= 0 {
+		staleHours = 24
+	}
+	staleMaxAge := time.Duration(staleHours) * time.Hour
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &TimeHealth{
-		healthy:       false, // Start as unhealthy until first check
+		healthy:       false, // Unhealthy until first in-bounds sync or stale-window grace
 		offset:        0,
 		lastCheck:     time.Time{},
 		checkInterval: checkInterval,
 		maxOffset:     maxOffset,
+		staleMaxAge:   staleMaxAge,
 		servers:       servers,
+		queryHook:     config.QueryHook,
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -87,9 +104,10 @@ func (th *TimeHealth) GetStatus() Status {
 	th.mu.RLock()
 	defer th.mu.RUnlock()
 	return Status{
-		Healthy:   th.healthy,
-		Offset:    th.offset,
-		LastCheck: th.lastCheck,
+		Healthy:      th.healthy,
+		Offset:       th.offset,
+		LastCheck:    th.lastCheck,
+		LastGoodSync: th.lastGoodSync,
 	}
 }
 
@@ -128,26 +146,50 @@ func (th *TimeHealth) Stop() {
 func (th *TimeHealth) check() {
 	// Try each server until one succeeds
 	for _, server := range th.servers {
-		offset, err := th.queryNTP(server)
+		offset, err := th.queryServer(server)
 		if err != nil {
 			continue // Try next server
 		}
 
 		// Update state
+		now := time.Now()
 		th.mu.Lock()
 		th.offset = offset
-		th.lastCheck = time.Now()
-		th.healthy = absDuration(offset) <= th.maxOffset
+		th.lastCheck = now
+		inBounds := absDuration(offset) <= th.maxOffset
+		th.healthy = inBounds
+		if inBounds {
+			th.lastGoodSync = now
+		} else {
+			// Out-of-bounds offset: do not keep a prior lastGoodSync, or a later all-servers-fail cycle
+			// could incorrectly treat stale grace as healthy (see stale_sync_behavior_test.go).
+			th.lastGoodSync = time.Time{}
+		}
 		th.mu.Unlock()
 
-		return // Success
+		return // Got a response from at least one server
 	}
 
-	// All servers failed - mark as unhealthy
+	// All servers failed: unhealthy only if we never synced, or last good sync is older than staleMaxAge
 	th.mu.Lock()
-	th.healthy = false
 	th.lastCheck = time.Now()
+	switch {
+	case th.lastGoodSync.IsZero():
+		th.healthy = false
+	case time.Since(th.lastGoodSync) <= th.staleMaxAge:
+		th.healthy = true
+	default:
+		th.healthy = false
+	}
 	th.mu.Unlock()
+}
+
+// queryServer runs a real NTP query or Config.QueryHook when set.
+func (th *TimeHealth) queryServer(server string) (time.Duration, error) {
+	if th.queryHook != nil {
+		return th.queryHook(server)
+	}
+	return th.queryNTP(server)
 }
 
 // queryNTP is declared in sntp.go to keep types.go focused on types

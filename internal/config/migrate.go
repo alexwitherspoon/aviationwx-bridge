@@ -44,7 +44,7 @@ func MigrateFromLegacy(legacyPath string, newBaseDir string) error {
 
 	// Migrate cameras
 	for _, cam := range legacy.Cameras {
-		if err := svc.AddCamera(cam); err != nil {
+		if _, err := svc.AddCamera(cam); err != nil {
 			return fmt.Errorf("migrate camera %s: %w", cam.ID, err)
 		}
 	}

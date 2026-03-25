@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-readonly SCRIPT_VERSION="2.0"
+readonly SCRIPT_VERSION="2.1"
 readonly GITHUB_REPO="alexwitherspoon/aviationwx.org-bridge"
 readonly IMAGE_NAME="ghcr.io/alexwitherspoon/aviationwx-org-bridge"
 readonly CONTAINER_NAME="aviationwx-org-bridge"
@@ -93,6 +93,7 @@ update_host_scripts() {
         "aviationwx"
         "aviationwx-supervisor.sh"
         "aviationwx-watchdog.sh"
+        "aviationwx-capture-restart.sh"
         "aviationwx-recovery.sh"
         "aviationwx-container-start.sh"
     )

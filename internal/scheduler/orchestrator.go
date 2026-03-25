@@ -3,10 +3,12 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/camera"
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/hardware"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/queue"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/resource"
 	timepkg "github.com/alexwitherspoon/AviationWX.org-Bridge/internal/time"
@@ -18,6 +20,7 @@ type Orchestrator struct {
 	// Components
 	queueManager    *queue.Manager
 	captureWorkers  map[string]*CaptureWorker
+	captureGate     *CaptureGate
 	uploadWorker    *UploadWorker
 	authority       *timepkg.Authority
 	exifHelper      *timepkg.ExifToolHelper
@@ -47,9 +50,10 @@ type OrchestratorConfig struct {
 	Timezone string // IANA timezone, e.g., "America/Los_Angeles"
 
 	// Upload settings
-	MinUploadInterval    time.Duration // Default: 1 second
-	AuthBackoffSecs      int           // Default: 60
-	MaxConcurrentUploads int           // Default: 2 (conservative for slow networks)
+	MinUploadInterval     time.Duration // Default: 1 second
+	AuthBackoffSecs       int           // Default: 60
+	MaxConcurrentUploads  int           // Default: 2 (conservative for slow networks)
+	MaxConcurrentCaptures int           // Default: 1; global limit on simultaneous capture jobs
 
 	// Resource management
 	ResourceLimiter *resource.Limiter // Optional: limits concurrent CPU-intensive work
@@ -61,12 +65,13 @@ type OrchestratorConfig struct {
 // DefaultOrchestratorConfig returns sensible defaults
 func DefaultOrchestratorConfig() OrchestratorConfig {
 	return OrchestratorConfig{
-		QueueBasePath:        "/dev/shm/aviationwx",
-		QueueMaxTotalMB:      100,
-		QueueMaxHeapMB:       400,
-		MinUploadInterval:    time.Second,
-		AuthBackoffSecs:      60,
-		MaxConcurrentUploads: 2, // Conservative for slow networks
+		QueueBasePath:         "/dev/shm/aviationwx",
+		QueueMaxTotalMB:       100,
+		QueueMaxHeapMB:        400,
+		MinUploadInterval:     time.Second,
+		AuthBackoffSecs:       60,
+		MaxConcurrentUploads:  2, // Conservative for slow networks
+		MaxConcurrentCaptures: 0, // 0 = unset; NewOrchestrator uses hardware.DefaultMaxConcurrentCaptures()
 	}
 }
 
@@ -126,13 +131,27 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		logger.Info("Using default resource limiter")
 	}
 
+	mc := config.MaxConcurrentCaptures
+	if mc <= 0 {
+		// User did not set max_concurrent_captures; profile from RAM/CPU. Explicit values skip this.
+		mc = hardware.DefaultMaxConcurrentCaptures()
+	}
+	if mc > maxConcurrentCapturesCap {
+		mc = maxConcurrentCapturesCap
+	}
+	captureGate := NewCaptureGate(mc)
+
+	cfgCopy := config
+	cfgCopy.MaxConcurrentCaptures = mc
+
 	return &Orchestrator{
 		queueManager:    queueManager,
 		captureWorkers:  make(map[string]*CaptureWorker),
+		captureGate:     captureGate,
 		authority:       authority,
 		exifHelper:      exifHelper,
 		resourceLimiter: resourceLimiter,
-		config:          config,
+		config:          cfgCopy,
 		ctx:             ctx,
 		cancel:          cancel,
 		logger:          logger,
@@ -164,6 +183,8 @@ func (o *Orchestrator) AddCamera(cam camera.Camera, config CameraConfig, interva
 		IntervalSecs:    intervalSecs,
 		Logger:          o.logger,
 		OnCapture:       onCapture,
+		CaptureGate:     o.captureGate,
+		OnGateReleased:  o.notifyCaptureGateReleased,
 	}
 
 	worker := NewCaptureWorker(workerConfig)
@@ -254,6 +275,58 @@ func (o *Orchestrator) SetTimeHealth(timeHealth *timepkg.TimeHealth) {
 		worker.authority = authority
 	}
 	o.mu.Unlock()
+}
+
+// SetMaxConcurrentCaptures updates the global capture concurrency limit (1–10).
+func (o *Orchestrator) SetMaxConcurrentCaptures(n int) {
+	if n < 1 {
+		n = 1
+	}
+	if n > maxConcurrentCapturesCap {
+		n = maxConcurrentCapturesCap
+	}
+	o.mu.Lock()
+	o.config.MaxConcurrentCaptures = n
+	g := o.captureGate
+	o.mu.Unlock()
+	var prevLimit int
+	if g != nil {
+		g.mu.Lock()
+		prevLimit = g.limit
+		g.mu.Unlock()
+		g.SetLimit(n)
+	}
+	if g != nil && n > prevLimit {
+		for i := 0; i < n-prevLimit; i++ {
+			o.notifyCaptureGateReleased()
+		}
+	}
+}
+
+// notifyCaptureGateReleased wakes one pending capture worker after a slot frees (sorted camera ID order).
+func (o *Orchestrator) notifyCaptureGateReleased() {
+	o.mu.RLock()
+	ids := make([]string, 0, len(o.captureWorkers))
+	for id := range o.captureWorkers {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var toWake *CaptureWorker
+	for _, id := range ids {
+		w := o.captureWorkers[id]
+		if w != nil && w.eligibleForPendingGateWake() {
+			toWake = w
+			break
+		}
+	}
+	o.mu.RUnlock()
+	if toWake == nil {
+		return
+	}
+	select {
+	case toWake.wakeCapture <- struct{}{}:
+	default:
+	}
 }
 
 // SetMaxConcurrentUploads updates the orchestrator config and applies the new limit to the upload worker.

@@ -45,6 +45,9 @@ func TestNewTimeHealth_Defaults(t *testing.T) {
 	if len(th.servers) == 0 {
 		t.Error("servers should have default value")
 	}
+	if th.staleMaxAge != 24*time.Hour {
+		t.Errorf("staleMaxAge = %v, want 24h (default when StaleThresholdHours is 0)", th.staleMaxAge)
+	}
 }
 
 func TestTimeHealth_IsHealthy(t *testing.T) {
@@ -105,6 +108,9 @@ func TestTimeHealth_GetStatus(t *testing.T) {
 	}
 	if !status.LastCheck.IsZero() {
 		t.Error("LastCheck should be zero initially")
+	}
+	if !status.LastGoodSync.IsZero() {
+		t.Error("LastGoodSync should be zero initially")
 	}
 }
 

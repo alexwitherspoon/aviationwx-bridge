@@ -46,7 +46,7 @@
                 <div id="setupBanner" class="banner banner-info" style="display: none;">
                     <div class="banner-content">
                         <h3>Welcome to AviationWX.org Bridge!</h3>
-                        <p>Let's set up your first camera. You'll need your SFTP credentials from aviationwx.org</p>
+                        <p>Let's set up your first camera. Each camera needs its own SFTP account from aviationwx.org.</p>
                         <button class="btn btn-primary" onclick="showSetupWizard()">Start Setup</button>
                     </div>
                 </div>
@@ -172,16 +172,21 @@
                     <div class="card-body">
                         <div class="form-group">
                             <label for="timezone">Local Timezone</label>
-                            <select id="timezone" class="form-control" onchange="updateTimezone()">
+                            <select id="timezone" class="form-control" onchange="markTimezoneDirty()">
                                 <option value="">-- Select Timezone --</option>
                             </select>
                             <p class="form-help">
-                                Select the timezone where your cameras are located. 
+                                Select the timezone where your cameras are located.
                                 Camera timestamps will be interpreted in this timezone and converted to UTC.
+                                Click Save to apply changes.
                             </p>
+                            <p id="timezoneUnsavedHint" class="form-help" style="display:none;color:var(--color-warning);">Unsaved changes — click Save timezone to apply.</p>
+                        </div>
+                        <div style="margin-top: var(--space-md);">
+                            <button type="button" class="btn btn-primary" onclick="saveTimezone()">Save timezone</button>
                         </div>
 
-                        <div class="time-preview">
+                        <div class="time-preview" style="margin-top: var(--space-lg);">
                             <div class="time-box">
                                 <label>Local Time</label>
                                 <span id="localTime" class="time-value">--:--:--</span>
@@ -203,13 +208,17 @@
                     <div class="card-body">
                         <div class="form-group">
                             <label for="webPassword">Password</label>
-                            <input type="password" id="webPassword" class="form-control" placeholder="••••••••">
+                            <div class="password-input-row">
+                                <input type="password" id="webPassword" class="form-control" placeholder="New password" autocomplete="new-password" spellcheck="false" oninput="markWebConsoleDirty()">
+                                <button type="button" class="btn btn-secondary btn-sm" id="webPasswordToggle" aria-pressed="false" aria-label="Show Web console password" onclick="togglePasswordField('webPassword', 'webPasswordToggle', 'Web console password')">Show</button>
+                            </div>
                             <p class="form-help">
                                 Change the password for the web console. 
                                 Contact: <a href="mailto:contact@aviationwx.org">contact@aviationwx.org</a> for SFTP credentials.
                             </p>
+                            <p id="webConsoleUnsavedHint" class="form-help" style="display:none;color:var(--color-warning);">Unsaved changes — click Save password to apply.</p>
                         </div>
-                        <button class="btn btn-primary" onclick="saveWebSettings()">Save Password</button>
+                        <button type="button" class="btn btn-primary" onclick="saveWebSettings()">Save password</button>
                     </div>
                 </div>
 
@@ -221,7 +230,7 @@
                     <div class="card-body">
                         <div class="form-group">
                             <label for="maxConcurrentUploads">Concurrent Uploads</label>
-                            <select id="maxConcurrentUploads" class="form-control">
+                            <select id="maxConcurrentUploads" class="form-control" onchange="markUploadSettingsDirty()">
                                 <option value="1">1 (Slowest connection)</option>
                                 <option value="2" selected>2 (Default - recommended)</option>
                                 <option value="3">3 (Faster connection)</option>
@@ -233,8 +242,27 @@
                             </p>
                         </div>
                         <div class="form-group">
+                            <label for="maxConcurrentCaptures">Concurrent Captures</label>
+                            <select id="maxConcurrentCaptures" class="form-control" onchange="markUploadSettingsDirty()">
+                                <option value="0">Auto (profiled from hardware)</option>
+                                <option value="1" selected>1 (Recommended for Pi Zero 2 W)</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                            </select>
+                            <p class="form-help">
+                                How many cameras may capture at the same time across the bridge. When the limit is reached, each camera queues at most one extra capture. Lower values reduce CPU and memory load on small devices.
+                            </p>
+                        </div>
+                        <div class="form-group">
                             <label for="updateChannel">Update Channel</label>
-                            <select id="updateChannel" class="form-control">
+                            <select id="updateChannel" class="form-control" onchange="markUploadSettingsDirty()">
                                 <option value="latest" selected>Latest (Stable releases - recommended)</option>
                                 <option value="edge">Edge (Development builds - for testing)</option>
                             </select>
@@ -245,19 +273,20 @@
                         </div>
                         <div class="form-group">
                             <label for="timeoutConnect">Connection Timeout (seconds)</label>
-                            <input type="number" id="timeoutConnect" class="form-control" min="10" max="300" value="60">
+                            <input type="number" id="timeoutConnect" class="form-control" min="10" max="300" value="60" oninput="markUploadSettingsDirty()">
                             <p class="form-help">
                                 How long to wait for SFTP server connection. Default: 60 seconds.
                             </p>
                         </div>
                         <div class="form-group">
                             <label for="timeoutUpload">Upload Timeout (seconds)</label>
-                            <input type="number" id="timeoutUpload" class="form-control" min="60" max="600" value="300">
+                            <input type="number" id="timeoutUpload" class="form-control" min="60" max="600" value="300" oninput="markUploadSettingsDirty()">
                             <p class="form-help">
                                 Maximum time for a single file upload. Default: 300 seconds (5 minutes).
                             </p>
                         </div>
-                        <button class="btn btn-primary" onclick="saveGlobalSettings()">Save Settings</button>
+                        <p id="uploadSettingsUnsavedHint" class="form-help" style="display:none;color:var(--color-warning);">Unsaved changes — click Save settings to apply.</p>
+                        <button type="button" class="btn btn-primary" onclick="saveGlobalSettings()">Save settings</button>
                     </div>
                 </div>
 
@@ -310,6 +339,9 @@
                         <h2>Log Filters</h2>
                     </div>
                     <div class="card-body">
+                        <p class="form-help" style="margin-bottom: var(--space-md);">
+                            Filters apply only in this browser session; they are not stored on the bridge.
+                        </p>
                         <div class="form-group">
                             <label>
                                 <input type="checkbox" id="filterError" checked onchange="updateLogFilters()">
@@ -355,9 +387,12 @@
     </div>
 
     <script type="module">
-        import { buildCameraConfigFromFormValues } from '/js/form-utils.js';
+        import { buildCameraConfigFromFormValues, uploadCredentialKey, findConflictingCameraId, slugCameraIdFromName } from '/js/form-utils.js';
         import { shouldRefreshPreview } from '/js/preview-refresh.js';
         window.buildCameraConfigFromFormValues = buildCameraConfigFromFormValues;
+        window.uploadCredentialKey = uploadCredentialKey;
+        window.findConflictingCameraId = findConflictingCameraId;
+        window.slugCameraIdFromName = slugCameraIdFromName;
         window.shouldRefreshPreview = shouldRefreshPreview;
     </script>
     <script src="/js/app.js" defer></script>

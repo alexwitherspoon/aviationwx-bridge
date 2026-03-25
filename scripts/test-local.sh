@@ -39,14 +39,26 @@ check_result() {
 
 cd "$(dirname "$0")/.."
 
-# 1. Check Go version
+# 1. Check Go version (must satisfy go.mod; keeps local script aligned with CI/Docker)
 step "Checking Go version"
-GO_VERSION=$(go version | grep -oE 'go1\.[0-9]+')
-if [[ "$GO_VERSION" == "go1.24" ]] || [[ "$GO_VERSION" == "go1.25" ]] || [[ "$GO_VERSION" == "go1.26" ]]; then
-    echo "Go version: $GO_VERSION"
-    check_result "Go version"
+REQ_GO=$(awk '/^go[[:space:]]+[0-9]/{gsub(/\r/,""); print $2; exit}' go.mod)
+if [ -z "$REQ_GO" ]; then
+    echo -e "${RED}✗ Could not read Go version from go.mod${NC}"
+    FAILED=1
+elif ! command -v go >/dev/null 2>&1; then
+    echo -e "${RED}✗ go not found in PATH${NC}"
+    FAILED=1
 else
-    echo "Warning: Using $GO_VERSION, CI uses Go 1.26"
+    HAVE_GO=$(go env GOVERSION)
+    echo "go.mod requires: ${REQ_GO}"
+    echo "go toolchain:     ${HAVE_GO}"
+    # Pass when HAVE_GO >= REQ_GO (semver; sort -V)
+    if [ "$(printf '%s\n' "$REQ_GO" "$HAVE_GO" | sort -V | head -n1)" != "$REQ_GO" ]; then
+        echo -e "${RED}✗ Go ${HAVE_GO} is older than go.mod requirement ${REQ_GO}${NC}"
+        FAILED=1
+    else
+        echo -e "${GREEN}✓ Go version satisfies go.mod${NC}"
+    fi
 fi
 
 # 2. Check exiftool

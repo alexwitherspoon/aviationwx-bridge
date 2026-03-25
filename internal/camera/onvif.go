@@ -29,17 +29,22 @@ func NewONVIFCamera(config Config) (*ONVIFCamera, error) {
 	if config.ONVIF == nil {
 		return nil, fmt.Errorf("onvif config is required")
 	}
-	if config.ONVIF.Endpoint == "" {
+	oc := *config.ONVIF
+	oc.Endpoint = NormalizeONVIFEndpoint(oc.Endpoint)
+	if oc.Endpoint == "" {
 		return nil, fmt.Errorf("onvif.endpoint is required")
 	}
-	if config.ONVIF.Username == "" {
+	if oc.Username == "" {
 		return nil, fmt.Errorf("onvif.username is required")
 	}
-	if config.ONVIF.Password == "" {
+	if oc.Password == "" {
 		return nil, fmt.Errorf("onvif.password is required")
 	}
 
-	timeout := time.Duration(config.TimeoutSeconds) * time.Second
+	cfg := config
+	cfg.ONVIF = &oc
+
+	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout == 0 {
 		timeout = 15 * time.Second // Default timeout
 	}
@@ -49,13 +54,13 @@ func NewONVIFCamera(config Config) (*ONVIFCamera, error) {
 	}
 
 	onvifClient := &onvif.Client{
-		Username:   config.ONVIF.Username,
-		Password:   config.ONVIF.Password,
+		Username:   cfg.ONVIF.Username,
+		Password:   cfg.ONVIF.Password,
 		HTTPClient: httpClient,
 	}
 
 	return &ONVIFCamera{
-		config:      config,
+		config:      cfg,
 		httpClient:  httpClient,
 		onvifClient: onvifClient,
 	}, nil

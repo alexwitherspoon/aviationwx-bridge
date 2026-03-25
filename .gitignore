@@ -25,6 +25,9 @@ go.work.sum
 # Go dependencies
 vendor/
 
+# Node (devDependencies only — Bats, etc.; use npm ci in CI)
+node_modules/
+
 # IDE files
 .vscode/
 .idea/

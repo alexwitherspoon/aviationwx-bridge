@@ -74,7 +74,17 @@ run_tests_native() {
     fi
     
     go test -v ./...
-    log_success "All tests passed"
+    log_success "All Go tests passed"
+
+    if [ -f package-lock.json ] && command -v npm &> /dev/null; then
+        log_info "Running npm ci, JS unit tests, and shell (Bats) tests..."
+        npm ci
+        npm run test:js
+        npm run test:sh
+        log_success "JS and shell (Bats) tests passed"
+    else
+        log_warn "Skipping npm/Bats tests (npm or package-lock.json missing)"
+    fi
 }
 
 # Run linting locally
@@ -131,8 +141,8 @@ run_docker_build() {
     
     # Quick smoke test
     log_info "Running smoke test..."
-    docker run --rm aviationwx-org-bridge:local-test --version 2>/dev/null || \
-        docker run --rm aviationwx-org-bridge:local-test exiftool -ver
+    docker run --rm aviationwx-org-bridge:local-test --version || \
+        docker run --rm --entrypoint exiftool aviationwx-org-bridge:local-test -ver
     
     log_success "Docker smoke test passed"
 }

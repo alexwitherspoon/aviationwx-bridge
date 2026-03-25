@@ -1,10 +1,14 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/hardware"
 )
 
 func TestNewService(t *testing.T) {
@@ -25,6 +29,19 @@ func TestNewService(t *testing.T) {
 	}
 	if global.WebConsole == nil || global.WebConsole.Port != 1229 {
 		t.Error("Expected default web console config")
+	}
+	if global.MaxConcurrentCaptures != 0 {
+		t.Errorf("Expected MaxConcurrentCaptures 0 (unset, profiled each boot), got %d", global.MaxConcurrentCaptures)
+	}
+	if n := EffectiveMaxConcurrentCaptures(global); n != hardware.DefaultMaxConcurrentCaptures() {
+		t.Errorf("EffectiveMaxConcurrentCaptures: want profiled default %d, got %d", hardware.DefaultMaxConcurrentCaptures(), n)
+	}
+	raw, err := os.ReadFile(filepath.Join(tmpDir, "global.json"))
+	if err != nil {
+		t.Fatalf("read global.json: %v", err)
+	}
+	if strings.Contains(string(raw), "max_concurrent_captures") {
+		t.Error("first-time global.json should omit max_concurrent_captures so profiling applies each boot")
 	}
 
 	// Verify global.json was created
@@ -55,7 +72,7 @@ func TestAddCamera(t *testing.T) {
 		},
 	}
 
-	err := svc.AddCamera(cam)
+	_, err := svc.AddCamera(cam)
 	if err != nil {
 		t.Fatalf("AddCamera failed: %v", err)
 	}
@@ -79,6 +96,154 @@ func TestAddCamera(t *testing.T) {
 	}
 }
 
+func TestAddCamera_ReturnsPersistedCameraWithID(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, _ := NewService(tmpDir)
+	added, err := svc.AddCamera(Camera{
+		Name: "Hello Cam",
+		Type: "http",
+		Upload: &Upload{
+			Host:     "example.com",
+			Port:     2222,
+			Username: "u1",
+			Password: "p",
+		},
+	})
+	if err != nil {
+		t.Fatalf("AddCamera: %v", err)
+	}
+	if added.ID != "hello-cam" {
+		t.Fatalf("returned ID: want hello-cam, got %q", added.ID)
+	}
+}
+
+func TestAddCamera_DuplicateUploadCredentials(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, _ := NewService(tmpDir)
+	u := &Upload{
+		Protocol: "sftp",
+		Host:     "upload.aviationwx.org",
+		Port:     2222,
+		Username: "acct-one",
+		Password: "secret",
+	}
+	if _, err := svc.AddCamera(Camera{
+		ID:     "cam-1",
+		Name:   "One",
+		Type:   "http",
+		Upload: u,
+	}); err != nil {
+		t.Fatalf("first AddCamera: %v", err)
+	}
+	_, err := svc.AddCamera(Camera{
+		ID:   "cam-2",
+		Name: "Two",
+		Type: "http",
+		Upload: &Upload{
+			Protocol: "sftp",
+			Host:     "upload.aviationwx.org",
+			Port:     2222,
+			Username: "acct-one",
+			Password: "different",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for duplicate SFTP identity")
+	}
+	if !errors.Is(err, ErrDuplicateUploadCredentials) {
+		t.Fatalf("want ErrDuplicateUploadCredentials, got %v", err)
+	}
+}
+
+func TestUpdateCamera_AllowedWhenUploadUnchanged(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, _ := NewService(tmpDir)
+	if _, err := svc.AddCamera(Camera{
+		ID:   "cam-1",
+		Name: "One",
+		Type: "http",
+		Upload: &Upload{
+			Protocol: "sftp",
+			Host:     "upload.aviationwx.org",
+			Port:     2222,
+			Username: "u1",
+			Password: "p",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AddCamera(Camera{
+		ID:   "cam-2",
+		Name: "Two",
+		Type: "http",
+		Upload: &Upload{
+			Protocol: "sftp",
+			Host:     "upload.aviationwx.org",
+			Port:     2222,
+			Username: "u2",
+			Password: "p",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := svc.UpdateCamera("cam-2", func(c *Camera) error {
+		c.Name = "Renamed"
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("update with same upload identity: %v", err)
+	}
+}
+
+func TestUpdateCamera_DuplicateUploadCredentials(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, _ := NewService(tmpDir)
+	if _, err := svc.AddCamera(Camera{
+		ID:   "cam-1",
+		Name: "One",
+		Type: "http",
+		Upload: &Upload{
+			Protocol: "sftp",
+			Host:     "upload.aviationwx.org",
+			Port:     2222,
+			Username: "u1",
+			Password: "p",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AddCamera(Camera{
+		ID:   "cam-2",
+		Name: "Two",
+		Type: "http",
+		Upload: &Upload{
+			Protocol: "sftp",
+			Host:     "upload.aviationwx.org",
+			Port:     2222,
+			Username: "u2",
+			Password: "p",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := svc.UpdateCamera("cam-2", func(c *Camera) error {
+		c.Upload = &Upload{
+			Protocol: "sftp",
+			Host:     "upload.aviationwx.org",
+			Port:     2222,
+			Username: "u1",
+			Password: "p",
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected duplicate upload error")
+	}
+	if !errors.Is(err, ErrDuplicateUploadCredentials) {
+		t.Fatalf("want ErrDuplicateUploadCredentials, got %v", err)
+	}
+}
+
 func TestAddCamera_Duplicate(t *testing.T) {
 	tmpDir := t.TempDir()
 	svc, _ := NewService(tmpDir)
@@ -91,12 +256,12 @@ func TestAddCamera_Duplicate(t *testing.T) {
 	}
 
 	// Add first time - should succeed
-	if err := svc.AddCamera(cam); err != nil {
+	if _, err := svc.AddCamera(cam); err != nil {
 		t.Fatalf("First AddCamera failed: %v", err)
 	}
 
 	// Add second time - should fail
-	err := svc.AddCamera(cam)
+	_, err := svc.AddCamera(cam)
 	if err == nil {
 		t.Error("Expected error when adding duplicate camera")
 	}
@@ -113,7 +278,9 @@ func TestUpdateCamera(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatal(err)
+	}
 
 	// Update it
 	err := svc.UpdateCamera("test-cam-1", func(c *Camera) error {
@@ -145,7 +312,9 @@ func TestUpdateCamera_IDPreserved(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatal(err)
+	}
 
 	// Try to change ID
 	err := svc.UpdateCamera("test-cam-1", func(c *Camera) error {
@@ -186,7 +355,9 @@ func TestDeleteCamera(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatal(err)
+	}
 
 	// Delete it
 	err := svc.DeleteCamera("test-cam-1")
@@ -225,7 +396,9 @@ func TestListCameras(t *testing.T) {
 			Type:    "http",
 			Enabled: true,
 		}
-		svc.AddCamera(cam)
+		if _, err := svc.AddCamera(cam); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// List them
@@ -275,6 +448,29 @@ func TestEffectiveMaxConcurrentUploads(t *testing.T) {
 	}
 }
 
+func TestEffectiveMaxConcurrentCaptures(t *testing.T) {
+	if n := EffectiveMaxConcurrentCaptures(GlobalSettings{MaxConcurrentCaptures: 5}); n != 5 {
+		t.Errorf("top-level: want 5, got %d", n)
+	}
+	nested := &Global{MaxConcurrentCaptures: 3}
+	if n := EffectiveMaxConcurrentCaptures(GlobalSettings{Global: nested}); n != 3 {
+		t.Errorf("nested only: want 3, got %d", n)
+	}
+	if n := EffectiveMaxConcurrentCaptures(GlobalSettings{MaxConcurrentCaptures: 4, Global: nested}); n != 4 {
+		t.Errorf("top-level wins: want 4, got %d", n)
+	}
+	// Unset uses profiled default (depends on RAM/CPU on this machine).
+	if n := EffectiveMaxConcurrentCaptures(GlobalSettings{}); n != hardware.DefaultMaxConcurrentCaptures() {
+		t.Errorf("default: want profiled default %d, got %d", hardware.DefaultMaxConcurrentCaptures(), n)
+	}
+	// Any explicit 1–10 must match exactly; profiled default must never be blended in.
+	for want := 1; want <= 10; want++ {
+		if got := EffectiveMaxConcurrentCaptures(GlobalSettings{MaxConcurrentCaptures: want}); got != want {
+			t.Errorf("MaxConcurrentCaptures=%d: want %d, got %d", want, want, got)
+		}
+	}
+}
+
 func TestSubscribe(t *testing.T) {
 	tmpDir := t.TempDir()
 	svc, _ := NewService(tmpDir)
@@ -293,7 +489,9 @@ func TestSubscribe(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatal(err)
+	}
 
 	// Wait for event
 	select {
@@ -349,7 +547,9 @@ func TestReload(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc1.AddCamera(cam)
+	if _, err := svc1.AddCamera(cam); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create second service (should reload from disk)
 	svc2, err := NewService(tmpDir)
@@ -424,7 +624,9 @@ func TestImmutability(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatal(err)
+	}
 
 	// Get camera and try to modify it
 	retrieved, _ := svc.GetCamera("test-cam-1")

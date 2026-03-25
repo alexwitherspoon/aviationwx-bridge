@@ -57,7 +57,7 @@ jobs:
         run: go test -v -race -coverprofile=coverage.out ./...
 
       - name: Set up Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v6.3.0
         with:
           node-version: "22"
           cache: npm

@@ -30,6 +30,19 @@ updates:
       - ci
     open-pull-requests-limit: 10
 
+  # npm (package.json / package-lock.json — dev tooling e.g. Bats)
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "deps(npm)"
+    labels:
+      - dependencies
+      - npm
+    open-pull-requests-limit: 5
+
   # Docker base images (docker/Dockerfile, docker/docker-compose.yml)
   - package-ecosystem: docker
     directory: /docker

@@ -43,6 +43,8 @@
 |-------|------|----------|---------|-------------|
 | `version` | integer | Yes | - | Schema version (must be `2`) |
 | `timezone` | string | No | `"UTC"` | IANA timezone (e.g., `"America/Chicago"`) |
+| `max_concurrent_uploads` | integer | No | `2` | Parallel SFTP uploads (also mirrored under `global`) |
+| `max_concurrent_captures` | integer | No | (profile) | Parallel capture jobs (also mirrored under `global`); if omitted, derived from RAM (~500 MB per slot, max 10) and, when max CPU frequency &lt; 2 GHz, capped to about one concurrent capture per two logical CPUs; if RAM cannot be detected, default **1**. An explicit value (1–10) is used as-is and is not adjusted by profiling |
 | `cameras` | array | Yes | - | Array of camera configurations |
 | `global` | object | No | (defaults) | Global settings |
 | `queue` | object | No | (defaults) | Queue management settings |
@@ -53,7 +55,7 @@
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `id` | string | Yes | - | Unique ID (alphanumeric, hyphens) |
+| `id` | string | Yes | - | Unique ID (alphanumeric, hyphens). Stored in JSON; when adding a camera via the web UI, the id is generated from the display name with automatic suffixing if needed |
 | `name` | string | Yes | - | Human-readable name |
 | `type` | string | Yes | - | `"http"`, `"rtsp"`, or `"onvif"` |
 | `enabled` | boolean | No | `true` | Enable/disable camera |
@@ -89,7 +91,7 @@
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `endpoint` | string | Yes | - | ONVIF device service URL |
+| `endpoint` | string | Yes | - | ONVIF device service URL (e.g. `http://host/onvif/device_service`). The bridge and web API normalize the value: repeated `http://` / `https://` prefixes (common when pasting a full URL) are collapsed to a single scheme; if the value began with `https://`, that scheme is kept, otherwise `http://` is used. |
 | `username` | string | Yes | - | ONVIF username |
 | `password` | string | Yes | - | ONVIF password |
 | `profile_token` | string | No | (auto) | Media profile token |
@@ -114,7 +116,7 @@ Controls optional image resizing/quality for bandwidth management.
 
 ### Camera Upload Object
 
-Each camera has its own upload credentials. SFTP only (protocol "ftps"/"ftp" in config are migrated to SFTP).
+Each camera has its own upload credentials. SFTP only (protocol "ftps"/"ftp" in config are migrated to SFTP). Two cameras may not share the same SFTP identity (same `host`, `port`, and `username`); the bridge rejects duplicates when adding or updating cameras.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
@@ -149,6 +151,8 @@ Each camera has its own upload credentials. SFTP only (protocol "ftps"/"ftp" in 
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `max_concurrent_uploads` | integer | `2` | Parallel SFTP uploads |
+| `max_concurrent_captures` | integer | (profile) | Same as root; see root row for default formula |
 | `capture_timeout_seconds` | integer | `30` | HTTP/ONVIF timeout |
 | `rtsp_timeout_seconds` | integer | `10` | RTSP frame timeout |
 | `backoff` | object | (below) | Backoff settings |
@@ -207,6 +211,7 @@ Each camera has its own upload credentials. SFTP only (protocol "ftps"/"ftp" in 
 | `check_interval_seconds` | integer | `300` | Check interval (5 min) |
 | `max_offset_seconds` | integer | `5` | Max acceptable offset |
 | `timeout_seconds` | integer | `5` | Query timeout |
+| `stale_threshold_hours` | integer | `24` | Remain healthy this long after last good NTP sync while servers are unreachable; `0` uses default 24 |
 
 ### Web Console Object
 
@@ -215,6 +220,10 @@ Each camera has its own upload credentials. SFTP only (protocol "ftps"/"ftp" in 
 | `enabled` | boolean | `true` | Enable web console |
 | `port` | integer | `1229` | Web console port |
 | `password` | string | `"aviationwx"` | Login password |
+
+### Web console and network exposure
+
+The bridge targets a **private LAN** (for example a Raspberry Pi at a field or home), not a public internet-facing service. Authenticated JSON APIs and unauthenticated health endpoints (`GET /healthz`, `GET /readyz`) assume **trusted local access**: operators on the same network, or host-side automation (for example watchdog scripts using `127.0.0.1`). They are **not** hardened for anonymous access from the internet. Do not port-forward the web console port or place the host on an untrusted network without firewall rules and a deliberate security review.
 
 ## Complete Example
 

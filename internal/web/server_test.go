@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +79,7 @@ func TestConfigPutTopLevelFields(t *testing.T) {
 		"timezone":                base.Timezone,
 		"update_channel":          "edge",
 		"max_concurrent_uploads":  5,
+		"max_concurrent_captures": 3,
 		"timeout_connect_seconds": 45,
 		"timeout_upload_seconds":  400,
 		"web_console":             base.WebConsole,
@@ -108,11 +111,677 @@ func TestConfigPutTopLevelFields(t *testing.T) {
 	if g.Global == nil || g.Global.MaxConcurrentUploads != 5 {
 		t.Errorf("global.max_concurrent_uploads should mirror top-level, got %+v", g.Global)
 	}
+	if g.MaxConcurrentCaptures != 3 {
+		t.Errorf("max_concurrent_captures: want 3, got %d", g.MaxConcurrentCaptures)
+	}
+	if g.Global == nil || g.Global.MaxConcurrentCaptures != 3 {
+		t.Errorf("global.max_concurrent_captures should mirror top-level, got %+v", g.Global)
+	}
 	if g.TimeoutConnectSeconds != 45 {
 		t.Errorf("timeout_connect_seconds: want 45, got %d", g.TimeoutConnectSeconds)
 	}
 	if g.TimeoutUploadSeconds != 400 {
 		t.Errorf("timeout_upload_seconds: want 400, got %d", g.TimeoutUploadSeconds)
+	}
+}
+
+func TestConfigGetPreservesUserMaxConcurrentCaptures(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	if err := os.WriteFile(globalPath, []byte(`{"version":2,"timezone":"UTC","max_concurrent_captures":7}`), 0644); err != nil {
+		t.Fatalf("write global.json: %v", err)
+	}
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/config: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got config.GlobalSettings
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+	if got.MaxConcurrentCaptures != 7 {
+		t.Errorf("max_concurrent_captures: want 7 (stored), got %d", got.MaxConcurrentCaptures)
+	}
+}
+
+func TestConfigGetFillsProfiledWhenMaxConcurrentCapturesUnset(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	if err := os.WriteFile(globalPath, []byte(`{"version":2,"timezone":"UTC"}`), 0644); err != nil {
+		t.Fatalf("write global.json: %v", err)
+	}
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	pre := svc.GetGlobal()
+	want := config.EffectiveMaxConcurrentCaptures(pre)
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/config: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got config.GlobalSettings
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+	if got.MaxConcurrentCaptures != want {
+		t.Errorf("max_concurrent_captures: want %d (effective when unset), got %d", want, got.MaxConcurrentCaptures)
+	}
+}
+
+func TestConfigGetFillsTopLevelWhenOnlyNestedMaxConcurrentCapturesSet(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	// Only nested global.global.max_concurrent_captures — UI reads top-level field from GET.
+	body := `{"version":2,"timezone":"UTC","global":{"max_concurrent_captures":4}}`
+	if err := os.WriteFile(globalPath, []byte(body), 0644); err != nil {
+		t.Fatalf("write global.json: %v", err)
+	}
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	pre := svc.GetGlobal()
+	if pre.MaxConcurrentCaptures != 0 {
+		t.Fatalf("pre: want top-level 0 on disk, got %d", pre.MaxConcurrentCaptures)
+	}
+	want := config.EffectiveMaxConcurrentCaptures(pre)
+	if want != 4 {
+		t.Fatalf("EffectiveMaxConcurrentCaptures: want 4 from nested, got %d", want)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/config: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got config.GlobalSettings
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+	if got.MaxConcurrentCaptures != 4 {
+		t.Errorf("max_concurrent_captures: want 4 (effective from nested), got %d", got.MaxConcurrentCaptures)
+	}
+}
+
+func TestConfigGetIncludesMaxConcurrentCapturesAuto(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	if err := os.WriteFile(globalPath, []byte(`{"version":2,"timezone":"UTC"}`), 0644); err != nil {
+		t.Fatalf("write global.json: %v", err)
+	}
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET: %d %s", w.Code, w.Body.String())
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if auto, ok := m["max_concurrent_captures_auto"].(bool); !ok || !auto {
+		t.Fatalf("max_concurrent_captures_auto: want true, got %v", m["max_concurrent_captures_auto"])
+	}
+}
+
+func TestConfigGetMaxConcurrentCapturesAutoFalseWhenExplicit(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	if err := os.WriteFile(globalPath, []byte(`{"version":2,"timezone":"UTC","max_concurrent_captures":3}`), 0644); err != nil {
+		t.Fatalf("write global.json: %v", err)
+	}
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET: %d %s", w.Code, w.Body.String())
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if auto, ok := m["max_concurrent_captures_auto"].(bool); !ok || auto {
+		t.Fatalf("max_concurrent_captures_auto: want false, got %v", m["max_concurrent_captures_auto"])
+	}
+}
+
+func TestConfigPutMaxConcurrentCapturesZeroClearsExplicit(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "global.json")
+	if err := os.WriteFile(globalPath, []byte(`{"version":2,"timezone":"UTC","max_concurrent_captures":5}`), 0644); err != nil {
+		t.Fatalf("write global.json: %v", err)
+	}
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	base := svc.GetGlobal()
+	body, err := json.Marshal(map[string]interface{}{
+		"version":                 base.Version,
+		"timezone":                base.Timezone,
+		"update_channel":          base.UpdateChannel,
+		"max_concurrent_uploads":  base.MaxConcurrentUploads,
+		"max_concurrent_captures": 0,
+		"timeout_connect_seconds": base.TimeoutConnectSeconds,
+		"timeout_upload_seconds":  base.TimeoutUploadSeconds,
+		"web_console":             base.WebConsole,
+		"global":                  base.Global,
+		"queue":                   base.Queue,
+		"sntp":                    base.SNTP,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewBuffer(body))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT: %d %s", w.Code, w.Body.String())
+	}
+	g := svc.GetGlobal()
+	if g.MaxConcurrentCaptures != 0 {
+		t.Errorf("top-level max_concurrent_captures: want 0 (unset), got %d", g.MaxConcurrentCaptures)
+	}
+	if g.Global != nil && g.Global.MaxConcurrentCaptures != 0 {
+		t.Errorf("nested max_concurrent_captures: want 0, got %d", g.Global.MaxConcurrentCaptures)
+	}
+}
+
+func TestAddCamera_NormalizesCameraType(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	body := `{"name":"Type Case","type":"  HTTP  ","enabled":true,"snapshot_url":"http://example.com/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"u1","password":"p1"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(body))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", w.Code, w.Body.String())
+	}
+	cam, err := svc.GetCamera("type-case")
+	if err != nil {
+		t.Fatalf("GetCamera: %v", err)
+	}
+	if cam.Type != "http" {
+		t.Errorf("type: want http, got %q", cam.Type)
+	}
+}
+
+func TestAddCamera_RejectInvalidCameraType(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	body := `{"name":"Bad Type","type":"ftp","enabled":true,"snapshot_url":"http://example.com/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"u1","password":"p1"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(body))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateCamera_NormalizesCameraType(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	postJSON := `{"name":"HTTP Cam","type":"http","enabled":true,"snapshot_url":"http://x/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"u","password":"p"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(postJSON))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", w.Code, w.Body.String())
+	}
+	putJSON := `{"name":"HTTP Cam","type":"  RTSP  ","enabled":true,"snapshot_url":"rtsp://x/stream","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"u","password":"p"},"rtsp":{"url":"rtsp://x/stream"}}`
+	req2 := httptest.NewRequest(http.MethodPut, "/api/cameras/http-cam", bytes.NewBufferString(putJSON))
+	req2.SetBasicAuth("admin", svc.GetWebPassword())
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("PUT: %d %s", w2.Code, w2.Body.String())
+	}
+	cam, err := svc.GetCamera("http-cam")
+	if err != nil {
+		t.Fatalf("GetCamera: %v", err)
+	}
+	if cam.Type != "rtsp" {
+		t.Errorf("type: want rtsp, got %q", cam.Type)
+	}
+}
+
+func TestReadyz(t *testing.T) {
+	t.Run("notConfiguredReturns200", func(t *testing.T) {
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				return map[string]interface{}{"status": "ok"}
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+	})
+
+	t.Run("callbackNotReadyReturns503", func(t *testing.T) {
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				return map[string]interface{}{"status": "ok"}
+			},
+			GetCaptureReadiness: func() (bool, string) {
+				return false, "test reason"
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503, got %d", w.Code)
+		}
+	})
+
+	t.Run("callbackReadyReturns200", func(t *testing.T) {
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				return map[string]interface{}{"status": "ok"}
+			},
+			GetCaptureReadiness: func() (bool, string) {
+				return true, ""
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+	})
+}
+
+func testServerConfigService(t *testing.T) *config.Service {
+	t.Helper()
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	return svc
+}
+
+func TestAddCamera_DuplicateUploadCredentialsHTTP409(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	camJSON := func(displayName string) string {
+		return fmt.Sprintf(`{
+			"name": %q,
+			"type": "http",
+			"enabled": true,
+			"snapshot_url": "http://example.com/s.jpg",
+			"capture_interval_seconds": 60,
+			"upload": {
+				"host": "upload.example.com",
+				"port": 2222,
+				"username": "shared-sftp-user",
+				"password": "p"
+			}
+		}`, displayName)
+	}
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(body))
+		req.SetBasicAuth("admin", svc.GetWebPassword())
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		server.GetMux().ServeHTTP(w, req)
+		return w
+	}
+	if w := post(camJSON("Camera One")); w.Code != http.StatusCreated {
+		t.Fatalf("first POST: %d %s", w.Code, w.Body.String())
+	}
+	if w := post(camJSON("Camera Two")); w.Code != http.StatusConflict {
+		t.Fatalf("duplicate upload: want 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAddCamera_POST_RequiresUploadUsernameAndPassword(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	post := func(body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(body))
+		req.SetBasicAuth("admin", svc.GetWebPassword())
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		server.GetMux().ServeHTTP(w, req)
+		return w.Code
+	}
+	noUser := `{"name":"Cam","type":"http","enabled":true,"snapshot_url":"http://example.com/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"","password":"secret"}}`
+	if code := post(noUser); code != http.StatusBadRequest {
+		t.Fatalf("empty username: want 400, got %d", code)
+	}
+	noPass := `{"name":"Cam","type":"http","enabled":true,"snapshot_url":"http://example.com/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"u1","password":""}}`
+	if code := post(noPass); code != http.StatusBadRequest {
+		t.Fatalf("empty password: want 400, got %d", code)
+	}
+}
+
+func TestAddCamera_NormalizesUploadFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	body := `{"name":"Trim Upload","type":"http","enabled":true,"snapshot_url":"http://example.com/s.jpg","capture_interval_seconds":60,"upload":{"host":"  Upload.EXAMPLE.com  ","port":2222,"username":"  user1  ","password":"  secret  "}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(body))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", w.Code, w.Body.String())
+	}
+	cam, err := svc.GetCamera("trim-upload")
+	if err != nil {
+		t.Fatalf("GetCamera: %v", err)
+	}
+	if cam.Upload.Host != "upload.example.com" {
+		t.Errorf("upload.host: got %q", cam.Upload.Host)
+	}
+	if cam.Upload.Username != "user1" {
+		t.Errorf("upload.username: got %q", cam.Upload.Username)
+	}
+	if cam.Upload.Password != "secret" {
+		t.Errorf("upload.password: got %q", cam.Upload.Password)
+	}
+}
+
+func TestAddCamera_ONVIF_RejectInvalidEndpoint(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	body := `{"name":"Bad Onvif","type":"onvif","enabled":true,"capture_interval_seconds":60,"onvif":{"endpoint":"   ","username":"u","password":"p"},"upload":{"host":"upload.example.com","port":2222,"username":"u1","password":"p1"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(body))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("POST onvif whitespace endpoint: want 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateCamera_PUT_Upload_RequiresUsername(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	postJSON := `{"name":"HTTP Cam","type":"http","enabled":true,"snapshot_url":"http://x/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"u","password":"p"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(postJSON))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", w.Code, w.Body.String())
+	}
+	putJSON := `{"name":"HTTP Cam","type":"http","enabled":true,"snapshot_url":"http://x/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"   ","password":"p"}}`
+	req2 := httptest.NewRequest(http.MethodPut, "/api/cameras/http-cam", bytes.NewBufferString(putJSON))
+	req2.SetBasicAuth("admin", svc.GetWebPassword())
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Fatalf("PUT blank upload username: want 400, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
+func TestUpdateCamera_ONVIF_RejectEmptyEndpointWhenNoExistingEndpoint(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	postJSON := `{"name":"HTTP Cam","type":"http","enabled":true,"snapshot_url":"http://x/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"u","password":"p"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(postJSON))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", w.Code, w.Body.String())
+	}
+	putJSON := `{"name":"HTTP Cam","type":"http","enabled":true,"snapshot_url":"http://x/s.jpg","capture_interval_seconds":60,"upload":{"host":"upload.example.com","port":2222,"username":"u","password":"p"},"onvif":{"endpoint":"   ","username":"a","password":"b"}}`
+	req2 := httptest.NewRequest(http.MethodPut, "/api/cameras/http-cam", bytes.NewBufferString(putJSON))
+	req2.SetBasicAuth("admin", svc.GetWebPassword())
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Fatalf("PUT empty ONVIF endpoint: want 400, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
+// TestAddCamera_ONVIF_NormalizesDuplicateEndpoint verifies POST /api/cameras persists a
+// single-scheme ONVIF endpoint when the client sends duplicated http:// prefixes.
+func TestAddCamera_ONVIF_NormalizesDuplicateEndpoint(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+	camJSON := `{
+		"name": "Onvif Dup Endpoint",
+		"type": "onvif",
+		"enabled": true,
+		"capture_interval_seconds": 60,
+		"onvif": {
+			"endpoint": "http://http://192.168.1.50/onvif/device_service",
+			"username": "admin",
+			"password": "secret"
+		},
+		"upload": {
+			"host": "upload.example.com",
+			"port": 2222,
+			"username": "onvif-dup-user",
+			"password": "pass"
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/cameras", bytes.NewBufferString(camJSON))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", w.Code, w.Body.String())
+	}
+	cam, err := svc.GetCamera("onvif-dup-endpoint")
+	if err != nil {
+		t.Fatalf("GetCamera: %v", err)
+	}
+	if cam.ONVIF == nil {
+		t.Fatal("expected ONVIF config")
+	}
+	want := "http://192.168.1.50/onvif/device_service"
+	if cam.ONVIF.Endpoint != want {
+		t.Errorf("onvif.endpoint = %q, want %q", cam.ONVIF.Endpoint, want)
+	}
+
+	updateJSON := `{
+		"id": "onvif-dup-endpoint",
+		"name": "Onvif Dup Endpoint",
+		"type": "onvif",
+		"enabled": true,
+		"capture_interval_seconds": 60,
+		"onvif": {
+			"endpoint": "https://https://10.0.0.2/other/onvif",
+			"username": "admin",
+			"password": "secret"
+		},
+		"upload": {
+			"host": "upload.example.com",
+			"port": 2222,
+			"username": "onvif-dup-user",
+			"password": ""
+		}
+	}`
+	req2 := httptest.NewRequest(http.MethodPut, "/api/cameras/onvif-dup-endpoint", bytes.NewBufferString(updateJSON))
+	req2.SetBasicAuth("admin", svc.GetWebPassword())
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("PUT: %d %s", w2.Code, w2.Body.String())
+	}
+	cam2, err := svc.GetCamera("onvif-dup-endpoint")
+	if err != nil {
+		t.Fatalf("GetCamera after PUT: %v", err)
+	}
+	wantHTTPS := "https://10.0.0.2/other/onvif"
+	if cam2.ONVIF.Endpoint != wantHTTPS {
+		t.Errorf("after PUT onvif.endpoint = %q, want %q", cam2.ONVIF.Endpoint, wantHTTPS)
 	}
 }
 
@@ -151,7 +820,6 @@ func TestCameraAddUpdateDelete(t *testing.T) {
 	// Add camera
 	t.Run("AddCamera", func(t *testing.T) {
 		camJSON := `{
-			"id": "test-cam",
 			"name": "Test Camera",
 			"type": "http",
 			"enabled": true,
@@ -170,8 +838,16 @@ func TestCameraAddUpdateDelete(t *testing.T) {
 			t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
 		}
 
-		// Verify persisted
-		cam, err := svc.GetCamera("test-cam")
+		var created map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+			t.Fatalf("decode POST response: %v", err)
+		}
+		if id, _ := created["id"].(string); id != "test-camera" {
+			t.Fatalf("response id: want test-camera, got %v", created["id"])
+		}
+
+		// Verify persisted (id derived from display name)
+		cam, err := svc.GetCamera("test-camera")
 		if err != nil {
 			t.Fatalf("Camera not found: %v", err)
 		}
@@ -183,7 +859,7 @@ func TestCameraAddUpdateDelete(t *testing.T) {
 	// Update camera (preserve password)
 	t.Run("UpdateCamera_PreservePassword", func(t *testing.T) {
 		updateJSON := `{
-			"id": "test-cam",
+			"id": "test-camera",
 			"name": "Updated Camera",
 			"type": "http",
 			"enabled": true,
@@ -197,13 +873,13 @@ func TestCameraAddUpdateDelete(t *testing.T) {
 			}
 		}`
 
-		w := makeRequest("PUT", "/api/cameras/test-cam", []byte(updateJSON))
+		w := makeRequest("PUT", "/api/cameras/test-camera", []byte(updateJSON))
 		if w.Code != http.StatusOK {
 			t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
 		}
 
 		// Verify password was preserved
-		cam, _ := svc.GetCamera("test-cam")
+		cam, _ := svc.GetCamera("test-camera")
 		if cam.Upload.Password != "pass" {
 			t.Errorf("Expected password to be preserved, got %s", cam.Upload.Password)
 		}
@@ -231,13 +907,13 @@ func TestCameraAddUpdateDelete(t *testing.T) {
 
 	// Delete camera
 	t.Run("DeleteCamera", func(t *testing.T) {
-		w := makeRequest("DELETE", "/api/cameras/test-cam", nil)
+		w := makeRequest("DELETE", "/api/cameras/test-camera", nil)
 		if w.Code != http.StatusNoContent {
 			t.Fatalf("Expected 204, got %d", w.Code)
 		}
 
 		// Verify deleted
-		_, err := svc.GetCamera("test-cam")
+		_, err := svc.GetCamera("test-camera")
 		if err == nil {
 			t.Error("Camera should have been deleted")
 		}
@@ -267,7 +943,9 @@ func TestConfigServicePersistence(t *testing.T) {
 			Password: "testpass",
 		},
 	}
-	svc1.AddCamera(cam)
+	if _, err := svc1.AddCamera(cam); err != nil {
+		t.Fatalf("AddCamera: %v", err)
+	}
 
 	// Create new service instance (simulates restart)
 	svc2, err := config.NewService(tmpDir)
@@ -311,7 +989,9 @@ func TestConfigServiceEventNotifications(t *testing.T) {
 		Type:    "http",
 		Enabled: true,
 	}
-	svc.AddCamera(cam)
+	if _, err := svc.AddCamera(cam); err != nil {
+		t.Fatalf("AddCamera: %v", err)
+	}
 
 	// Wait for event
 	select {
@@ -476,13 +1156,15 @@ func TestCameraPreview(t *testing.T) {
 			},
 		})
 		svc := server.configService
-		svc.AddCamera(config.Camera{
+		if _, err := svc.AddCamera(config.Camera{
 			ID:      "preview-cam",
 			Name:    "Preview Test",
 			Type:    "http",
 			Enabled: true,
 			Upload:  &config.Upload{Host: "upload.example.com", Port: 2222, Username: "u", Password: "p"},
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		req := httptest.NewRequest("GET", "/api/cameras/preview-cam/preview", nil)
 		req.SetBasicAuth("admin", "test")
@@ -506,13 +1188,15 @@ func TestCameraPreview(t *testing.T) {
 	t.Run("nil callback returns 503", func(t *testing.T) {
 		server := testServerWithAuth(t, ServerConfig{})
 		svc := server.configService
-		svc.AddCamera(config.Camera{
+		if _, err := svc.AddCamera(config.Camera{
 			ID:      "preview-cam",
 			Name:    "Preview Test",
 			Type:    "http",
 			Enabled: true,
 			Upload:  &config.Upload{Host: "upload.example.com", Port: 2222, Username: "u", Password: "p"},
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		req := httptest.NewRequest("GET", "/api/cameras/preview-cam/preview", nil)
 		req.SetBasicAuth("admin", "test")
@@ -546,13 +1230,15 @@ func TestCameraPreview(t *testing.T) {
 			},
 		})
 		svc := server.configService
-		svc.AddCamera(config.Camera{
+		if _, err := svc.AddCamera(config.Camera{
 			ID:      "preview-cam",
 			Name:    "Preview Test",
 			Type:    "http",
 			Enabled: true,
 			Upload:  &config.Upload{Host: "upload.example.com", Port: 2222, Username: "u", Password: "p"},
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		req := httptest.NewRequest("GET", "/api/cameras/preview-cam/preview", nil)
 		req.SetBasicAuth("admin", "test")
@@ -571,13 +1257,15 @@ func TestCameraPreview(t *testing.T) {
 			},
 		})
 		svc := server.configService
-		svc.AddCamera(config.Camera{
+		if _, err := svc.AddCamera(config.Camera{
 			ID:      "preview-cam",
 			Name:    "Preview Test",
 			Type:    "http",
 			Enabled: true,
 			Upload:  &config.Upload{Host: "upload.example.com", Port: 2222, Username: "u", Password: "p"},
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		req := httptest.NewRequest("GET", "/api/cameras/preview-cam/preview", nil)
 		req.SetBasicAuth("admin", "test")

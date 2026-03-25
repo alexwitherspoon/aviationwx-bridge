@@ -125,5 +125,31 @@ func TestONVIFCamera_Type(t *testing.T) {
 	}
 }
 
+// TestNewONVIFCamera_NormalizesDuplicateSchemeEndpoint verifies duplicate http(s):// prefixes
+// are collapsed on the camera's stored config (regression for pasted URLs).
+func TestNewONVIFCamera_NormalizesDuplicateSchemeEndpoint(t *testing.T) {
+	raw := "http://http://192.168.1.100/onvif/device_service"
+	want := "http://192.168.1.100/onvif/device_service"
+	cfg := Config{
+		ID:   "test-camera",
+		Type: "onvif",
+		ONVIF: &ONVIFConfig{
+			Endpoint: raw,
+			Username: "admin",
+			Password: "secret",
+		},
+	}
+	cam, err := NewONVIFCamera(cfg)
+	if err != nil {
+		t.Fatalf("NewONVIFCamera: %v", err)
+	}
+	if cam.config.ONVIF.Endpoint != want {
+		t.Errorf("stored endpoint = %q, want %q", cam.config.ONVIF.Endpoint, want)
+	}
+	if cfg.ONVIF.Endpoint != raw {
+		t.Errorf("caller ONVIFConfig should not be mutated: got %q", cfg.ONVIF.Endpoint)
+	}
+}
+
 // Note: Integration tests for ONVIF Capture would require a real ONVIF camera
 // or a mock ONVIF server. These are left for integration testing phase.

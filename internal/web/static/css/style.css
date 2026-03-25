@@ -1006,6 +1006,22 @@ select.form-control {
     gap: var(--space-md);
 }
 
+.password-input-row {
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-sm);
+}
+
+.password-input-row .form-control {
+    flex: 1;
+    min-width: 0;
+}
+
+.password-input-row .btn {
+    flex-shrink: 0;
+    align-self: center;
+}
+
 .form-section {
     margin-bottom: var(--space-lg);
     padding-bottom: var(--space-lg);

@@ -37,6 +37,13 @@ type CaptureWorker struct {
 	nextCaptureTime    time.Time
 	currentlyCapturing bool
 	lastCaptureTime    time.Time
+
+	// Global capture concurrency (optional): at most one pending tick queued per camera when gate is full.
+	captureGate    *CaptureGate
+	onGateReleased func()
+	pendingCapture bool
+	wakeCapture    chan struct{}
+	wakeRetryTimer *time.Timer // single deferred wake after backoff (dedupes stacked AfterFuncs)
 }
 
 // CaptureWorkerConfig configures a capture worker
@@ -50,6 +57,8 @@ type CaptureWorkerConfig struct {
 	IntervalSecs    int               // Capture interval in seconds (1-1800, default 60)
 	Logger          Logger
 	OnCapture       func(cameraID string, imageData []byte, captureTime time.Time) // Called after successful capture and processing
+	CaptureGate     *CaptureGate                                                   // Optional: limit simultaneous captures across all cameras
+	OnGateReleased  func()                                                         // Called after Release; wakes pending workers
 }
 
 // NewCaptureWorker creates a new capture worker for a camera
@@ -81,11 +90,65 @@ func NewCaptureWorker(cfg CaptureWorkerConfig) *CaptureWorker {
 		cancel:          cancel,
 		logger:          logger,
 		onCapture:       cfg.OnCapture,
+		captureGate:     cfg.CaptureGate,
+		onGateReleased:  cfg.OnGateReleased,
+		wakeCapture:     make(chan struct{}, 1),
 		state: &CameraState{
 			CameraID:    cfg.Camera.ID(),
 			NextAttempt: time.Now(),
 		},
 	}
+}
+
+func (w *CaptureWorker) hasPendingCapture() bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.pendingCapture
+}
+
+// eligibleForPendingGateWake reports whether a pending deferred capture can run now when a gate slot frees.
+func (w *CaptureWorker) eligibleForPendingGateWake() bool {
+	if !w.hasPendingCapture() {
+		return false
+	}
+	w.mu.RLock()
+	busy := w.currentlyCapturing
+	w.mu.RUnlock()
+	if busy {
+		return false
+	}
+	if w.queue.IsCapturePaused() {
+		return false
+	}
+	w.mu.RLock()
+	next := w.state.NextAttempt
+	w.mu.RUnlock()
+	return !time.Now().Before(next)
+}
+
+// scheduleWakeAfter sends a non-blocking wake after d (deduping timers on the worker).
+func (w *CaptureWorker) scheduleWakeAfter(d time.Duration) {
+	if d <= 0 {
+		select {
+		case w.wakeCapture <- struct{}{}:
+		default:
+		}
+		return
+	}
+	w.mu.Lock()
+	if w.wakeRetryTimer != nil {
+		w.wakeRetryTimer.Stop()
+	}
+	w.wakeRetryTimer = time.AfterFunc(d, func() {
+		w.mu.Lock()
+		w.wakeRetryTimer = nil
+		w.mu.Unlock()
+		select {
+		case w.wakeCapture <- struct{}{}:
+		default:
+		}
+	})
+	w.mu.Unlock()
 }
 
 // Start begins the capture loop
@@ -95,6 +158,12 @@ func (w *CaptureWorker) Start() {
 
 // Stop stops the capture worker gracefully
 func (w *CaptureWorker) Stop() {
+	w.mu.Lock()
+	if w.wakeRetryTimer != nil {
+		w.wakeRetryTimer.Stop()
+		w.wakeRetryTimer = nil
+	}
+	w.mu.Unlock()
 	w.cancel()
 }
 
@@ -175,10 +244,36 @@ func (w *CaptureWorker) run() {
 			w.logger.Info("Capture worker stopped", "camera", w.camera.ID())
 			return
 
+		case <-w.wakeCapture:
+			w.mu.RLock()
+			busy := w.currentlyCapturing
+			w.mu.RUnlock()
+			if busy {
+				continue
+			}
+			// Match ticker-path protections: do not run deferred capture while paused or in backoff.
+			if w.queue.IsCapturePaused() {
+				continue
+			}
+			w.mu.RLock()
+			nextWake := w.state.NextAttempt
+			w.mu.RUnlock()
+			if time.Now().Before(nextWake) {
+				d := time.Until(nextWake)
+				// Clear pending so the ticker path can run after backoff; dedupe wake via scheduleWakeAfter.
+				w.mu.Lock()
+				w.pendingCapture = false
+				w.mu.Unlock()
+				w.scheduleWakeAfter(d)
+				continue
+			}
+			w.capture()
+
 		case <-ticker.C:
 			// Check if previous capture is still running
 			w.mu.RLock()
 			isCapturing := w.currentlyCapturing
+			pending := w.pendingCapture
 			w.mu.RUnlock()
 
 			if isCapturing {
@@ -188,19 +283,14 @@ func (w *CaptureWorker) run() {
 				continue
 			}
 
-			// Update next capture time for display
-			w.mu.Lock()
-			w.nextCaptureTime = time.Now().Add(w.interval)
-			w.mu.Unlock()
-
-			// Check if queue has paused capture due to pressure
+			// Apply pause/backoff before the pending-gate skip so a deferred capture is not
+			// stuck forever when only backoff was blocking the wake path.
 			if w.queue.IsCapturePaused() {
 				w.logger.Debug("Capture paused due to queue pressure",
 					"camera", w.camera.ID())
 				continue
 			}
 
-			// Check backoff
 			w.mu.RLock()
 			nextAttempt := w.state.NextAttempt
 			w.mu.RUnlock()
@@ -209,18 +299,55 @@ func (w *CaptureWorker) run() {
 				continue
 			}
 
+			if w.captureGate != nil && pending {
+				// Already queued one deferred capture when gate was full (depth 1)
+				continue
+			}
+
+			// Update next capture time for display
+			w.mu.Lock()
+			w.nextCaptureTime = time.Now().Add(w.interval)
+			w.mu.Unlock()
+
 			w.capture()
 
 		case <-w.queue.ResumeCapture():
 			w.logger.Info("Capture resumed", "camera", w.camera.ID())
+			// Retry a deferred capture that may have skipped while paused (wake path).
+			if w.hasPendingCapture() {
+				select {
+				case w.wakeCapture <- struct{}{}:
+				default:
+				}
+			}
 		}
 	}
 }
 
 func (w *CaptureWorker) capture() {
+	if w.captureGate != nil {
+		if !w.captureGate.TryAcquire() {
+			w.mu.Lock()
+			if !w.pendingCapture {
+				w.pendingCapture = true
+			}
+			w.mu.Unlock()
+			return
+		}
+		defer func() {
+			w.captureGate.Release()
+			if w.onGateReleased != nil {
+				w.onGateReleased()
+			}
+		}()
+	}
+
 	w.mu.Lock()
 	w.capturesTotal++
 	w.currentlyCapturing = true
+	if w.captureGate != nil {
+		w.pendingCapture = false
+	}
 	captureInterval := w.interval
 	w.mu.Unlock()
 

@@ -7,7 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
+
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/hardware"
 )
 
 // Service provides centralized config management with file-per-camera storage
@@ -44,6 +47,7 @@ type GlobalSettings struct {
 	Timezone              string       `json:"timezone,omitempty"`                // IANA timezone
 	UpdateChannel         string       `json:"update_channel,omitempty"`          // Update channel: "latest" or "edge"
 	MaxConcurrentUploads  int          `json:"max_concurrent_uploads,omitempty"`  // Max concurrent uploads (default: 2)
+	MaxConcurrentCaptures int          `json:"max_concurrent_captures,omitempty"` // If unset: profiled default (see EffectiveMaxConcurrentCaptures)
 	TimeoutConnectSeconds int          `json:"timeout_connect_seconds,omitempty"` // SFTP connect timeout (default: 60)
 	TimeoutUploadSeconds  int          `json:"timeout_upload_seconds,omitempty"`  // SFTP upload timeout (default: 300)
 	Global                *Global      `json:"global,omitempty"`                  // Global operational settings
@@ -80,6 +84,7 @@ func NewService(baseDir string) (*Service, error) {
 			Timezone:              "UTC",
 			UpdateChannel:         "latest",
 			MaxConcurrentUploads:  2,
+			MaxConcurrentCaptures: 0, // omitted on disk (omitempty); profile each boot via EffectiveMaxConcurrentCaptures
 			TimeoutConnectSeconds: 60,
 			TimeoutUploadSeconds:  300,
 			SNTP:                  &defaultSNTP,
@@ -116,6 +121,24 @@ func EffectiveMaxConcurrentUploads(g GlobalSettings) int {
 		return n
 	}
 	return 2
+}
+
+// EffectiveMaxConcurrentCaptures returns the configured maximum concurrent capture jobs,
+// or a profiled default when unset (RAM-based slots ~500 MB each, max 10; if max CPU
+// frequency is below 2 GHz, also capped to about one concurrent capture per two logical CPUs).
+//
+// Hardware profiling is used only when both top-level and global.global max_concurrent_captures
+// are unset (<= 0). Any positive configured value is returned unchanged.
+// Top-level max_concurrent_captures takes precedence over global.global.
+func EffectiveMaxConcurrentCaptures(g GlobalSettings) int {
+	n := g.MaxConcurrentCaptures
+	if n <= 0 && g.Global != nil {
+		n = g.Global.MaxConcurrentCaptures
+	}
+	if n > 0 {
+		return n
+	}
+	return hardware.DefaultMaxConcurrentCaptures()
 }
 
 // GetGlobal returns a copy of global config (thread-safe)
@@ -191,19 +214,32 @@ func (s *Service) ListCameras() []Camera {
 	return cameras
 }
 
-// AddCamera adds a new camera atomically
-func (s *Service) AddCamera(cam Camera) error {
+// AddCamera adds a new camera atomically and returns the persisted camera (including the assigned ID).
+func (s *Service) AddCamera(cam Camera) (Camera, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if strings.TrimSpace(cam.Name) == "" {
+		return Camera{}, fmt.Errorf("camera name is required")
+	}
+	if cam.ID == "" {
+		cam.ID = s.allocateUniqueCameraIDLocked(cam.Name)
+	}
+
 	// Check for duplicate
 	if _, exists := s.cameras[cam.ID]; exists {
-		return fmt.Errorf("camera already exists: %s", cam.ID)
+		return Camera{}, fmt.Errorf("camera already exists: %s", cam.ID)
+	}
+
+	if cam.Upload != nil {
+		if err := s.checkDuplicateUpload("", cam.Upload); err != nil {
+			return Camera{}, err
+		}
 	}
 
 	// Save to disk first (fail-safe)
 	if err := s.saveCameraFile(cam); err != nil {
-		return err
+		return Camera{}, err
 	}
 
 	// Update in-memory
@@ -213,7 +249,7 @@ func (s *Service) AddCamera(cam Camera) error {
 	// Notify listeners (async)
 	s.notifyListeners(ConfigEvent{Type: "camera_added", CameraID: cam.ID})
 
-	return nil
+	return cam, nil
 }
 
 // UpdateCamera updates an existing camera atomically
@@ -236,6 +272,12 @@ func (s *Service) UpdateCamera(id string, fn func(*Camera) error) error {
 
 	// Ensure ID doesn't change
 	updated.ID = id
+
+	if updated.Upload != nil {
+		if err := s.checkDuplicateUpload(id, updated.Upload); err != nil {
+			return err
+		}
+	}
 
 	// Save to disk first (fail-safe)
 	if err := s.saveCameraFile(updated); err != nil {

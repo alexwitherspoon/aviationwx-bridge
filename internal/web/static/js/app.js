@@ -9,6 +9,10 @@ let status = null;
 let previousCameraIds = null;
 let cameras = [];
 let timeUpdateInterval = null;
+/** Unsaved local edits — skip syncing those form sections from the server until Save. */
+let timezoneDirty = false;
+let webConsoleDirty = false;
+let uploadSettingsDirty = false;
 
 // Timezone list (IANA timezones for US and common international)
 const TIMEZONES = [
@@ -175,8 +179,8 @@ function updateStatusDisplay() {
     // Update basic stats
     document.getElementById('statCameras').textContent = status.cameras || 0;
     
-    // Update timezone selector
-    if (status.timezone) {
+    // Update timezone selector from server unless the user has unsaved edits
+    if (status.timezone && !timezoneDirty) {
         document.getElementById('timezone').value = status.timezone;
     }
     
@@ -608,18 +612,44 @@ function formatTime(date, timezone) {
     }
 }
 
-async function updateTimezone() {
+function updateSettingsUnsavedHints() {
+    const set = (id, dirty) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = dirty ? 'block' : 'none';
+    };
+    set('timezoneUnsavedHint', timezoneDirty);
+    set('webConsoleUnsavedHint', webConsoleDirty);
+    set('uploadSettingsUnsavedHint', uploadSettingsDirty);
+}
+
+function markTimezoneDirty() {
+    timezoneDirty = true;
+    updateSettingsUnsavedHints();
+}
+
+function markWebConsoleDirty() {
+    webConsoleDirty = true;
+    updateSettingsUnsavedHints();
+}
+
+function markUploadSettingsDirty() {
+    uploadSettingsDirty = true;
+    updateSettingsUnsavedHints();
+}
+
+async function saveTimezone() {
     const timezone = document.getElementById('timezone').value;
     try {
         await api('/time', {
             method: 'PUT',
             body: JSON.stringify({ timezone }),
         });
+        timezoneDirty = false;
+        updateSettingsUnsavedHints();
         updateTimeDisplay();
-        // Show success message with hot-reload confirmation
         showNotification('✅ Timezone updated! Workers reloaded automatically.', 'success');
     } catch (err) {
-        alert('Failed to update timezone: ' + err.message);
+        alert('Failed to save timezone: ' + err.message);
     }
 }
 
@@ -666,22 +696,18 @@ function getCameraFormHtml(cam = null) {
             <div class="form-section">
                 <div class="form-section-title">Camera Details</div>
                 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="camId">Camera ID</label>
-                        <input type="text" id="camId" class="form-control" 
-                               value="${cam?.id || ''}" 
-                               ${isEdit ? 'readonly' : 'required'}
-                               placeholder="e.g., kord-west">
-                        <p class="form-help">Unique identifier (lowercase, no spaces)</p>
-                    </div>
-                    <div class="form-group">
-                        <label for="camName">Display Name</label>
-                        <input type="text" id="camName" class="form-control" 
-                               value="${cam?.name || ''}"
-                               placeholder="e.g., KORD West Camera">
-                    </div>
+                <div class="form-group">
+                    <label for="camName">Display Name</label>
+                    <input type="text" id="camName" class="form-control" required
+                           value="${cam?.name || ''}"
+                           placeholder="e.g., KORD West Camera">
+                    <p class="form-help">
+                        ${isEdit
+        ? `Internal id <code>${escapeHtml(cam.id)}</code> is fixed (queue and paths).`
+        : 'A unique camera id is generated from this name (e.g. &quot;KORD West&quot; → <code>kord-west</code>). If the name matches an existing camera, a suffix is added automatically.'}
+                    </p>
                 </div>
+                <input type="hidden" id="camExistingId" value="${isEdit ? escapeHtml(cam.id) : ''}">
                 
                 <div class="form-group">
                     <label for="camType">Camera Type</label>
@@ -826,22 +852,27 @@ function getCameraFormHtml(cam = null) {
             </div>
             
             <div class="form-section">
-                <div class="form-section-title">Upload Credentials</div>
+                <div class="form-section-title">SFTP upload (this camera)</div>
                 <p class="form-help" style="margin-bottom: var(--space-md)">
-                    Contact <a href="mailto:contact@aviationwx.org">contact@aviationwx.org</a> to get upload credentials for your camera.
+                    Request a dedicated SFTP account for this camera from <a href="mailto:contact@aviationwx.org">contact@aviationwx.org</a>.
+                    Do not reuse the same host, username, and port for another camera — each camera must have its own credentials.
                 </p>
                 
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="uploadUser">Username</label>
+                        <label for="uploadUser">SFTP username (this camera)</label>
                         <input type="text" id="uploadUser" class="form-control" 
                                value="${cam?.upload?.username || ''}"
-                               required placeholder="your-username">
+                               required placeholder="e.g. account assigned to this camera">
                     </div>
                     <div class="form-group">
-                        <label for="uploadPass">Password</label>
-                        <input type="password" id="uploadPass" class="form-control" 
-                               ${isEdit ? 'placeholder="••••••••"' : 'required placeholder="your-password"'}>
+                        <label for="uploadPass">SFTP password (this camera)</label>
+                        <div class="password-input-row">
+                            <input type="password" id="uploadPass" class="form-control" spellcheck="false"
+                                   ${isEdit ? 'autocomplete="current-password" placeholder="Leave blank to keep current password"' : 'autocomplete="new-password" required placeholder="Password for this camera account"'}
+                            >
+                            <button type="button" class="btn btn-secondary btn-sm" id="uploadPassToggle" aria-pressed="false" aria-label="Show SFTP password" onclick="togglePasswordField('uploadPass', 'uploadPassToggle', 'SFTP password')">Show</button>
+                        </div>
                     </div>
                 </div>
                 
@@ -925,24 +956,43 @@ function updateImagePreset() {
 
 async function saveCamera(event, existingId = null) {
     event.preventDefault();
+
+    const uploadHost = document.getElementById('uploadHost').value || 'upload.aviationwx.org';
+    const uploadPort = parseInt(document.getElementById('uploadPort').value, 10) || 2222;
+    const uploadUser = document.getElementById('uploadUser').value;
+    if (typeof window.findConflictingCameraId === 'function') {
+        const conflictId = window.findConflictingCameraId(cameras, existingId, uploadHost, uploadPort, uploadUser);
+        if (conflictId) {
+            alert(`This SFTP account (host, port, and username) is already used by camera "${conflictId}". Each camera must have its own SFTP credentials from aviationwx.org.`);
+            return;
+        }
+    }
     
+    const displayName = document.getElementById('camName').value.trim();
+    if (!displayName) {
+        alert('Please enter a display name.');
+        return;
+    }
+
     const type = document.getElementById('camType').value;
     const basePath = document.getElementById('uploadBasePath')?.value || '/files';
     const camera = {
-        id: document.getElementById('camId').value.toLowerCase().replace(/\s+/g, '-'),
-        name: document.getElementById('camName').value || document.getElementById('camId').value,
+        name: displayName,
         type: type,
         enabled: document.getElementById('camEnabled').checked,
         capture_interval_seconds: parseInt(document.getElementById('camInterval').value, 10),
         upload: {
             protocol: 'sftp',
-            host: document.getElementById('uploadHost').value || 'upload.aviationwx.org',
-            port: parseInt(document.getElementById('uploadPort').value, 10) || 2222,
+            host: uploadHost,
+            port: uploadPort,
             username: document.getElementById('uploadUser').value,
             password: document.getElementById('uploadPass').value || undefined,
             base_path: basePath,
         }
     };
+    if (existingId) {
+        camera.id = existingId;
+    }
     
     // Image processing settings
     const maxWidth = parseInt(document.getElementById('imageMaxWidth').value, 10) || 0;
@@ -1065,9 +1115,15 @@ function buildCameraConfigFromForm() {
     const type = document.getElementById('camType')?.value;
     if (!type) return null;
 
+    const name = document.getElementById('camName')?.value?.trim();
+    const existing = document.getElementById('camExistingId')?.value?.trim();
+    let provisionalId = existing;
+    if (!provisionalId && typeof window.slugCameraIdFromName === 'function') {
+        provisionalId = window.slugCameraIdFromName(name);
+    }
     const values = {
         type,
-        id: document.getElementById('camId')?.value,
+        id: provisionalId || undefined,
         snapshot_url: document.getElementById('camSnapshotUrl')?.value,
         auth_user: document.getElementById('camAuthUser')?.value,
         auth_pass: document.getElementById('camAuthPass')?.value,
@@ -1128,8 +1184,10 @@ async function saveWebSettings() {
                 },
             }),
         });
-        alert('Password updated successfully');
         document.getElementById('webPassword').value = '';
+        webConsoleDirty = false;
+        updateSettingsUnsavedHints();
+        showNotification('✅ Password updated successfully.', 'success');
         await loadConfig();
     } catch (err) {
         alert('Failed to save: ' + err.message);
@@ -1139,12 +1197,27 @@ async function saveWebSettings() {
 // Global Settings (concurrent uploads, update channel, timeouts)
 async function loadGlobalSettings() {
     if (!config) return;
-    
+    if (uploadSettingsDirty) {
+        updateSettingsUnsavedHints();
+        return;
+    }
+
     // Load max concurrent uploads (from top-level, not nested in global)
     const maxConcurrent = config.max_concurrent_uploads || 2;
     const maxConcurrentSelect = document.getElementById('maxConcurrentUploads');
     if (maxConcurrentSelect) {
         maxConcurrentSelect.value = maxConcurrent.toString();
+    }
+
+    const maxCapturesSelect = document.getElementById('maxConcurrentCaptures');
+    if (maxCapturesSelect) {
+        if (config.max_concurrent_captures_auto === true) {
+            maxCapturesSelect.value = '0';
+        } else {
+            const n = config.max_concurrent_captures;
+            const maxCaptures = (typeof n === 'number' && n >= 1 && n <= 10) ? n : 2;
+            maxCapturesSelect.value = maxCaptures.toString();
+        }
     }
     
     // Load update channel
@@ -1166,6 +1239,8 @@ async function loadGlobalSettings() {
     if (timeoutUploadInput) {
         timeoutUploadInput.value = timeoutUpload;
     }
+
+    updateSettingsUnsavedHints();
 }
 
 async function saveGlobalSettings() {
@@ -1176,6 +1251,13 @@ async function saveGlobalSettings() {
     
     if (maxConcurrent < 1 || maxConcurrent > 10) {
         alert('Concurrent uploads must be between 1 and 10');
+        return;
+    }
+
+    const maxCapturesRaw = document.getElementById('maxConcurrentCaptures').value;
+    const maxCaptures = maxCapturesRaw === '0' ? 0 : parseInt(maxCapturesRaw, 10);
+    if (maxCaptures !== 0 && (maxCaptures < 1 || maxCaptures > 10 || Number.isNaN(maxCaptures))) {
+        alert('Concurrent captures must be Auto (profiled) or between 1 and 10');
         return;
     }
     
@@ -1195,6 +1277,7 @@ async function saveGlobalSettings() {
             ...config,
             update_channel: updateChannel,
             max_concurrent_uploads: maxConcurrent,
+            max_concurrent_captures: maxCaptures,
             timeout_connect_seconds: timeoutConnect,
             timeout_upload_seconds: timeoutUpload
         };
@@ -1203,9 +1286,12 @@ async function saveGlobalSettings() {
             method: 'PUT',
             body: JSON.stringify(updatedConfig),
         });
-        
+
+        uploadSettingsDirty = false;
+        updateSettingsUnsavedHints();
+
         showNotification(
-            '✅ Settings saved. Upload limits, SFTP timeouts, and update channel apply immediately. Restart the bridge only if you changed the web console listen port.',
+            '✅ Settings saved. Upload/capture limits, SFTP timeouts, and update channel apply immediately. Restart the bridge only if you changed the web console listen port.',
             'success'
         );
         
@@ -1258,6 +1344,10 @@ async function wizardStep2() {
             method: 'PUT',
             body: JSON.stringify({ timezone }),
         });
+        timezoneDirty = false;
+        const tzMain = document.getElementById('timezone');
+        if (tzMain) tzMain.value = timezone;
+        updateSettingsUnsavedHints();
     } catch (err) {
         console.error('Failed to set timezone:', err);
     }
@@ -1513,6 +1603,28 @@ async function triggerUpdate() {
     }
 }
 
-
+/**
+ * Toggle visibility for a password input paired with a Show/Hide button.
+ * @param {string} inputId
+ * @param {string} buttonId
+ * @param {string} [fieldLabel] Human-readable field name for aria-label (e.g. "SFTP password").
+ */
+function togglePasswordField(inputId, buttonId, fieldLabel) {
+    const input = document.getElementById(inputId);
+    const btn = document.getElementById(buttonId);
+    if (!input || !btn) return;
+    const base = (fieldLabel && String(fieldLabel).trim()) || 'Password';
+    if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = 'Hide';
+        btn.setAttribute('aria-pressed', 'true');
+        btn.setAttribute('aria-label', `Hide ${base}`);
+    } else {
+        input.type = 'password';
+        btn.textContent = 'Show';
+        btn.setAttribute('aria-pressed', 'false');
+        btn.setAttribute('aria-label', `Show ${base}`);
+    }
+}
 
 

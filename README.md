@@ -13,6 +13,8 @@ AviationWX.org Bridge is a lightweight daemon that:
 
 **Perfect for**: Airport operators wanting to provide webcam feeds to pilots for weather assessment and flight safety.
 
+**Network:** The bridge is a **local LAN** service (trusted private network or VPN). It is **not** designed to be reachable from the public internet; do not port-forward the web console. See [Network exposure](docs/DEPLOYMENT.md#network-exposure) in the deployment guide.
+
 ---
 
 ## Installation

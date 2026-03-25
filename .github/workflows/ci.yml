@@ -56,11 +56,23 @@ jobs:
       - name: Run Go tests
         run: go test -v -race -coverprofile=coverage.out ./...
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
       - name: Run JS tests
         run: npm run test:js
 
+      - name: Run shell (Bats) tests
+        run: npm run test:sh
+
       - name: Upload coverage
-        uses: codecov/codecov-action@v5.5.2
+        uses: codecov/codecov-action@v5.5.3
         with:
           files: ./coverage.out
           flags: unittests

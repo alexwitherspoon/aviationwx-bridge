@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - Docker and Docker Compose
 - exiftool (required for tests): `brew install exiftool` or `apt install libimage-exiftool-perl`
 

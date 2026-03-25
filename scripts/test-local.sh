@@ -42,11 +42,11 @@ cd "$(dirname "$0")/.."
 # 1. Check Go version
 step "Checking Go version"
 GO_VERSION=$(go version | grep -oE 'go1\.[0-9]+')
-if [[ "$GO_VERSION" == "go1.24" ]] || [[ "$GO_VERSION" == "go1.25" ]]; then
+if [[ "$GO_VERSION" == "go1.24" ]] || [[ "$GO_VERSION" == "go1.25" ]] || [[ "$GO_VERSION" == "go1.26" ]]; then
     echo "Go version: $GO_VERSION"
     check_result "Go version"
 else
-    echo "Warning: Using $GO_VERSION, CI uses Go 1.24"
+    echo "Warning: Using $GO_VERSION, CI uses Go 1.26"
 fi
 
 # 2. Check exiftool

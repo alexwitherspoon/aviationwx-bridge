@@ -50,6 +50,9 @@ const TIMEZONES = [
     { value: 'Australia/Sydney', label: 'Sydney' },
 ];
 
+/** Default web console listen port (matches bridge default when unset on disk). */
+const DEFAULT_WEB_CONSOLE_PORT = 1229;
+
 // Initialize application
 document.addEventListener('DOMContentLoaded', async () => {
     setupNavigation();
@@ -682,11 +685,7 @@ async function saveTimezone() {
     }
     timezoneDirty = false;
     updateSettingsUnsavedHints();
-    try {
-        await loadConfig();
-    } catch (err) {
-        console.error('Failed to reload config after timezone save:', err);
-    }
+    await loadConfig();
     updateTimeDisplay();
     showNotification('✅ Timezone updated! Workers reloaded automatically.', 'success');
 }
@@ -1214,7 +1213,10 @@ async function saveWebSettings() {
     
     try {
         // Handler replaces web_console wholesale; merge with GET snapshot so listen port is not cleared.
-        const wc = (config && config.web_console) || {};
+        const wc = { ...((config && config.web_console) || {}) };
+        if (!wc.port || wc.port <= 0) {
+            wc.port = DEFAULT_WEB_CONSOLE_PORT;
+        }
         await api('/config', {
             method: 'PUT',
             body: JSON.stringify({
@@ -1390,12 +1392,8 @@ async function wizardStep2() {
     const tzMain = document.getElementById('timezone');
     if (tzMain) tzMain.value = timezone;
     updateSettingsUnsavedHints();
-    try {
-        await loadConfig();
-    } catch (err) {
-        console.error('Failed to reload config after wizard timezone save:', err);
-    }
-    
+    await loadConfig();
+
     // Show add camera form
     closeModal();
     showSection('cameras');

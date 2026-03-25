@@ -191,7 +191,8 @@ jobs:
           sha256sum aviationwx-org-bridge-* > checksums.txt
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2.5.1
+        # Commit pin matches upstream tag v2.6.1 (workflow has contents: write)
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
           name: AviationWX.org Bridge ${{ steps.version.outputs.VERSION }}
           body: |

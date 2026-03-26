@@ -286,12 +286,6 @@ function updateResourceBar(name, percent, level, valueText) {
     }
 }
 
-// Legacy queue storage display (for backwards compatibility)
-function updateQueueStorageDisplay(storage) {
-    // This is now handled by updateSystemResourcesDisplay
-    // Keeping for any direct calls
-}
-
 // Camera displays
 function updateCameraOverview() {
     const container = document.getElementById('cameraOverview');

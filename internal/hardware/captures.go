@@ -1,7 +1,6 @@
 package hardware
 
 import (
-	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -55,14 +54,7 @@ func computeDefaultMaxConcurrentCaptures(totalMB, numCPU int, maxFreqMHz float64
 
 // totalMemoryMB and maxCPUFrequencyMHz are implemented per-GOOS in captures_*.go
 // (Darwin uses sysctl APIs that are not in golang.org/x/sys/unix on Linux.)
-
-func memTotalMBLinux() int {
-	data, err := os.ReadFile("/proc/meminfo")
-	if err != nil {
-		return 0
-	}
-	return parseMemTotalMBFromMeminfo(data)
-}
+// Linux sysfs and /proc readers live in captures_linux.go.
 
 // parseMemTotalMBFromMeminfo returns MemTotal in MB from /proc/meminfo-style content, or 0 if missing/invalid.
 func parseMemTotalMBFromMeminfo(data []byte) int {
@@ -81,23 +73,6 @@ func parseMemTotalMBFromMeminfo(data []byte) int {
 	return 0
 }
 
-func linuxMaxCPUFrequencyMHz() float64 {
-	paths := []string{
-		"/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
-		"/sys/devices/system/cpu/cpufreq/policy0/cpuinfo_max_freq",
-	}
-	for _, p := range paths {
-		b, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-		if mhz := cpufreqMaxMHzFromKHzFileContent(b); mhz > 0 {
-			return mhz
-		}
-	}
-	return linuxMaxCPUFrequencyMHzFromProcCPUInfo()
-}
-
 // cpufreqMaxMHzFromKHzFileContent parses a single integer kHz line from cpufreq sysfs (e.g. "1500000\n").
 func cpufreqMaxMHzFromKHzFileContent(b []byte) float64 {
 	s := strings.TrimSpace(string(b))
@@ -106,14 +81,6 @@ func cpufreqMaxMHzFromKHzFileContent(b []byte) float64 {
 		return 0
 	}
 	return float64(khz) / 1000.0
-}
-
-func linuxMaxCPUFrequencyMHzFromProcCPUInfo() float64 {
-	data, err := os.ReadFile("/proc/cpuinfo")
-	if err != nil {
-		return 0
-	}
-	return parseMaxMHzFromCPUInfo(data)
 }
 
 // parseMaxMHzFromCPUInfo returns the highest reported MHz from /proc/cpuinfo-style content (ARM/x86 variants).

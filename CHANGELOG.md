@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.1] - 2026-03-24
+
+### Changed
+- **Hardware**: Linux-only memory and CPU frequency helpers (`/proc`, sysfs) live in `captures_linux.go` with the `linux` build tag; shared parsers remain in `captures.go`.
+
+### Removed
+- **Web UI**: Unused `updateQueueStorageDisplay` stub (queue storage is handled by `updateSystemResourcesDisplay`).
+
 ## [2.7.0] - 2026-03-15
 
 ### Added

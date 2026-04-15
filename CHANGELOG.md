@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-04-15
+
+### Changed
+- **Dependencies**: Bump `golang.org/x/crypto` to v0.50.0 and `golang.org/x/sys` to v0.43.0.
+- **CI / release automation**: Update GitHub Actions (`actions/setup-go` v6.4.0, `codecov/codecov-action` v6.0.0, Docker build/login/metadata/build-push, `actions/upload-artifact` v7.0.1, `softprops/action-gh-release` v3.0.0, and related workflow steps); pin workflow actions to immutable commit SHAs with version comments for supply-chain consistency.
+
 ## [2.7.1] - 2026-03-24
 
 ### Changed

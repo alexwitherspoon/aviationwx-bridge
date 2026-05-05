@@ -14,6 +14,6 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/icholy/digest v1.1.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
-	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )

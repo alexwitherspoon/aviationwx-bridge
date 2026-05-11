@@ -6,8 +6,8 @@ require (
 	github.com/beevik/ntp v1.5.0
 	github.com/korylprince/go-onvif v0.1.5
 	github.com/pkg/sftp v1.13.10
-	golang.org/x/crypto v0.50.0
-	golang.org/x/sys v0.43.0
+	golang.org/x/crypto v0.51.0
+	golang.org/x/sys v0.44.0
 )
 
 require (

@@ -442,6 +442,7 @@ func (w *UploadWorker) probeConnections() {
 	start := w.probeCameraIndex % n
 	cameraID := ""
 	uploader := upload.Client(nil)
+	nextProbeIndex := -1
 	for i := 0; i < n; i++ {
 		idx := (start + i) % n
 		id := w.queueOrder[idx]
@@ -459,10 +460,16 @@ func (w *UploadWorker) probeConnections() {
 		}
 		cameraID = id
 		uploader = up
-		w.probeCameraIndex = (idx + 1) % n
+		nextProbeIndex = (idx + 1) % n
 		break
 	}
 	w.mu.RUnlock()
+
+	if nextProbeIndex >= 0 {
+		w.mu.Lock()
+		w.probeCameraIndex = nextProbeIndex
+		w.mu.Unlock()
+	}
 
 	if uploader == nil {
 		return

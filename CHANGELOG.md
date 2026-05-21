@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Watchdog**: Restarts bridge container when Docker reports `unhealthy` (not only `exited`).
 
 ### Fixed
+- **Watchdog**: Detect unhealthy containers via `State.Health.Status` (not `State.Status`).
+- **Health**: `/healthz` parses typed `getStatus()` (orchestrator struct, enabled camera count).
+- **Bridge**: Stop camera retry loop on graceful shutdown.
+- **Upload**: Clear per-path read-failure counts after success; drop redundant timeout channel drain.
+- **Queue**: Remove duplicate `maybeResumeCapture` call from `MarkUploaded`.
 - **Capture**: Immediate wake on `ResumeCapture` (not only when a pending capture exists).
 - **Upload**: Upload timeout interrupts SFTP (`InterruptUpload`) so the next upload is not blocked; channel drain retained.
 - **Upload**: Serialize SFTP `Upload` per client so timeout interrupt closes the correct session under concurrent workers.

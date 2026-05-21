@@ -2,8 +2,8 @@
 # AviationWX.org Bridge - Container Startup
 # Started by systemd after boot-update; also used by aviationwx-supervisor.sh on update/rollback.
 # Optional first argument: image tag to run (defaults to /data/aviationwx/last-known-good.txt).
-# Version: 2.0
-# Features: Dynamic resource limits based on system capabilities
+# Version: 2.1
+# Features: Dynamic resource limits; optional image tag; /readyz healthcheck; TCP keepalive sysctls
 
 set -euo pipefail
 

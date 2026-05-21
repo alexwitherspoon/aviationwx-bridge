@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-05-21
+
 ### Added
 - **Self-recovery**: Resume capture when queue drains below resume threshold (not only after upload).
 - **Self-recovery**: Resume capture after tmpfs/disk space recovers (filesystem and memory monitors).

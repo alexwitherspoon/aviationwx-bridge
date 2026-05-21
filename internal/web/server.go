@@ -790,88 +790,38 @@ func (s *Server) buildHealthStatus() map[string]interface{} {
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	// Get orchestrator status if available
 	if s.getStatus != nil {
-		rawStatus := s.getStatus()
-		if statusMap, ok := rawStatus.(map[string]interface{}); ok {
-			// Extract key health indicators
-			orchestratorRunning := false
-			camerasActive := 0
-			camerasTotal := 0
-			uploadsRecent := 0
-			queueHealth := "unknown"
-			ntpHealthy := true
+		hi := extractHealthIndicators(s.getStatus())
+		details := []string{}
 
-			if orch, ok := statusMap["orchestrator"].(map[string]interface{}); ok {
-				if running, ok := orch["running"].(bool); ok {
-					orchestratorRunning = running
-				}
-			}
+		if hi.orchestratorPresent && !hi.orchestratorRunning {
+			health["status"] = "degraded"
+			details = append(details, "orchestrator not running")
+		}
 
-			if cameras, ok := statusMap["cameras"].([]interface{}); ok {
-				camerasTotal = len(cameras)
-				for _, cam := range cameras {
-					if camMap, ok := cam.(map[string]interface{}); ok {
-						if enabled, ok := camMap["enabled"].(bool); ok && enabled {
-							camerasActive++
-						}
-					}
-				}
-			}
+		if hi.camerasTotal > 0 && hi.camerasActive == 0 {
+			health["status"] = "degraded"
+			details = append(details, "no enabled cameras")
+		}
 
-			if queue, ok := statusMap["queue"].(map[string]interface{}); ok {
-				if qh, ok := queue["health"].(string); ok {
-					queueHealth = qh
-				}
-			}
+		if hi.queueHealth == "critical" {
+			health["status"] = "degraded"
+			details = append(details, "queue critical")
+		}
 
-			if upload, ok := statusMap["upload"].(map[string]interface{}); ok {
-				if stats, ok := upload["stats"].(map[string]interface{}); ok {
-					if success, ok := stats["uploads_success"].(int64); ok {
-						uploadsRecent = int(success)
-					}
-				}
-			}
+		health["orchestrator_running"] = hi.orchestratorRunning
+		health["cameras_active"] = hi.camerasActive
+		health["cameras_total"] = hi.camerasTotal
+		health["uploads_recent"] = hi.uploadsRecent
+		health["queue_health"] = hi.queueHealth
+		health["ntp_healthy"] = hi.ntpHealthy
 
-			if timeInfo, ok := statusMap["time"].(map[string]interface{}); ok {
-				if healthy, ok := timeInfo["ntp_healthy"].(bool); ok {
-					ntpHealthy = healthy
-				}
-			}
+		for _, d := range details {
+			appendHealthDetail(health, d)
+		}
 
-			// Determine overall health status
-			details := []string{}
-
-			if !orchestratorRunning {
-				health["status"] = "degraded"
-				details = append(details, "orchestrator not running")
-			}
-
-			if camerasTotal > 0 && camerasActive == 0 {
-				health["status"] = "degraded"
-				details = append(details, "no active cameras")
-			}
-
-			if queueHealth == "critical" {
-				health["status"] = "degraded"
-				details = append(details, "queue critical")
-			}
-
-			// Populate health details
-			health["orchestrator_running"] = orchestratorRunning
-			health["cameras_active"] = camerasActive
-			health["cameras_total"] = camerasTotal
-			health["uploads_recent"] = uploadsRecent
-			health["queue_health"] = queueHealth
-			health["ntp_healthy"] = ntpHealthy
-
-			for _, d := range details {
-				appendHealthDetail(health, d)
-			}
-
-			if hr, ok := statusMap["host_recovery"].(map[string]interface{}); ok {
-				health["host_recovery"] = hr
-			}
+		if hi.hostRecovery != nil {
+			health["host_recovery"] = hi.hostRecovery
 		}
 	}
 

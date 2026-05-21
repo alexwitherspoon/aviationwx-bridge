@@ -170,7 +170,6 @@ func (m *Manager) StartMemoryMonitor(ctx context.Context) {
 			return
 		case <-ticker.C:
 			m.checkMemoryPressure()
-			m.tryResumePausedCaptures()
 		}
 	}
 }

@@ -62,7 +62,7 @@ Install enables layered recovery instead of a blind daily container restart:
 
 Docker health checks use **`/readyz`** so an alive but non-capturing container is unhealthy.
 
-Legacy `daily-restart.sh` (3 AM cron) is **deprecated** — do not add a nightly restart unless you have a specific ops reason; capture-restart targets stale state without disrupting healthy sites.
+Legacy `daily-restart.sh` (3 AM cron) is **deprecated**. Do not add a nightly restart unless you have a specific ops reason; capture-restart targets stale state without disrupting healthy sites.
 
 **Existing Pis:** `aviationwx-capture-restart.timer` is enabled automatically on the next `boot-update` / daily update once supervisor v2.2+ is deployed (no `install.sh` rerun). Verify with `systemctl is-enabled aviationwx-capture-restart.timer`.
 

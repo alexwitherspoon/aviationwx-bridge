@@ -1,5 +1,5 @@
 #!/bin/bash
-# AviationWX.org Bridge — host helper: restart container when /readyz is unreachable or
+# AviationWX.org Bridge host helper: restart container when /readyz is unreachable or
 # returns HTTP 503 (capture not ready), with consecutive-check thresholds, cooldown, and
 # max restarts per 24h.
 #

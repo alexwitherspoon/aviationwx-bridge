@@ -1,7 +1,7 @@
 #!/bin/bash
 # AviationWX.org Bridge - Unified Supervisor
 # Handles updates for both host scripts and container
-# Version: 2.0
+# Version: 2.2
 
 set -euo pipefail
 

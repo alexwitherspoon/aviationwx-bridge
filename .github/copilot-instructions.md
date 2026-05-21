@@ -1,4 +1,4 @@
-# AviationWX.org Bridge – Copilot Instructions
+# AviationWX.org Bridge - Copilot Instructions
 
 ## Project Summary
 

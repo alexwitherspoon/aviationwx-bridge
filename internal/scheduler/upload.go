@@ -531,6 +531,7 @@ func (w *UploadWorker) uploadWorkerRoutine(workerID int, workChan <-chan uploadT
 			success := w.uploadWithRetry(task.cameraID, task.uploader, task.image, task.remotePath)
 
 			if success {
+				w.clearFileReadFailure(task.image.FilePath)
 				if err := task.queue.MarkUploaded(task.image); err != nil {
 					w.logger.Error("Failed to mark uploaded",
 						"worker", workerID,
@@ -783,7 +784,6 @@ func (w *UploadWorker) uploadWithRetry(cameraID string, uploader upload.Client, 
 
 	case <-uploadDeadline:
 		upload.InterruptUpload(uploader)
-		go func() { <-resultCh }()
 		w.logger.Error("Upload exceeded maximum time",
 			"camera", cameraID,
 			"file_size_kb", len(imageData)/1024,
@@ -791,6 +791,12 @@ func (w *UploadWorker) uploadWithRetry(cameraID string, uploader upload.Client, 
 		w.recordFailure(cameraID, fmt.Errorf("upload timeout after %v", maxUploadTime))
 		return false
 	}
+}
+
+func (w *UploadWorker) clearFileReadFailure(path string) {
+	w.fileReadFailMu.Lock()
+	delete(w.fileReadFailures, path)
+	w.fileReadFailMu.Unlock()
 }
 
 // handleReadFailure records a read error and drops the queued file after maxFileReadFailures.

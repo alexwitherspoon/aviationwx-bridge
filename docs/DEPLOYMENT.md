@@ -56,8 +56,8 @@ Install enables layered recovery instead of a blind daily container restart:
 
 | Mechanism | Interval | Action |
 |-----------|----------|--------|
-| **Watchdog** | Every 1 min | NTP/network/Docker fixes; restarts **exited** or **unhealthy** container; runs capture-restart check |
-| **Capture-restart** | Every 5 min | Restarts after repeated `/readyz` 503 (stale capture) or unreachable (curl 000); max 6/day, 1h cooldown |
+| **Watchdog** | Every 1 min | NTP/network/Docker fixes; restarts **exited** or Docker **health=unhealthy** container; runs capture-restart (thresholds count per run, ~5 min to restart on 503) |
+| **Capture-restart timer** | Every 5 min | Same script as watchdog backup; slower streak accumulation (~25 min to restart on 503) |
 | **Bridge (in-process)** | Continuous | Queue resume after drain/space recovery; hourly SFTP probe per empty camera queue; camera retry/restart every 15 min |
 
 Docker health checks use **`/readyz`** so an alive but non-capturing container is unhealthy.

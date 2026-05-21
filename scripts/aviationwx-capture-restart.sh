@@ -4,7 +4,8 @@
 # max restarts per 24h.
 #
 # Installed by install.sh (aviationwx-capture-restart.timer, every 5 minutes) and invoked
-# from aviationwx-watchdog.sh. Run on the host, not inside the container.
+# from aviationwx-watchdog.sh (every 1 minute). Thresholds are per invocation: with the
+# watchdog, five consecutive 503s typically means ~5 minutes before restart. Run on the host.
 #
 # Environment (optional):
 #   AVIATIONWX_CAPTURE_RESTART_URL                      default http://127.0.0.1:1229/readyz

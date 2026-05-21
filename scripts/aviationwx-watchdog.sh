@@ -219,11 +219,12 @@ check_temperature() {
 }
 
 check_bridge_container() {
-    # If bridge container has exited (e.g. panic, OOM), restart it
-    local status
+    # If bridge container has exited (e.g. panic, OOM) or failed healthcheck, restart it.
+    local status health_status
     status=$(docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "missing")
+    health_status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$CONTAINER_NAME" 2>/dev/null || echo "")
 
-    if [ "$status" = "unhealthy" ]; then
+    if [ "$health_status" = "unhealthy" ]; then
         log_event "ERROR" "Bridge container unhealthy (healthcheck failing), restarting"
         if systemctl is-active --quiet aviationwx-container.service 2>/dev/null; then
             execute_action "Restart unhealthy bridge container" "systemctl restart aviationwx-container.service"

@@ -7,6 +7,6 @@
     "test:sh": "bats scripts/tests"
   },
   "devDependencies": {
-    "bats": "^1.13.0"
+    "bats": "1.13.0"
   }
 }

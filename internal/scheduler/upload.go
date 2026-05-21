@@ -481,19 +481,27 @@ func (w *UploadWorker) probeConnections() {
 	err := uploader.TestConnection()
 
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	hadFailedProbe := !w.lastProbeOK && !w.lastProbeTime.IsZero()
 	w.lastProbeTime = time.Now()
 	w.lastProbeOK = err == nil
+	probeErr := ""
 	if err != nil {
-		w.lastProbeError = err.Error()
+		probeErr = err.Error()
+		w.lastProbeError = probeErr
+	} else {
+		w.lastProbeError = ""
+	}
+	logFail := err != nil
+	logRecover := err == nil && hadFailedProbe
+	w.mu.Unlock()
+
+	if logFail {
 		w.logger.Warn("Upload connectivity probe failed",
 			"camera", cameraID,
-			"error", err)
+			"error", probeErr)
 		return
 	}
-	w.lastProbeError = ""
-	if hadFailedProbe {
+	if logRecover {
 		w.logger.Info("Upload connectivity probe recovered",
 			"camera", cameraID)
 	}
@@ -550,6 +558,8 @@ func (w *UploadWorker) uploadWorkerRoutine(workerID int, workChan <-chan uploadT
 
 // scheduleUploads coordinates which images to upload next
 func (w *UploadWorker) scheduleUploads(workChan chan<- uploadTask) {
+	w.pruneStaleFileReadFailures()
+
 	w.mu.RLock()
 	if len(w.queueOrder) == 0 {
 		w.mu.RUnlock()
@@ -799,8 +809,30 @@ func (w *UploadWorker) clearFileReadFailure(path string) {
 	w.fileReadFailMu.Unlock()
 }
 
+// pruneStaleFileReadFailures drops map entries whose queue files no longer exist.
+func (w *UploadWorker) pruneStaleFileReadFailures() {
+	w.fileReadFailMu.Lock()
+	defer w.fileReadFailMu.Unlock()
+	for path := range w.fileReadFailures {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			delete(w.fileReadFailures, path)
+		}
+	}
+}
+
 // handleReadFailure records a read error and drops the queued file after maxFileReadFailures.
 func (w *UploadWorker) handleReadFailure(cameraID string, img *queue.QueuedImage, err error) {
+	if os.IsNotExist(err) {
+		w.clearFileReadFailure(img.FilePath)
+		w.mu.RLock()
+		q := w.queues[cameraID]
+		w.mu.RUnlock()
+		if q != nil {
+			_ = q.DropQueuedImage(img)
+		}
+		return
+	}
+
 	w.fileReadFailMu.Lock()
 	count := w.fileReadFailures[img.FilePath]
 	count++

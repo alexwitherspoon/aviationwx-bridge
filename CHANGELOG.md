@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bridge**: Stop camera retry loop on graceful shutdown.
 - **Upload**: Clear per-path read-failure counts after success; drop redundant timeout channel drain.
 - **Queue**: Remove duplicate `maybeResumeCapture` call from `MarkUploaded`.
+- **Queue**: Resume capture once per memory monitor tick (not twice via filesystem check).
+- **Upload**: Prune `fileReadFailures` when queue files are gone; log SFTP probes outside upload mutex.
 - **Capture**: Immediate wake on `ResumeCapture` (not only when a pending capture exists).
 - **Upload**: Upload timeout interrupts SFTP (`InterruptUpload`) so the next upload is not blocked.
 - **Upload**: Serialize SFTP `Upload` per client so timeout interrupt closes the correct session under concurrent workers.

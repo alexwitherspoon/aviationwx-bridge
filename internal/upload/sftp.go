@@ -158,7 +158,8 @@ func normalizeRemotePath(remotePath string) string {
 	return strings.TrimPrefix(remotePath, "/")
 }
 
-// Close is a no-op; Upload and TestConnection close connections per operation.
+// Close aborts any in-flight Upload by closing the active SSH session (same as Interrupt).
+// Each Upload and TestConnection still closes its own session when the call returns.
 func (c *SFTPClient) Close() error {
 	c.Interrupt()
 	return nil

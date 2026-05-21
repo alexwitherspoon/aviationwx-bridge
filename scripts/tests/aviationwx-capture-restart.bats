@@ -83,3 +83,33 @@ load test_helper
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"another capture-restart run in progress"* ]]
 }
+
+@test "503 streak counter clamps at threshold" {
+	local now
+	now=$(date +%s)
+	local restarts
+	restarts=$(jq -n --argjson now "$now" '[range(6) | $now - (. * 3600)] | map({epoch: .})')
+	jq -n \
+		--argjson cu 5 \
+		--argjson restarts "$restarts" \
+		'{consecutive_unready: $cu, consecutive_unreachable: 0, recent_restarts: $restarts}' >"$STATE_FILE"
+	MOCK_HTTP_CODE=503 run bash "$SCRIPT"
+	[ "$status" -eq 0 ]
+	[ "$(jq -r .consecutive_unready "$STATE_FILE")" = "5" ]
+}
+
+@test "recovery-exhausted since is UTC" {
+	local now
+	now=$(date +%s)
+	local restarts
+	restarts=$(jq -n --argjson now "$now" '[range(6) | $now - (. * 3600)] | map({epoch: .})')
+	jq -n \
+		--argjson cu 5 \
+		--argjson restarts "$restarts" \
+		'{consecutive_unready: $cu, consecutive_unreachable: 0, recent_restarts: $restarts}' >"$STATE_FILE"
+	MOCK_HTTP_CODE=503 run bash "$SCRIPT"
+	[ "$status" -eq 0 ]
+	local since
+	since=$(jq -r .since "$DATA_DIR/recovery-exhausted.json")
+	[[ "$since" == *Z ]]
+}

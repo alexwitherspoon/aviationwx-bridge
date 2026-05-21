@@ -88,6 +88,17 @@ clear_recovery_exhausted() {
 	rm -f "$RECOVERY_EXHAUSTED_FILE"
 }
 
+# clamp_streak caps a counter at its threshold so long outages do not grow without bound.
+clamp_streak() {
+	local value="$1"
+	local threshold="$2"
+	if [ "$value" -gt "$threshold" ]; then
+		echo "$threshold"
+	else
+		echo "$value"
+	fi
+}
+
 write_recovery_exhausted() {
 	local reason="$1"
 	local restarts_24h="$2"
@@ -95,7 +106,7 @@ write_recovery_exhausted() {
 		--arg reason "$reason" \
 		--argjson restarts "$restarts_24h" \
 		--argjson max "$MAX_PER_24H" \
-		--arg since "$(date -Iseconds)" \
+		--arg since "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 		'{exhausted: true, reason: $reason, restarts_24h: $restarts, max_per_24h: $max, since: $since}' \
 		>"${RECOVERY_EXHAUSTED_FILE}.tmp"
 	mv "${RECOVERY_EXHAUSTED_FILE}.tmp" "$RECOVERY_EXHAUSTED_FILE"
@@ -177,6 +188,7 @@ main() {
 
 	if [ "$code" = "503" ]; then
 		consecutive_unready=$((consecutive_unready + 1))
+		consecutive_unready=$(clamp_streak "$consecutive_unready" "$CONSECUTIVE_THRESHOLD")
 		consecutive_unreachable=0
 		log_event "WARN" "readyz not ready (503), consecutive=$consecutive_unready/$CONSECUTIVE_THRESHOLD"
 
@@ -190,6 +202,7 @@ main() {
 
 	if [ "$code" = "000" ]; then
 		consecutive_unreachable=$((consecutive_unreachable + 1))
+		consecutive_unreachable=$(clamp_streak "$consecutive_unreachable" "$UNREACHABLE_THRESHOLD")
 		consecutive_unready=0
 		log_event "WARN" "readyz unreachable (000), consecutive=$consecutive_unreachable/$UNREACHABLE_THRESHOLD"
 

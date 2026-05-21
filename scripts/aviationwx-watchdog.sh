@@ -225,14 +225,8 @@ check_bridge_container() {
     health_status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$CONTAINER_NAME" 2>/dev/null || echo "")
 
     if [ "$health_status" = "unhealthy" ]; then
-        log_event "ERROR" "Bridge container unhealthy (healthcheck failing), restarting"
-        if systemctl is-active --quiet aviationwx-container.service 2>/dev/null; then
-            execute_action "Restart unhealthy bridge container" "systemctl restart aviationwx-container.service"
-        elif [ -x "$CONTAINER_START_SCRIPT" ]; then
-            execute_action "Recreate unhealthy bridge container" "$CONTAINER_START_SCRIPT"
-        else
-            execute_action "Restart unhealthy bridge container" "docker restart '$CONTAINER_NAME'"
-        fi
+        # /readyz healthcheck failure: capture-restart.sh applies streak, cooldown, and 24h cap.
+        log_event "WARN" "Bridge container unhealthy (/readyz); capture-restart handles rate-limited restart"
     elif [ "$status" = "exited" ] || [ "$status" = "missing" ]; then
         log_event "ERROR" "Bridge container $status, restarting"
         if systemctl is-active --quiet aviationwx-container.service 2>/dev/null; then

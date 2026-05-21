@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Health checks**: Container health uses `/readyz` instead of `/healthz` alone.
 - **Upload**: Catch-up mode uses LIFO (`DequeueNext`) per camera when queue exceeds threshold.
 - **Capture-restart**: Unreachable `/readyz` (curl 000) escalates to container restart; max-restart cap no longer clears the streak.
-- **Watchdog**: Restarts bridge container when Docker reports `unhealthy` (not only `exited`).
+- **Watchdog**: Restarts **exited** bridge container; `unhealthy` (/readyz) is handled by capture-restart rate limits (not immediate restart).
 
 ### Fixed
 - **Watchdog**: Detect unhealthy containers via `State.Health.Status` (not `State.Status`).
@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Upload**: Advance `probeCameraIndex` under write lock (fix RLock data race).
 - **Bridge**: Stale camera worker restart uses `AVIATIONWX_READYZ_GRACE_SECONDS` and `AVIATIONWX_READYZ_STALE_SECONDS` (same as `/readyz`).
 - **Host**: capture-restart uses `curl ... || code=000` so unreachable does not become `000000`.
+- **Host**: Clamp capture-restart streak counters at threshold; write `recovery-exhausted.json` `since` in UTC.
 - **Capture**: Immediate wake on `ResumeCapture` (not only when a pending capture exists).
 - **Upload**: Upload timeout interrupts SFTP (`InterruptUpload`) so the next upload is not blocked.
 - **Upload**: Serialize SFTP `Upload` per client so timeout interrupt closes the correct session under concurrent workers.

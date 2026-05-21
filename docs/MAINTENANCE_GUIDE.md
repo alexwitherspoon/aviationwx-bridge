@@ -161,10 +161,22 @@ local current_scripts=(
 
 ### Modifying Existing Services
 
-1. **Edit the service definition** in `setup_systemd()` function
-2. **Test locally** with Docker deployment
-3. **Document changes** in CHANGELOG.md
-4. **Release note**: Mention that services will be updated on next install
+1. **Edit the service definition** in `setup_systemd()` function (fresh installs)
+2. **Mirror changes** in `ensure_capture_restart_timer()` in `aviationwx-supervisor.sh` when the unit is managed on update (existing Pis)
+3. **Test locally** with Docker deployment
+4. **Document changes** in CHANGELOG.md
+5. **Bump `SCRIPT_VERSION`** in `aviationwx-supervisor.sh` and **`min_host_version`** in the release workflow when host/supervisor behavior changes
+
+### Enabling units on existing Pis (without re-running install.sh)
+
+`boot-update` and `daily-update` call `ensure_capture_restart_timer()` idempotently:
+
+- Writes `aviationwx-capture-restart.service` / `.timer` if missing
+- `systemctl enable` + `start` the timer
+
+Ship a release with `min_host_version` above the Pi’s embedded supervisor version so host scripts (including this logic) are pulled from `main` first.
+
+**Container recreation:** `aviationwx-supervisor.sh` must call `aviationwx-container-start.sh` for updates and rollback (not inline `docker run`), so Pi memory/CPU/tmpfs limits stay consistent with install.
 
 ### Adding New Services
 

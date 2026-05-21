@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/scheduler"
 )
 
 // TestTimezoneUpdate tests the PUT /api/time endpoint
@@ -581,6 +582,85 @@ func TestUpdateCamera_NormalizesCameraType(t *testing.T) {
 	if cam.Type != "rtsp" {
 		t.Errorf("type: want rtsp, got %q", cam.Type)
 	}
+}
+
+func TestHealthz(t *testing.T) {
+	t.Run("hostRecoveryExhaustedReturns503", func(t *testing.T) {
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				return map[string]interface{}{
+					"host_recovery": map[string]interface{}{
+						"exhausted":    true,
+						"reason":       "capture readiness stuck",
+						"restarts_24h": float64(6),
+						"max_per_24h":  float64(6),
+					},
+				}
+			},
+			GetCaptureReadiness: func() (bool, string) {
+				return true, ""
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503, got %d body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("orchestratorRunningHealthy", func(t *testing.T) {
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				return map[string]interface{}{
+					"cameras": 1,
+					"orchestrator": scheduler.OrchestratorStatus{
+						Running:     true,
+						CameraCount: 1,
+					},
+				}
+			},
+			GetCaptureReadiness: func() (bool, string) {
+				return true, ""
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+		}
+		var body map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body["status"] != "healthy" {
+			t.Fatalf("status=%v details=%v", body["status"], body["details"])
+		}
+		if running, _ := body["orchestrator_running"].(bool); !running {
+			t.Fatalf("orchestrator_running=%v", body["orchestrator_running"])
+		}
+	})
+
+	t.Run("captureNotReadyReturns503", func(t *testing.T) {
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				return map[string]interface{}{"status": "ok"}
+			},
+			GetCaptureReadiness: func() (bool, string) {
+				return false, "camera cam1: last success 2h ago"
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503, got %d", w.Code)
+		}
+	})
 }
 
 func TestReadyz(t *testing.T) {

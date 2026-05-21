@@ -13,10 +13,10 @@ import (
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/upload"
 )
 
-// UploadWorker handles uploading queued images to the server
-// Supports concurrent uploads (default: 2) with connection rate limiting
-// Uses newest-first (LIFO) when catching up, oldest-first (FIFO) otherwise
-// Each camera has its own uploader with independent credentials
+// UploadWorker uploads queued images to the server.
+// Supports concurrent uploads (default: 2) with connection rate limiting.
+// When a camera's backlog exceeds CatchupThreshold, dequeue prefers newest images first.
+// Each camera has its own uploader with independent credentials.
 type UploadWorker struct {
 	queues     map[string]*queue.Queue  // Camera ID -> Queue
 	queueOrder []string                 // Order for round-robin
@@ -63,6 +63,15 @@ type UploadWorker struct {
 
 	// Per-camera failure tracking (for fail2ban awareness)
 	cameraFailures map[string]*uploadFailureState
+
+	fileReadFailures map[string]int // per-path read failures before DropQueuedImage
+	fileReadFailMu   sync.Mutex
+
+	connectionProbeInterval time.Duration
+	probeCameraIndex        int
+	lastProbeTime           time.Time
+	lastProbeOK             bool
+	lastProbeError          string
 }
 
 // uploadFailureState tracks failures for a single camera
@@ -86,13 +95,14 @@ type uploadTask struct {
 // UploadWorkerConfig configures the upload worker
 // Note: Individual uploaders are set per-camera via AddQueue
 type UploadWorkerConfig struct {
-	MaxConcurrent      int           // Maximum concurrent uploads (default: 2)
-	CatchupThreshold   int           // Queue size to trigger LIFO mode (default: 20)
-	MinUploadInterval  time.Duration // Minimum time between uploads (default: 1 second)
-	AuthBackoff        time.Duration // Backoff after auth failure (default: 60 seconds)
-	RetryDelay         time.Duration // Delay before single retry (default: 5 seconds)
-	ConnectionInterval time.Duration // Minimum time between new connections (default: 2 seconds)
-	Logger             Logger
+	MaxConcurrent           int           // Maximum concurrent uploads (default: 2)
+	CatchupThreshold        int           // Queue size to trigger LIFO mode (default: 20)
+	MinUploadInterval       time.Duration // Minimum time between uploads (default: 1 second)
+	AuthBackoff             time.Duration // Backoff after auth failure (default: 60 seconds)
+	RetryDelay              time.Duration // Delay before single retry (default: 5 seconds)
+	ConnectionInterval      time.Duration // Minimum time between new connections (default: 2 seconds)
+	ConnectionProbeInterval time.Duration // TestConnection interval when a camera queue is empty (0 = default 1h)
+	Logger                  Logger
 }
 
 // NewUploadWorker creates a new upload worker
@@ -130,30 +140,40 @@ func NewUploadWorker(cfg UploadWorkerConfig) *UploadWorker {
 		connectionInterval = 2 * time.Second // Stagger connection establishment
 	}
 
+	probeInterval := cfg.ConnectionProbeInterval
+	if probeInterval == 0 {
+		probeInterval = time.Hour
+	}
+
 	logger := cfg.Logger
 	if logger == nil {
 		logger = &defaultLogger{}
 	}
 
 	return &UploadWorker{
-		queues:             make(map[string]*queue.Queue),
-		queueOrder:         make([]string, 0),
-		configs:            make(map[string]CameraConfig),
-		uploaders:          make(map[string]upload.Client),
-		ctx:                ctx,
-		cancel:             cancel,
-		logger:             logger,
-		maxConcurrent:      maxConcurrent,
-		catchupThreshold:   catchupThreshold,
-		minUploadInterval:  minInterval,
-		authBackoff:        authBackoff,
-		retryDelay:         retryDelay,
-		connectionInterval: connectionInterval,
-		todayDate:          time.Now().Truncate(24 * time.Hour), // Initialize to today at 00:00
-		cameraFailures:     make(map[string]*uploadFailureState),
-		inFlight:           make(map[string]bool),
+		queues:                  make(map[string]*queue.Queue),
+		queueOrder:              make([]string, 0),
+		configs:                 make(map[string]CameraConfig),
+		uploaders:               make(map[string]upload.Client),
+		ctx:                     ctx,
+		cancel:                  cancel,
+		logger:                  logger,
+		maxConcurrent:           maxConcurrent,
+		catchupThreshold:        catchupThreshold,
+		minUploadInterval:       minInterval,
+		authBackoff:             authBackoff,
+		retryDelay:              retryDelay,
+		connectionInterval:      connectionInterval,
+		connectionProbeInterval: probeInterval,
+		todayDate:               time.Now().Truncate(24 * time.Hour),
+		cameraFailures:          make(map[string]*uploadFailureState),
+		fileReadFailures:        make(map[string]int),
+		inFlight:                make(map[string]bool),
 	}
 }
+
+// maxFileReadFailures is how many read errors on one queued file before it is dropped.
+const maxFileReadFailures = 3
 
 // maxConcurrentUploadsCap is the upper bound for concurrent upload workers (matches web UI and orchestrator).
 const maxConcurrentUploadsCap = 10
@@ -288,6 +308,9 @@ func (w *UploadWorker) GetStats() UploadStats {
 		PerCameraFailures:  w.copyFailureStats(),
 		CurrentlyUploading: w.activeUploads > 0,
 		ActiveUploads:      w.activeUploads,
+		LastProbeTime:      w.lastProbeTime,
+		LastProbeOK:        w.lastProbeOK,
+		LastProbeError:     w.lastProbeError,
 	}
 }
 
@@ -317,6 +340,9 @@ type UploadStats struct {
 	PerCameraFailures  map[string]int64 `json:"per_camera_failures"` // Track failures per camera
 	CurrentlyUploading bool             `json:"currently_uploading"`
 	ActiveUploads      int              `json:"active_uploads"` // Number of concurrent uploads in progress
+	LastProbeTime      time.Time        `json:"last_probe_time,omitempty"`
+	LastProbeOK        bool             `json:"last_probe_ok"`
+	LastProbeError     string           `json:"last_probe_error,omitempty"`
 }
 
 func (w *UploadWorker) run() {
@@ -375,6 +401,14 @@ func (w *UploadWorker) run() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	var probeTicker *time.Ticker
+	var probeC <-chan time.Time
+	if w.connectionProbeInterval > 0 {
+		probeTicker = time.NewTicker(w.connectionProbeInterval)
+		defer probeTicker.Stop()
+		probeC = probeTicker.C
+	}
+
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -389,7 +423,94 @@ func (w *UploadWorker) run() {
 
 		case <-ticker.C:
 			w.scheduleUploads(workChan)
+
+		case <-probeC:
+			w.probeConnections()
 		}
+	}
+}
+
+// probeConnections runs TestConnection for one camera whose queue is empty.
+func (w *UploadWorker) probeConnections() {
+	w.mu.RLock()
+	if len(w.queueOrder) == 0 {
+		w.mu.RUnlock()
+		return
+	}
+
+	n := len(w.queueOrder)
+	start := w.probeCameraIndex % n
+	cameraID := ""
+	uploader := upload.Client(nil)
+	nextProbeIndex := -1
+	for i := 0; i < n; i++ {
+		idx := (start + i) % n
+		id := w.queueOrder[idx]
+		q := w.queues[id]
+		up := w.uploaders[id]
+		failState := w.cameraFailures[id]
+		if q == nil || up == nil || failState == nil {
+			continue
+		}
+		if q.GetImageCount() > 0 {
+			continue
+		}
+		if time.Now().Before(failState.backoffUntil) {
+			continue
+		}
+		cameraID = id
+		uploader = up
+		nextProbeIndex = (idx + 1) % n
+		break
+	}
+	w.mu.RUnlock()
+
+	if nextProbeIndex >= 0 {
+		w.mu.Lock()
+		w.probeCameraIndex = nextProbeIndex
+		w.mu.Unlock()
+	}
+
+	if uploader == nil {
+		return
+	}
+
+	w.connectionMutex.Lock()
+	if !w.lastConnectionTime.IsZero() {
+		elapsed := time.Since(w.lastConnectionTime)
+		if elapsed < w.connectionInterval {
+			time.Sleep(w.connectionInterval - elapsed)
+		}
+	}
+	w.lastConnectionTime = time.Now()
+	w.connectionMutex.Unlock()
+
+	err := uploader.TestConnection()
+
+	w.mu.Lock()
+	hadFailedProbe := !w.lastProbeOK && !w.lastProbeTime.IsZero()
+	w.lastProbeTime = time.Now()
+	w.lastProbeOK = err == nil
+	probeErr := ""
+	if err != nil {
+		probeErr = err.Error()
+		w.lastProbeError = probeErr
+	} else {
+		w.lastProbeError = ""
+	}
+	logFail := err != nil
+	logRecover := err == nil && hadFailedProbe
+	w.mu.Unlock()
+
+	if logFail {
+		w.logger.Warn("Upload connectivity probe failed",
+			"camera", cameraID,
+			"error", probeErr)
+		return
+	}
+	if logRecover {
+		w.logger.Info("Upload connectivity probe recovered",
+			"camera", cameraID)
 	}
 }
 
@@ -425,6 +546,7 @@ func (w *UploadWorker) uploadWorkerRoutine(workerID int, workChan <-chan uploadT
 			success := w.uploadWithRetry(task.cameraID, task.uploader, task.image, task.remotePath)
 
 			if success {
+				w.clearFileReadFailure(task.image.FilePath)
 				if err := task.queue.MarkUploaded(task.image); err != nil {
 					w.logger.Error("Failed to mark uploaded",
 						"worker", workerID,
@@ -443,6 +565,8 @@ func (w *UploadWorker) uploadWorkerRoutine(workerID int, workChan <-chan uploadT
 
 // scheduleUploads coordinates which images to upload next
 func (w *UploadWorker) scheduleUploads(workChan chan<- uploadTask) {
+	w.pruneStaleFileReadFailures()
+
 	w.mu.RLock()
 	if len(w.queueOrder) == 0 {
 		w.mu.RUnlock()
@@ -454,21 +578,6 @@ func (w *UploadWorker) scheduleUploads(workChan chan<- uploadTask) {
 	if availableSlots <= 0 {
 		w.mu.RUnlock()
 		return
-	}
-
-	// Get total queue size to determine if we're catching up
-	totalQueued := 0
-	for _, q := range w.queues {
-		totalQueued += q.GetImageCount()
-	}
-
-	// Determine mode: LIFO (newest first) when catching up, FIFO (oldest first) otherwise
-	newestFirst := totalQueued > w.catchupThreshold
-
-	if newestFirst {
-		w.logger.Debug("Catch-up mode active (LIFO)",
-			"queued", totalQueued,
-			"threshold", w.catchupThreshold)
 	}
 
 	// Round-robin across cameras
@@ -504,8 +613,17 @@ func (w *UploadWorker) scheduleUploads(workChan chan<- uploadTask) {
 			continue
 		}
 
+		queued := q.GetImageCount()
+		cameraNewestFirst := queued > w.catchupThreshold
+		if cameraNewestFirst {
+			w.logger.Debug("Catch-up mode active (LIFO)",
+				"camera", cameraID,
+				"queued", queued,
+				"threshold", w.catchupThreshold)
+		}
+
 		// Try to get an image from this camera's queue
-		img, err := q.Dequeue()
+		img, err := q.DequeueNext(cameraNewestFirst)
 		if err == queue.ErrQueueEmpty {
 			continue
 		}
@@ -574,7 +692,7 @@ func (w *UploadWorker) uploadWithRetry(cameraID string, uploader upload.Client, 
 			"camera", cameraID,
 			"path", img.FilePath,
 			"error", err)
-		w.recordFailure(cameraID, err)
+		w.handleReadFailure(cameraID, img, err)
 		return false
 	}
 
@@ -682,6 +800,7 @@ func (w *UploadWorker) uploadWithRetry(cameraID string, uploader upload.Client, 
 		return false
 
 	case <-uploadDeadline:
+		upload.InterruptUpload(uploader)
 		w.logger.Error("Upload exceeded maximum time",
 			"camera", cameraID,
 			"file_size_kb", len(imageData)/1024,
@@ -689,6 +808,59 @@ func (w *UploadWorker) uploadWithRetry(cameraID string, uploader upload.Client, 
 		w.recordFailure(cameraID, fmt.Errorf("upload timeout after %v", maxUploadTime))
 		return false
 	}
+}
+
+func (w *UploadWorker) clearFileReadFailure(path string) {
+	w.fileReadFailMu.Lock()
+	delete(w.fileReadFailures, path)
+	w.fileReadFailMu.Unlock()
+}
+
+// pruneStaleFileReadFailures drops map entries whose queue files no longer exist.
+func (w *UploadWorker) pruneStaleFileReadFailures() {
+	w.fileReadFailMu.Lock()
+	defer w.fileReadFailMu.Unlock()
+	for path := range w.fileReadFailures {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			delete(w.fileReadFailures, path)
+		}
+	}
+}
+
+// handleReadFailure records a read error and drops the queued file after maxFileReadFailures.
+func (w *UploadWorker) handleReadFailure(cameraID string, img *queue.QueuedImage, err error) {
+	if os.IsNotExist(err) {
+		w.clearFileReadFailure(img.FilePath)
+		w.mu.RLock()
+		q := w.queues[cameraID]
+		w.mu.RUnlock()
+		if q != nil {
+			_ = q.DropQueuedImage(img)
+		}
+		return
+	}
+
+	w.fileReadFailMu.Lock()
+	count := w.fileReadFailures[img.FilePath] + 1
+	w.fileReadFailures[img.FilePath] = count
+	w.fileReadFailMu.Unlock()
+
+	w.mu.RLock()
+	q := w.queues[cameraID]
+	w.mu.RUnlock()
+
+	if count >= maxFileReadFailures && q != nil {
+		if dropErr := q.DropQueuedImage(img); dropErr != nil {
+			w.logger.Error("Failed to drop unreadable queued image",
+				"camera", cameraID,
+				"path", img.FilePath,
+				"error", dropErr)
+		} else {
+			w.clearFileReadFailure(img.FilePath)
+		}
+	}
+
+	w.recordFailure(cameraID, err)
 }
 
 func (w *UploadWorker) buildRemotePath(basePath, cameraID string, timestamp time.Time) string {

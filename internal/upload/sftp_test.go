@@ -131,7 +131,7 @@ func TestNewSFTPClient_WithBasePath(t *testing.T) {
 }
 
 func TestSFTPClient_ConcurrentUploads(t *testing.T) {
-	// SFTPClient uses a mutex to serialize access. Concurrent calls must not race.
+	// Concurrent Upload calls each dial independently; must not race on client state.
 	// This test verifies that many goroutines calling Upload (which will fail to connect)
 	// complete without panic or data race. Run with: go test -race
 	// Use .invalid TLD (RFC 6761) - reserved for invalid names, never resolves.

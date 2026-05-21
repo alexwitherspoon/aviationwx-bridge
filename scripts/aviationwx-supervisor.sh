@@ -1,11 +1,11 @@
 #!/bin/bash
 # AviationWX.org Bridge - Unified Supervisor
 # Handles updates for both host scripts and container
-# Version: 2.0
+# Version: 2.2
 
 set -euo pipefail
 
-readonly SCRIPT_VERSION="2.1"
+readonly SCRIPT_VERSION="2.2"
 readonly GITHUB_REPO="alexwitherspoon/aviationwx.org-bridge"
 readonly IMAGE_NAME="ghcr.io/alexwitherspoon/aviationwx-org-bridge"
 readonly CONTAINER_NAME="aviationwx-org-bridge"
@@ -150,8 +150,82 @@ update_host_scripts() {
     
     log_event "SUCCESS" "Host scripts updated to v$new_version"
     log_event "INFO" "Backup saved to $backup_dir"
+
+    ensure_capture_restart_timer
     
     return 0
+}
+
+# ============================================================================
+# SYSTEMD (idempotent; for Pis installed before capture-restart timer existed)
+# ============================================================================
+
+# ensure_capture_restart_timer installs/enables aviationwx-capture-restart.timer.
+# Unit definitions must stay in sync with install.sh setup_systemd().
+ensure_capture_restart_timer() {
+    if ! command -v systemctl >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ "$(id -u)" -ne 0 ]; then
+        log_event "WARN" "Skipping capture-restart timer setup (not root)"
+        return 0
+    fi
+
+    local timer_unit="/etc/systemd/system/aviationwx-capture-restart.timer"
+    local service_unit="/etc/systemd/system/aviationwx-capture-restart.service"
+    local installed_units=false
+
+    if [ ! -f "$timer_unit" ]; then
+        installed_units=true
+        cat >"$timer_unit" <<'EOF'
+[Unit]
+Description=AviationWX.org Bridge Capture Restart Check
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+    fi
+
+    if [ ! -f "$service_unit" ]; then
+        installed_units=true
+        cat >"$service_unit" <<'EOF'
+[Unit]
+Description=AviationWX.org Bridge Capture Restart
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aviationwx-capture-restart.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
+    if [ "$installed_units" = true ]; then
+        log_event "ACTION" "Installed capture-restart systemd units"
+    fi
+
+    systemctl daemon-reload 2>/dev/null || true
+
+    if ! systemctl is-enabled aviationwx-capture-restart.timer &>/dev/null; then
+        log_event "ACTION" "Enabling aviationwx-capture-restart.timer"
+        if ! systemctl enable aviationwx-capture-restart.timer 2>/dev/null; then
+            log_event "WARN" "Failed to enable aviationwx-capture-restart.timer"
+            return 0
+        fi
+    fi
+
+    if ! systemctl is-active aviationwx-capture-restart.timer &>/dev/null; then
+        systemctl start aviationwx-capture-restart.timer 2>/dev/null || true
+    fi
 }
 
 # ============================================================================
@@ -494,29 +568,28 @@ pull_and_validate_update() {
     fi
 }
 
+# start_container recreates the bridge using aviationwx-container-start.sh so updates
+# get the same RAM/CPU/tmpfs limits as install and boot (not a minimal inline docker run).
 start_container() {
     local version="$1"
-    
+    local start_script="/usr/local/bin/aviationwx-container-start.sh"
+
     if [ "$DRY_RUN" = "true" ]; then
-        log_event "DRY-RUN" "Would start container with version: $version"
+        log_event "DRY-RUN" "Would start container via $start_script version: $version"
         return 0
     fi
-    
-    docker run -d \
-        --name "$CONTAINER_NAME" \
-        --restart no \
-        -p 1229:1229 \
-        -v "${DATA_DIR}:/data" \
-        --tmpfs /dev/shm:size=200m \
-        --sysctl net.ipv4.tcp_keepalive_time=30 \
-        --sysctl net.ipv4.tcp_keepalive_intvl=10 \
-        --sysctl net.ipv4.tcp_keepalive_probes=6 \
-        --health-cmd='wget --no-verbose --tries=1 --spider http://localhost:1229/healthz || exit 1' \
-        --health-interval=30s \
-        --health-timeout=3s \
-        --health-start-period=10s \
-        --health-retries=3 \
-        "${IMAGE_NAME}:${version}"
+
+    if [ ! -x "$start_script" ]; then
+        log_event "ERROR" "$start_script not found or not executable"
+        return 1
+    fi
+
+    if ! "$start_script" "$version"; then
+        log_event "ERROR" "container-start failed for version $version"
+        return 1
+    fi
+
+    return 0
 }
 
 wait_for_healthy() {
@@ -655,6 +728,8 @@ boot_update() {
             exec /usr/local/bin/aviationwx-supervisor.sh boot-update
         fi
     fi
+
+    ensure_capture_restart_timer
     
     # Step 2: Check if last boot was watchdog-triggered
     if [ -f "${DATA_DIR}/last-reboot-reason.json" ]; then

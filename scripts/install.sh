@@ -363,12 +363,42 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+    # Capture-restart timer (/readyz 503 → container restart when capture is stale)
+    cat > /etc/systemd/system/aviationwx-capture-restart.timer << 'EOF'
+[Unit]
+Description=AviationWX.org Bridge Capture Restart Check
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    cat > /etc/systemd/system/aviationwx-capture-restart.service << 'EOF'
+[Unit]
+Description=AviationWX.org Bridge Capture Restart
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aviationwx-capture-restart.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
     # Reload and enable
     systemctl daemon-reload
     systemctl enable aviationwx-boot-update.service
     systemctl enable aviationwx-container.service
     systemctl enable aviationwx-daily-update.timer
     systemctl enable aviationwx-watchdog.timer
+    systemctl enable aviationwx-capture-restart.timer
 
     log_success "Systemd services configured and enabled"
 }
@@ -422,8 +452,8 @@ bootstrap_container() {
     local attempts=0
     local max_attempts=30
     while [[ $attempts -lt $max_attempts ]]; do
-        if curl -sf "http://localhost:${WEB_PORT}/healthz" > /dev/null 2>&1; then
-            log_success "Bridge is running and healthy"
+        if curl -sf "http://localhost:${WEB_PORT}/readyz" > /dev/null 2>&1; then
+            log_success "Bridge is running and capture-ready"
             return 0
         fi
         sleep 2
@@ -572,6 +602,8 @@ uninstall() {
         "aviationwx-daily-update.timer"
         "aviationwx-watchdog.service"
         "aviationwx-watchdog.timer"
+        "aviationwx-capture-restart.service"
+        "aviationwx-capture-restart.timer"
     )
     
     # Deprecated systemd services/timers (from older versions)

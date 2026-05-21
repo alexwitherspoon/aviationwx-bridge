@@ -219,11 +219,15 @@ check_temperature() {
 }
 
 check_bridge_container() {
-    # If bridge container has exited (e.g. panic, OOM), restart it
-    local status
+    # If bridge container has exited (e.g. panic, OOM) or failed healthcheck, restart it.
+    local status health_status
     status=$(docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "missing")
+    health_status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$CONTAINER_NAME" 2>/dev/null || echo "")
 
-    if [ "$status" = "exited" ] || [ "$status" = "missing" ]; then
+    if [ "$health_status" = "unhealthy" ]; then
+        # /readyz healthcheck failure: capture-restart.sh applies streak, cooldown, and 24h cap.
+        log_event "WARN" "Bridge container unhealthy (/readyz); capture-restart handles rate-limited restart"
+    elif [ "$status" = "exited" ] || [ "$status" = "missing" ]; then
         log_event "ERROR" "Bridge container $status, restarting"
         if systemctl is-active --quiet aviationwx-container.service 2>/dev/null; then
             execute_action "Restart bridge container" "systemctl restart aviationwx-container.service"
@@ -361,6 +365,11 @@ main() {
         trigger_reboot
     fi
     
+    # Stale capture recovery (/readyz 503 → container restart; rate limits in script)
+    if [ -x /usr/local/bin/aviationwx-capture-restart.sh ]; then
+        /usr/local/bin/aviationwx-capture-restart.sh || true
+    fi
+
     # Save state for next run
     save_state
     

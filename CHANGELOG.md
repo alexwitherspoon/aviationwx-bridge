@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Self-recovery**: Resume capture when queue drains below resume threshold (not only after upload).
+- **Self-recovery**: Resume capture after tmpfs/disk space recovers (filesystem and memory monitors).
+- **Self-recovery**: Hourly SFTP connectivity probe per camera when that camera's queue is empty.
+- **Self-recovery**: Retry camera worker start every 15 minutes; restart stale workers (not only missing).
+- **Self-recovery**: Drop queued images after repeated read failures (poison pill).
+- **Host install**: `aviationwx-capture-restart.timer` (every 5 min); watchdog invokes capture-restart.
+- **Updates**: Supervisor enables `aviationwx-capture-restart.timer` on boot/daily update (existing Pis, no `install.sh`).
+- **Health**: Docker and `/healthz` align with `/readyz` capture readiness.
+
+### Changed
+- **Health checks**: Container health uses `/readyz` instead of `/healthz` alone.
+- **Upload**: Catch-up mode uses LIFO (`DequeueNext`) per camera when queue exceeds threshold.
+- **Capture-restart**: Unreachable `/readyz` (curl 000) escalates to container restart; max-restart cap no longer clears the streak.
+- **Watchdog**: Restarts **exited** bridge container; `unhealthy` (/readyz) is handled by capture-restart rate limits (not immediate restart).
+
+### Fixed
+- **Watchdog**: Detect unhealthy containers via `State.Health.Status` (not `State.Status`).
+- **Health**: `/healthz` parses typed `getStatus()` (orchestrator struct, enabled camera count).
+- **Bridge**: Stop camera retry loop on graceful shutdown.
+- **Upload**: Clear per-path read-failure counts after success; drop redundant timeout channel drain.
+- **Queue**: Remove duplicate `maybeResumeCapture` call from `MarkUploaded`.
+- **Queue**: Resume capture once per memory monitor tick (not twice via filesystem check).
+- **Upload**: Prune `fileReadFailures` when queue files are gone; log SFTP probes outside upload mutex.
+- **Health**: `/healthz` sets `ntp_healthy` from orchestrator `TimeInfo` when time is unhealthy.
+- **Upload**: Keep read-failure count until poisoned file drop succeeds.
+- **Queue**: Resync queue counts from disk when drop/mark finds file already removed (avoid double decrement).
+- **Upload**: Advance `probeCameraIndex` under write lock (fix RLock data race).
+- **Bridge**: Stale camera worker restart uses `AVIATIONWX_READYZ_GRACE_SECONDS` and `AVIATIONWX_READYZ_STALE_SECONDS` (same as `/readyz`).
+- **Host**: capture-restart uses `curl ... || code=000` so unreachable does not become `000000`.
+- **Host**: Clamp capture-restart streak counters at threshold; write `recovery-exhausted.json` `since` in UTC.
+- **Capture**: Immediate wake on `ResumeCapture` (not only when a pending capture exists).
+- **Upload**: Upload timeout interrupts SFTP (`InterruptUpload`) so the next upload is not blocked.
+- **Upload**: Serialize SFTP `Upload` per client so timeout interrupt closes the correct session under concurrent workers.
+- **Upload**: Catch-up LIFO logging is per-camera (matches dequeue).
+- **Updates**: Supervisor uses `aviationwx-container-start.sh` (dynamic resource limits) instead of a minimal inline `docker run`.
+- **Host recovery**: `recovery-exhausted.json` when capture-restart cap is hit; exposed in `/api/status` and `/healthz`.
+
 ## [2.8.0] - 2026-04-15
 
 ### Changed

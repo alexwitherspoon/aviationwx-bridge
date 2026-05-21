@@ -1,14 +1,15 @@
 #!/bin/bash
 # AviationWX.org Bridge - Container Startup
-# Started by systemd after boot-update completes
-# Version: 2.0
-# Features: Dynamic resource limits based on system capabilities
+# Started by systemd after boot-update; also used by aviationwx-supervisor.sh on update/rollback.
+# Optional first argument: image tag to run (defaults to /data/aviationwx/last-known-good.txt).
+# Version: 2.1
+# Features: Dynamic resource limits; optional image tag; /readyz healthcheck; TCP keepalive sysctls
 
 set -euo pipefail
 
 readonly CONTAINER_NAME="aviationwx-org-bridge"
 readonly IMAGE_NAME="ghcr.io/alexwitherspoon/aviationwx-org-bridge"
-readonly DATA_DIR="/data/aviationwx"
+readonly DATA_DIR="${AVIATIONWX_DATA_DIR:-/data/aviationwx}"
 
 # ============================================================================
 # RESOURCE DETECTION
@@ -103,8 +104,11 @@ calculate_cpu_limits() {
 # MAIN STARTUP
 # ============================================================================
 
-# Get version to start (set by boot-update)
-VERSION=$(cat "${DATA_DIR}/last-known-good.txt" 2>/dev/null || echo "latest")
+# Version: optional first argument (supervisor update), else last-known-good from boot-update.
+VERSION="${1:-}"
+if [ -z "$VERSION" ]; then
+    VERSION=$(cat "${DATA_DIR}/last-known-good.txt" 2>/dev/null || echo "latest")
+fi
 
 # Detect system resources
 TOTAL_MEMORY_MB=$(get_total_memory_mb)
@@ -155,9 +159,12 @@ docker run -d \
     -p 1229:1229 \
     -v "${DATA_DIR}:/data" \
     --tmpfs "/dev/shm:size=${TMPFS_SIZE}m" \
+    --sysctl net.ipv4.tcp_keepalive_time=30 \
+    --sysctl net.ipv4.tcp_keepalive_intvl=10 \
+    --sysctl net.ipv4.tcp_keepalive_probes=6 \
     \
     `# Health check` \
-    --health-cmd='wget --no-verbose --tries=1 --spider http://localhost:1229/healthz || exit 1' \
+    --health-cmd='wget --no-verbose --tries=1 --spider http://localhost:1229/readyz || exit 1' \
     --health-interval=30s \
     --health-timeout=5s \
     --health-start-period=30s \

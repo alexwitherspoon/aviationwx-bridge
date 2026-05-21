@@ -32,7 +32,7 @@ This script:
 
 - **Web Console**: `http://<device-ip>:1229`
 - **Default Password**: `aviationwx` (change immediately!)
-- **Health Check**: `http://<device-ip>:1229/healthz`
+- **Health Check**: `http://<device-ip>:1229/readyz` (capture readiness; `/healthz` for process-level status)
 
 ### Network exposure
 
@@ -40,7 +40,7 @@ AviationWX.org Bridge is a **local LAN utility**: the web console and health end
 
 ### Automatic Updates
 
-The supervisor checks for updates every 6 hours:
+The supervisor checks for updates **once per day** (`aviationwx-daily-update.timer`, with up to 30 minutes jitter).
 
 | Update Type | Behavior |
 |-------------|----------|
@@ -49,6 +49,24 @@ The supervisor checks for updates every 6 hours:
 | Emergency | Applies immediately |
 
 All updates automatically rollback if health checks fail.
+
+### Self-recovery (no nightly restart required)
+
+Install enables layered recovery instead of a blind daily container restart:
+
+| Mechanism | Interval | Action |
+|-----------|----------|--------|
+| **Watchdog** | Every 1 min | NTP/network/Docker fixes; restarts **exited** container; runs capture-restart for `/readyz` failures (Docker **unhealthy** uses same rate limits, ~5 min to restart on 503) |
+| **Capture-restart timer** | Every 5 min | Same script as watchdog backup; slower streak accumulation (~25 min to restart on 503) |
+| **Bridge (in-process)** | Continuous | Queue resume after drain/space recovery; hourly SFTP probe per empty camera queue; camera retry/restart every 15 min |
+
+Docker health checks use **`/readyz`** so an alive but non-capturing container is unhealthy.
+
+Legacy `daily-restart.sh` (3 AM cron) is **deprecated**. Do not add a nightly restart unless you have a specific ops reason; capture-restart targets stale state without disrupting healthy sites.
+
+**Existing Pis:** `aviationwx-capture-restart.timer` is enabled automatically on the next `boot-update` / daily update once supervisor v2.2+ is deployed (no `install.sh` rerun). Verify with `systemctl is-enabled aviationwx-capture-restart.timer`.
+
+**Recovery cap exhausted:** After 6 container restarts in 24h, the host writes `/data/aviationwx/recovery-exhausted.json` (visible in the web UI status and `/healthz` as unhealthy). Cleared when `/readyz` returns 200 or a restart succeeds. Requires manual intervention until the condition clears.
 
 **Manual update:**
 ```bash
@@ -216,14 +234,18 @@ aviationwx.yourdomain.com {
 
 | Endpoint | Purpose |
 |----------|---------|
-| `/healthz` | Container health (for Docker/K8s) |
+| `/readyz` | Capture readiness (Docker health check; 503 when stale) |
+| `/healthz` | Process and orchestrator status (503 when capture not ready) |
 | `/api/status` | Detailed system status (JSON) |
 
 ```bash
-# Check health
+# Capture readiness (matches Docker HEALTHCHECK)
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:1229/readyz
+
+# Process health
 curl http://localhost:1229/healthz
 
-# Get detailed status
+# Detailed status
 curl http://localhost:1229/api/status | jq
 ```
 

@@ -499,7 +499,6 @@ func (q *Queue) MarkUploaded(img *QueuedImage) error {
 	q.recalculateOldestLocked()
 
 	q.updateHealthLevelLocked()
-	q.maybeResumeCaptureLocked()
 
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/queue"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/scheduler"
+	timepkg "github.com/alexwitherspoon/AviationWX.org-Bridge/internal/time"
 )
 
 func TestExtractHealthIndicators_orchestratorRunning(t *testing.T) {
@@ -57,5 +58,23 @@ func TestExtractHealthIndicators_orchestratorStoppedDegraded(t *testing.T) {
 	}
 	if health["status"] != "degraded" {
 		t.Fatal("expected degraded when orchestrator stopped")
+	}
+}
+
+func TestExtractHealthIndicators_orchestratorTimeUnhealthy(t *testing.T) {
+	raw := map[string]interface{}{
+		"cameras": 1,
+		"time_health": map[string]interface{}{
+			"healthy": true,
+		},
+		"orchestrator": scheduler.OrchestratorStatus{
+			Running:  true,
+			TimeInfo: timepkg.TimeInfo{TimeHealthy: false},
+		},
+	}
+
+	hi := extractHealthIndicators(raw)
+	if hi.ntpHealthy {
+		t.Fatal("expected ntpHealthy false when orchestrator TimeInfo is unhealthy")
 	}
 }

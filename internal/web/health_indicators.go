@@ -62,9 +62,7 @@ func applyOrchestratorIndicators(hi *healthIndicators, orch scheduler.Orchestrat
 	}
 	hi.uploadsRecent = int(orch.UploadStats.UploadsSuccess)
 	hi.queueHealth = worstQueueHealthFromStats(orch.CameraStats)
-	if orch.TimeInfo.TimeHealthy {
-		hi.ntpHealthy = true
-	}
+	hi.ntpHealthy = orch.TimeInfo.TimeHealthy
 }
 
 func applyOrchestratorMapIndicators(hi *healthIndicators, orch map[string]interface{}) {

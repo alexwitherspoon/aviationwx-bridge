@@ -248,7 +248,8 @@ func main() {
 		}
 	}
 
-	go bridge.retryFailedCamerasLoop()
+	retryStop := make(chan struct{})
+	go bridge.retryFailedCamerasLoop(retryStop)
 
 	// Start web server with panic recovery
 	webErrChan := make(chan error, 1)
@@ -288,6 +289,7 @@ func main() {
 	if bridge.orchestrator != nil {
 		bridge.orchestrator.Stop()
 	}
+	close(retryStop)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -351,11 +353,16 @@ func (b *Bridge) initOrchestrator() error {
 }
 
 // retryFailedCamerasLoop periodically starts missing camera workers and restarts stale ones.
-func (b *Bridge) retryFailedCamerasLoop() {
+func (b *Bridge) retryFailedCamerasLoop(stop <-chan struct{}) {
 	ticker := time.NewTicker(cameraRetryInterval)
 	defer ticker.Stop()
-	for range ticker.C {
-		b.retryFailedCameras()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			b.retryFailedCameras()
+		}
 	}
 }
 

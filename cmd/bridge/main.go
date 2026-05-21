@@ -120,9 +120,6 @@ type CachedImage struct {
 // cameraRetryInterval is how often enabled cameras that failed to start at boot are retried.
 const cameraRetryInterval = 15 * time.Minute
 
-// minCameraStaleWindow is the minimum staleness window for per-camera worker restart.
-const minCameraStaleWindow = 15 * time.Minute
-
 func main() {
 	// Panic recovery - log crashes and exit gracefully
 	defer func() {
@@ -375,16 +372,22 @@ func cameraCaptureInterval(cam config.Camera) time.Duration {
 	return time.Duration(secs) * time.Second
 }
 
-// cameraStaleThreshold returns max(minCameraStaleWindow, 3×capture interval), matching /readyz.
+// cameraStaleThreshold returns max(readyzMinStale, 3×capture interval), same formula as /readyz.
 func cameraStaleThreshold(interval time.Duration) time.Duration {
 	if interval <= 0 {
 		interval = 60 * time.Second
 	}
+	minStale := readyzMinStale()
 	threshold := 3 * interval
-	if minCameraStaleWindow > threshold {
-		return minCameraStaleWindow
+	if minStale > threshold {
+		return minStale
 	}
 	return threshold
+}
+
+// readyzMinStale is the minimum staleness window for /readyz and stale worker restart.
+func readyzMinStale() time.Duration {
+	return envDurationSeconds("AVIATIONWX_READYZ_STALE_SECONDS", 900)
 }
 
 // cameraWorkerIsStale reports whether a running worker should be removed and restarted.
@@ -954,7 +957,7 @@ func (b *Bridge) getStatus() interface{} {
 // max(stale, 3*capture interval) so long-interval cameras are not flagged incorrectly.
 func (b *Bridge) getCaptureReadiness() (bool, string) {
 	grace := envDurationSeconds("AVIATIONWX_READYZ_GRACE_SECONDS", 600)
-	minStale := envDurationSeconds("AVIATIONWX_READYZ_STALE_SECONDS", 900)
+	minStale := readyzMinStale()
 
 	if b.orchestrator == nil {
 		hasEnabled := false

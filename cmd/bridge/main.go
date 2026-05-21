@@ -120,9 +120,6 @@ type CachedImage struct {
 // cameraRetryInterval is how often enabled cameras that failed to start at boot are retried.
 const cameraRetryInterval = 15 * time.Minute
 
-// cameraReadinessGrace matches /readyz: no staleness checks until orchestrator uptime exceeds this.
-const cameraReadinessGrace = 5 * time.Minute
-
 // minCameraStaleWindow is the minimum staleness window for per-camera worker restart.
 const minCameraStaleWindow = 15 * time.Minute
 
@@ -392,7 +389,8 @@ func cameraStaleThreshold(interval time.Duration) time.Duration {
 
 // cameraWorkerIsStale reports whether a running worker should be removed and restarted.
 func (b *Bridge) cameraWorkerIsStale(cam config.Camera, cs scheduler.CameraStatus, uptime time.Duration) bool {
-	if uptime < cameraReadinessGrace {
+	grace := envDurationSeconds("AVIATIONWX_READYZ_GRACE_SECONDS", 600)
+	if uptime < grace {
 		return false
 	}
 	threshold := cameraStaleThreshold(cameraCaptureInterval(cam))

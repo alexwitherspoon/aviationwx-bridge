@@ -5,6 +5,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -12,12 +13,13 @@ import (
 )
 
 // SFTPClient implements the Client interface using SFTP protocol.
-// Safe for concurrent use: a mutex serializes Upload and TestConnection per client.
+// Each Upload uses its own SSH/SFTP session; Interrupt closes the active session on timeout.
+// uploadMu serializes Upload (one in-flight per client) so activeSSH is not shared across goroutines.
 type SFTPClient struct {
-	mu         sync.Mutex
-	config     Config
-	sshClient  *ssh.Client
-	sftpClient *sftp.Client
+	mu        sync.Mutex // serializes TestConnection
+	uploadMu  sync.Mutex // serializes Upload
+	config    Config
+	activeSSH atomic.Pointer[ssh.Client]
 }
 
 // NewSFTPClient creates a new SFTP upload client
@@ -40,55 +42,59 @@ func NewSFTPClient(cfg Config) (*SFTPClient, error) {
 	}, nil
 }
 
-// Upload uploads a file via SFTP with atomic write (tmp + rename)
+// Upload uploads a file via SFTP with atomic write (tmp + rename).
 func (c *SFTPClient) Upload(remotePath string, data []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.uploadMu.Lock()
+	defer c.uploadMu.Unlock()
 
-	// Connect
-	if err := c.connect(); err != nil {
+	sshClient, sftpClient, err := c.dial()
+	if err != nil {
 		return fmt.Errorf("connection failed: %w", err)
 	}
-	defer func() { _ = c.Close() }() // Best-effort cleanup
+	c.activeSSH.Store(sshClient)
+	defer func() {
+		c.activeSSH.Store(nil)
+		_ = sftpClient.Close()
+		_ = sshClient.Close()
+	}()
 
-	// Normalize remote path and prepend base path
-	// Use path.Join (not filepath.Join) because SFTP always uses forward slashes
 	remotePath = normalizeRemotePath(remotePath)
 	if c.config.BasePath != "" {
 		remotePath = path.Join(c.config.BasePath, remotePath)
 	}
 
-	// Create remote directory if needed
 	remoteDir := path.Dir(remotePath)
-	if err := c.sftpClient.MkdirAll(remoteDir); err != nil {
-		// Log but continue - directory may already exist, or we may not have permission
-		// to create parent directories but can still write to existing ones
-		_ = err // Best-effort directory creation
+	if err := sftpClient.MkdirAll(remoteDir); err != nil {
+		_ = err
 	}
 
-	// Atomic upload: write to .tmp, then rename
 	tmpPath := fmt.Sprintf("%s.tmp.%d", remotePath, time.Now().UnixNano())
 
-	remote, err := c.sftpClient.Create(tmpPath)
+	remote, err := sftpClient.Create(tmpPath)
 	if err != nil {
 		return fmt.Errorf("create remote file: %w", err)
 	}
 
-	// Write data
 	_, err = remote.Write(data)
-	_ = remote.Close() // Close before checking write error
+	_ = remote.Close()
 	if err != nil {
-		_ = c.sftpClient.Remove(tmpPath) // Cleanup on failure (best-effort)
+		_ = sftpClient.Remove(tmpPath)
 		return fmt.Errorf("upload failed: %w", err)
 	}
 
-	// Atomic rename
-	if err := c.sftpClient.Rename(tmpPath, remotePath); err != nil {
-		_ = c.sftpClient.Remove(tmpPath) // Cleanup on rename failure (best-effort)
+	if err := sftpClient.Rename(tmpPath, remotePath); err != nil {
+		_ = sftpClient.Remove(tmpPath)
 		return fmt.Errorf("rename failed: %w", err)
 	}
 
 	return nil
+}
+
+// Interrupt closes the active SSH connection to unblock a timed-out Upload.
+func (c *SFTPClient) Interrupt() {
+	if sshClient := c.activeSSH.Load(); sshClient != nil {
+		_ = sshClient.Close()
+	}
 }
 
 // TestConnection tests the SFTP connection and authentication
@@ -96,26 +102,28 @@ func (c *SFTPClient) TestConnection() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err := c.connect(); err != nil {
+	sshClient, sftpClient, err := c.dial()
+	if err != nil {
 		return err
 	}
-	defer func() { _ = c.Close() }() // Best-effort cleanup
+	defer func() {
+		_ = sftpClient.Close()
+		_ = sshClient.Close()
+	}()
 
-	// Try to stat the base path directory to verify connection works
 	testPath := "."
 	if c.config.BasePath != "" {
 		testPath = c.config.BasePath
 	}
-	if _, err := c.sftpClient.Stat(testPath); err != nil {
+	if _, err := sftpClient.Stat(testPath); err != nil {
 		return fmt.Errorf("connection test failed (path: %s): %w", testPath, err)
 	}
 
 	return nil
 }
 
-// connect establishes SSH and SFTP connections
-func (c *SFTPClient) connect() error {
-	// SSH client config
+// dial establishes a new SSH and SFTP session (not shared across concurrent Upload calls).
+func (c *SFTPClient) dial() (*ssh.Client, *sftp.Client, error) {
 	timeout := time.Duration(c.config.TimeoutConnectSeconds) * time.Second
 	if timeout == 0 {
 		timeout = 60 * time.Second
@@ -130,22 +138,19 @@ func (c *SFTPClient) connect() error {
 		Timeout:         timeout,
 	}
 
-	// Connect SSH
 	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
-	var err error
-	c.sshClient, err = ssh.Dial("tcp", addr, sshConfig)
+	sshClient, err := ssh.Dial("tcp", addr, sshConfig)
 	if err != nil {
-		return fmt.Errorf("ssh dial: %w", err)
+		return nil, nil, fmt.Errorf("ssh dial: %w", err)
 	}
 
-	// Open SFTP session
-	c.sftpClient, err = sftp.NewClient(c.sshClient)
+	sftpClient, err := sftp.NewClient(sshClient)
 	if err != nil {
-		_ = c.sshClient.Close() // Best-effort cleanup on SFTP session failure
-		return fmt.Errorf("sftp session: %w", err)
+		_ = sshClient.Close()
+		return nil, nil, fmt.Errorf("sftp session: %w", err)
 	}
 
-	return nil
+	return sshClient, sftpClient, nil
 }
 
 // normalizeRemotePath normalizes the remote path by removing leading slashes
@@ -153,25 +158,8 @@ func normalizeRemotePath(remotePath string) string {
 	return strings.TrimPrefix(remotePath, "/")
 }
 
-// Close closes SFTP and SSH connections
+// Close is a no-op; Upload and TestConnection close connections per operation.
 func (c *SFTPClient) Close() error {
-	var errs []error
-
-	if c.sftpClient != nil {
-		if err := c.sftpClient.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("sftp close: %w", err))
-		}
-	}
-
-	if c.sshClient != nil {
-		if err := c.sshClient.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("ssh close: %w", err))
-		}
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("close errors: %v", errs)
-	}
-
+	c.Interrupt()
 	return nil
 }

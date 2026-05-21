@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/alexwitherspoon/AviationWX.org-Brid
 **After installation:**
 - Web console: `http://<your-device-ip>:1229`
 - Default password: `aviationwx` (change this immediately!)
-- Updates are checked every 6 hours
+- Updates are checked daily (systemd timer)
 - Critical security updates apply automatically
 
 ---
@@ -85,7 +85,7 @@ services:
 
 **We provide:**
 - Semantic versioned Docker images (`:latest`, `:1.0.0`, `:1.0`)
-- Health endpoint at `/healthz`
+- Health: `/readyz` (capture readiness, used by Docker); `/healthz` (process status)
 - Changelog with breaking changes clearly marked
 
 ---

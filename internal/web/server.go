@@ -729,10 +729,9 @@ func (s *Server) handleTestUpload(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+// handleHealthz reports process and subsystem health.
+// Returns 503 when unhealthy, including when capture readiness fails (same rules as /readyz).
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
-	// Enhanced health check with actual system status
-	// Returns 200 OK if operational, 503 if unhealthy
-
 	status := s.buildHealthStatus()
 
 	// Set HTTP status code based on health
@@ -747,8 +746,8 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleReadyz reports whether capture pipelines are healthy enough to serve traffic.
-// Returns 503 when enabled cameras have no recent successful capture (optional hook from bridge).
-// No authentication — intended for host-side watchdog scripts.
+// Returns 503 when enabled cameras have no recent successful capture.
+// No authentication — intended for host-side watchdog and Docker health checks.
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -866,13 +865,48 @@ func (s *Server) buildHealthStatus() map[string]interface{} {
 			health["queue_health"] = queueHealth
 			health["ntp_healthy"] = ntpHealthy
 
-			if len(details) > 0 {
-				health["details"] = strings.Join(details, "; ")
+			for _, d := range details {
+				appendHealthDetail(health, d)
+			}
+
+			if hr, ok := statusMap["host_recovery"].(map[string]interface{}); ok {
+				health["host_recovery"] = hr
+			}
+		}
+	}
+
+	if s.getCaptureReadiness != nil {
+		ok, reason := s.getCaptureReadiness()
+		if !ok {
+			health["status"] = "unhealthy"
+			appendHealthDetail(health, "capture not ready: "+reason)
+		}
+	}
+
+	if hostRecovery, ok := health["host_recovery"].(map[string]interface{}); ok {
+		if exhausted, _ := hostRecovery["exhausted"].(bool); exhausted {
+			health["status"] = "unhealthy"
+			if reason, _ := hostRecovery["reason"].(string); reason != "" {
+				appendHealthDetail(health, "host auto-recovery exhausted: "+reason)
+			} else {
+				appendHealthDetail(health, "host auto-recovery exhausted (manual intervention required)")
 			}
 		}
 	}
 
 	return health
+}
+
+// appendHealthDetail adds a semicolon-separated detail string to the health response.
+func appendHealthDetail(health map[string]interface{}, detail string) {
+	if detail == "" {
+		return
+	}
+	if prev, ok := health["details"].(string); ok && prev != "" {
+		health["details"] = prev + "; " + detail
+		return
+	}
+	health["details"] = detail
 }
 
 func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {

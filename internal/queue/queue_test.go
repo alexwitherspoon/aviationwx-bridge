@@ -92,6 +92,84 @@ func TestQueue_Dequeue(t *testing.T) {
 	}
 }
 
+func TestQueue_DequeueNext_newestFirst(t *testing.T) {
+	dir := t.TempDir()
+	config := DefaultQueueConfig()
+
+	q, err := NewQueue("test-camera", dir, config, nil)
+	if err != nil {
+		t.Fatalf("NewQueue failed: %v", err)
+	}
+
+	times := []time.Time{
+		time.Now().UTC().Add(-3 * time.Second),
+		time.Now().UTC().Add(-2 * time.Second),
+		time.Now().UTC().Add(-1 * time.Second),
+	}
+	for _, ts := range times {
+		if err := q.Enqueue(createTestJPEG(1024), ts, "bridge_clock", "high"); err != nil {
+			t.Fatalf("Enqueue failed: %v", err)
+		}
+	}
+
+	img, err := q.DequeueNext(true)
+	if err != nil {
+		t.Fatalf("DequeueNext(true) failed: %v", err)
+	}
+	if img.Timestamp.UnixMilli() != times[2].UnixMilli() {
+		t.Errorf("expected newest timestamp %v, got %v", times[2], img.Timestamp)
+	}
+}
+
+func TestQueue_DropQueuedImage(t *testing.T) {
+	dir := t.TempDir()
+	config := DefaultQueueConfig()
+
+	q, err := NewQueue("test-camera", dir, config, nil)
+	if err != nil {
+		t.Fatalf("NewQueue failed: %v", err)
+	}
+
+	ts := time.Now().UTC()
+	if err := q.Enqueue(createTestJPEG(1024), ts, "bridge_clock", "high"); err != nil {
+		t.Fatalf("Enqueue failed: %v", err)
+	}
+
+	img, err := q.Dequeue()
+	if err != nil {
+		t.Fatalf("Dequeue failed: %v", err)
+	}
+
+	if err := q.DropQueuedImage(img); err != nil {
+		t.Fatalf("DropQueuedImage failed: %v", err)
+	}
+	if q.GetImageCount() != 0 {
+		t.Errorf("expected empty queue after drop, got %d images", q.GetImageCount())
+	}
+}
+
+func TestQueue_TryResumeCaptureIfPaused_emptyQueueStuckPause(t *testing.T) {
+	dir := t.TempDir()
+	config := DefaultQueueConfig()
+
+	q, err := NewQueue("test-camera", dir, config, nil)
+	if err != nil {
+		t.Fatalf("NewQueue failed: %v", err)
+	}
+
+	// Paused with an empty queue (e.g. disk-full enqueue failure) should resume via TryResumeCaptureIfPaused.
+	q.mu.Lock()
+	q.state.CapturePaused = true
+	q.mu.Unlock()
+
+	if !q.TryResumeCaptureIfPaused() {
+		t.Error("expected TryResumeCaptureIfPaused to unpause empty paused queue")
+	}
+	if q.IsCapturePaused() {
+		t.Error("expected capture resumed")
+	}
+}
+
 func TestQueue_MarkUploaded(t *testing.T) {
 	dir := t.TempDir()
 	config := DefaultQueueConfig()
@@ -324,6 +402,43 @@ func TestQueue_CapturePause(t *testing.T) {
 	err = q.Enqueue(imageData, ts, "bridge_clock", "high")
 	if err != ErrCapturePaused {
 		t.Errorf("expected ErrCapturePaused, got %v", err)
+	}
+}
+
+func TestQueue_CaptureResumeAfterExpire(t *testing.T) {
+	dir := t.TempDir()
+	config := DefaultQueueConfig()
+	config.MaxFiles = 10
+	config.ThresholdCritical = 0.9
+	config.PauseCaptureOnCritical = true
+	config.ResumeThreshold = 0.70
+	config.ThinningEnabled = false
+
+	q, err := NewQueue("test-camera", dir, config, nil)
+	if err != nil {
+		t.Fatalf("NewQueue failed: %v", err)
+	}
+
+	imageData := createTestJPEG(1024)
+	for i := 0; i < 9; i++ {
+		ts := time.Now().UTC().Add(time.Duration(i) * time.Millisecond)
+		if err := q.Enqueue(imageData, ts, "bridge_clock", "high"); err != nil {
+			t.Fatalf("Enqueue failed: %v", err)
+		}
+	}
+
+	if !q.IsCapturePaused() {
+		t.Fatal("expected capture paused at critical capacity")
+	}
+
+	q.config.MaxAgeSeconds = 1
+	time.Sleep(1100 * time.Millisecond)
+	if expired := q.ExpireOldImages(); expired != 9 {
+		t.Fatalf("expected 9 expired images, got %d", expired)
+	}
+
+	if q.IsCapturePaused() {
+		t.Error("expected capture resumed after queue drained below resume threshold")
 	}
 }
 

@@ -313,13 +313,7 @@ func (w *CaptureWorker) run() {
 
 		case <-w.queue.ResumeCapture():
 			w.logger.Info("Capture resumed", "camera", w.camera.ID())
-			// Retry a deferred capture that may have skipped while paused (wake path).
-			if w.hasPendingCapture() {
-				select {
-				case w.wakeCapture <- struct{}{}:
-				default:
-				}
-			}
+			w.scheduleWakeAfter(0)
 		}
 	}
 }

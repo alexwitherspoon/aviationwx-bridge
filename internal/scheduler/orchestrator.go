@@ -202,7 +202,9 @@ func (o *Orchestrator) AddCamera(cam camera.Camera, config CameraConfig, interva
 			AuthBackoff:       time.Duration(o.config.AuthBackoffSecs) * time.Second,
 			RetryDelay:        5 * time.Second,
 			MaxConcurrent:     maxConcurrent,
-			Logger:            o.logger,
+			// Hourly SFTP probe per camera when that camera's queue is empty.
+			ConnectionProbeInterval: time.Hour,
+			Logger:                  o.logger,
 		}
 		o.uploadWorker = NewUploadWorker(uploadConfig)
 	}

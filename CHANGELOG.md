@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Self-recovery**: Resume capture when queue drains below resume threshold (not only after upload).
+- **Self-recovery**: Resume capture after tmpfs/disk space recovers (filesystem and memory monitors).
+- **Self-recovery**: Hourly SFTP connectivity probe per camera when that camera's queue is empty.
+- **Self-recovery**: Retry camera worker start every 15 minutes; restart stale workers (not only missing).
+- **Self-recovery**: Drop queued images after repeated read failures (poison pill).
+- **Host install**: `aviationwx-capture-restart.timer` (every 5 min); watchdog invokes capture-restart.
+- **Updates**: Supervisor enables `aviationwx-capture-restart.timer` on boot/daily update (existing Pis, no `install.sh`).
+- **Health**: Docker and `/healthz` align with `/readyz` capture readiness.
+
+### Changed
+- **Health checks**: Container health uses `/readyz` instead of `/healthz` alone.
+- **Upload**: Catch-up mode uses LIFO (`DequeueNext`) per camera when queue exceeds threshold.
+- **Capture-restart**: Unreachable `/readyz` (curl 000) escalates to container restart; max-restart cap no longer clears the streak.
+- **Watchdog**: Restarts bridge container when Docker reports `unhealthy` (not only `exited`).
+
+### Fixed
+- **Capture**: Immediate wake on `ResumeCapture` (not only when a pending capture exists).
+- **Upload**: Upload timeout interrupts SFTP (`InterruptUpload`) so the next upload is not blocked; channel drain retained.
+- **Upload**: Serialize SFTP `Upload` per client so timeout interrupt closes the correct session under concurrent workers.
+- **Upload**: Catch-up LIFO logging is per-camera (matches dequeue).
+- **Updates**: Supervisor uses `aviationwx-container-start.sh` (dynamic resource limits) instead of a minimal inline `docker run`.
+- **Host recovery**: `recovery-exhausted.json` when capture-restart cap is hit; exposed in `/api/status` and `/healthz`.
+
 ## [2.8.0] - 2026-04-15
 
 ### Changed

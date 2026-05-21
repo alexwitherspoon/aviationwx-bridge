@@ -170,6 +170,7 @@ func (m *Manager) StartMemoryMonitor(ctx context.Context) {
 			return
 		case <-ticker.C:
 			m.checkMemoryPressure()
+			m.tryResumePausedCaptures()
 		}
 	}
 }
@@ -255,6 +256,25 @@ func (m *Manager) checkFilesystemSpace() {
 		// Moderate thinning - keep 50%
 		for _, q := range m.queues {
 			q.EmergencyThin(0.5)
+		}
+	} else {
+		m.tryResumePausedCaptures()
+	}
+}
+
+// tryResumePausedCaptures unpauses capture when a queue is below the resume threshold.
+func (m *Manager) tryResumePausedCaptures() {
+	m.mu.RLock()
+	queues := make([]*Queue, 0, len(m.queues))
+	for _, q := range m.queues {
+		queues = append(queues, q)
+	}
+	m.mu.RUnlock()
+
+	for _, q := range queues {
+		if q.TryResumeCaptureIfPaused() {
+			m.logger.Info("Capture resumed after queue below resume threshold",
+				"camera", q.GetState().CameraID)
 		}
 	}
 }

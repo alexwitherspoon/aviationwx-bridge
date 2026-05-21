@@ -60,8 +60,9 @@ make check
 Follow [CODE_STYLE.md](CODE_STYLE.md) for all changes.
 
 **Safety & reliability:**
-- Always capture fresh; never queue or upload stale images
+- Each capture cycle must fetch a new frame; do not skip capture to upload older backlog only
 - Each camera degrades independently; never fail silently
+- Self-recovery: resume capture when queue drains; `/readyz` for Docker health; host capture-restart via supervisor or timer (see DEPLOYMENT.md)
 - Use `context.Context` for cancellation and timeouts
 - Wrap errors: `fmt.Errorf("context: %w", err)`
 

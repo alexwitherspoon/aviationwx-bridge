@@ -223,7 +223,16 @@ check_bridge_container() {
     local status
     status=$(docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "missing")
 
-    if [ "$status" = "exited" ] || [ "$status" = "missing" ]; then
+    if [ "$status" = "unhealthy" ]; then
+        log_event "ERROR" "Bridge container unhealthy (healthcheck failing), restarting"
+        if systemctl is-active --quiet aviationwx-container.service 2>/dev/null; then
+            execute_action "Restart unhealthy bridge container" "systemctl restart aviationwx-container.service"
+        elif [ -x "$CONTAINER_START_SCRIPT" ]; then
+            execute_action "Recreate unhealthy bridge container" "$CONTAINER_START_SCRIPT"
+        else
+            execute_action "Restart unhealthy bridge container" "docker restart '$CONTAINER_NAME'"
+        fi
+    elif [ "$status" = "exited" ] || [ "$status" = "missing" ]; then
         log_event "ERROR" "Bridge container $status, restarting"
         if systemctl is-active --quiet aviationwx-container.service 2>/dev/null; then
             execute_action "Restart bridge container" "systemctl restart aviationwx-container.service"
@@ -361,6 +370,11 @@ main() {
         trigger_reboot
     fi
     
+    # Stale capture recovery (/readyz 503 → container restart; rate limits in script)
+    if [ -x /usr/local/bin/aviationwx-capture-restart.sh ]; then
+        /usr/local/bin/aviationwx-capture-restart.sh || true
+    fi
+
     # Save state for next run
     save_state
     

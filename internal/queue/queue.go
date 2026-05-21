@@ -303,9 +303,14 @@ func (q *Queue) emergencyThinLocked(keepRatio float64) int {
 	return removed
 }
 
-// Dequeue returns the oldest image in the queue without removing it
-// Call MarkUploaded after successful upload to remove it
+// Dequeue returns the oldest queued image without removing it.
 func (q *Queue) Dequeue() (*QueuedImage, error) {
+	return q.DequeueNext(false)
+}
+
+// DequeueNext returns the next image to upload without removing it.
+// When newestFirst is true, returns the newest image (catch-up / LIFO).
+func (q *Queue) DequeueNext(newestFirst bool) (*QueuedImage, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
@@ -322,15 +327,60 @@ func (q *Queue) Dequeue() (*QueuedImage, error) {
 		return nil, ErrQueueEmpty
 	}
 
-	oldest := files[0]
-	timestamp := parseTimestampFromFilename(oldest.Name())
+	idx := 0
+	if newestFirst {
+		idx = len(files) - 1
+	}
+	file := files[idx]
+	timestamp := parseTimestampFromFilename(file.Name())
 
 	return &QueuedImage{
-		Filename:  oldest.Name(),
+		Filename:  file.Name(),
 		Timestamp: timestamp,
-		FilePath:  filepath.Join(q.state.Directory, oldest.Name()),
-		SizeBytes: oldest.Size(),
+		FilePath:  filepath.Join(q.state.Directory, file.Name()),
+		SizeBytes: file.Size(),
 	}, nil
+}
+
+// TryResumeCaptureIfPaused unpauses capture when capacity is below the resume threshold.
+func (q *Queue) TryResumeCaptureIfPaused() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	wasPaused := q.state.CapturePaused
+	q.maybeResumeCaptureLocked()
+	return wasPaused && !q.state.CapturePaused
+}
+
+// DropQueuedImage removes a queued image file and updates queue state.
+func (q *Queue) DropQueuedImage(img *QueuedImage) error {
+	if img == nil {
+		return fmt.Errorf("image is nil")
+	}
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if err := os.Remove(img.FilePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove queued image: %w", err)
+	}
+
+	if q.state.ImageCount > 0 {
+		q.state.ImageCount--
+	}
+	if q.state.TotalSizeBytes >= img.SizeBytes {
+		q.state.TotalSizeBytes -= img.SizeBytes
+	} else {
+		q.state.TotalSizeBytes = 0
+	}
+
+	q.recalculateOldestLocked()
+	q.updateHealthLevelLocked()
+
+	q.logger.Warn("Dropped unreadable queued image",
+		"camera", q.state.CameraID,
+		"filename", img.Filename)
+
+	return nil
 }
 
 // DequeueBatch returns multiple images from the queue without removing them
@@ -448,18 +498,8 @@ func (q *Queue) MarkUploaded(img *QueuedImage) error {
 	// Recalculate oldest timestamp
 	q.recalculateOldestLocked()
 
-	// Check if we can resume capture
 	q.updateHealthLevelLocked()
-	if q.state.CapturePaused && q.canResumeCaptureLocked() {
-		q.state.CapturePaused = false
-		select {
-		case q.resumeCapture <- struct{}{}:
-		default:
-		}
-		q.logger.Info("Capture resumed",
-			"camera", q.state.CameraID,
-			"queue_size", q.state.ImageCount)
-	}
+	q.maybeResumeCaptureLocked()
 
 	return nil
 }
@@ -794,6 +834,25 @@ func (q *Queue) updateHealthLevelLocked() {
 			"to", q.state.HealthLevel.String(),
 			"capacity_percent", capacityPct*100)
 	}
+
+	q.maybeResumeCaptureLocked()
+}
+
+// maybeResumeCaptureLocked unpauses capture when capacity falls below ResumeThreshold.
+// Needed when the queue drains via expiry or thinning without a successful upload.
+// Caller must hold q.mu.
+func (q *Queue) maybeResumeCaptureLocked() {
+	if !q.state.CapturePaused || !q.canResumeCaptureLocked() {
+		return
+	}
+	q.state.CapturePaused = false
+	select {
+	case q.resumeCapture <- struct{}{}:
+	default:
+	}
+	q.logger.Info("Capture resumed",
+		"camera", q.state.CameraID,
+		"queue_size", q.state.ImageCount)
 }
 
 func (q *Queue) getCapacityPercentLocked() float64 {

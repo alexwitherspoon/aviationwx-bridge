@@ -117,6 +117,15 @@ type CachedImage struct {
 	CapturedAt time.Time
 }
 
+// cameraRetryInterval is how often enabled cameras that failed to start at boot are retried.
+const cameraRetryInterval = 15 * time.Minute
+
+// cameraReadinessGrace matches /readyz: no staleness checks until orchestrator uptime exceeds this.
+const cameraReadinessGrace = 5 * time.Minute
+
+// minCameraStaleWindow is the minimum staleness window for per-camera worker restart.
+const minCameraStaleWindow = 15 * time.Minute
+
 func main() {
 	// Panic recovery - log crashes and exit gracefully
 	defer func() {
@@ -239,6 +248,8 @@ func main() {
 		}
 	}
 
+	go bridge.retryFailedCamerasLoop()
+
 	// Start web server with panic recovery
 	webErrChan := make(chan error, 1)
 	go func() {
@@ -337,6 +348,102 @@ func (b *Bridge) initOrchestrator() error {
 		"enabled", enabledCount)
 
 	return nil
+}
+
+// retryFailedCamerasLoop periodically starts missing camera workers and restarts stale ones.
+func (b *Bridge) retryFailedCamerasLoop() {
+	ticker := time.NewTicker(cameraRetryInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		b.retryFailedCameras()
+	}
+}
+
+// cameraCaptureInterval returns the configured capture interval for staleness checks.
+func cameraCaptureInterval(cam config.Camera) time.Duration {
+	secs := cam.CaptureIntervalSeconds
+	if secs <= 0 {
+		secs = cam.IntervalSeconds
+	}
+	if secs <= 0 {
+		secs = 60
+	}
+	return time.Duration(secs) * time.Second
+}
+
+// cameraStaleThreshold returns max(minCameraStaleWindow, 3×capture interval), matching /readyz.
+func cameraStaleThreshold(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		interval = 60 * time.Second
+	}
+	threshold := 3 * interval
+	if minCameraStaleWindow > threshold {
+		return minCameraStaleWindow
+	}
+	return threshold
+}
+
+// cameraWorkerIsStale reports whether a running worker should be removed and restarted.
+func (b *Bridge) cameraWorkerIsStale(cam config.Camera, cs scheduler.CameraStatus, uptime time.Duration) bool {
+	if uptime < cameraReadinessGrace {
+		return false
+	}
+	threshold := cameraStaleThreshold(cameraCaptureInterval(cam))
+	if cs.LastSuccess.IsZero() {
+		return uptime > threshold
+	}
+	return time.Since(cs.LastSuccess) > threshold
+}
+
+// retryFailedCameras starts missing workers and restarts stale ones.
+func (b *Bridge) retryFailedCameras() {
+	if b.orchestrator == nil {
+		return
+	}
+	status := b.orchestrator.GetStatus()
+	for _, camConfig := range b.configService.ListCameras() {
+		if !camConfig.Enabled {
+			continue
+		}
+
+		var cs *scheduler.CameraStatus
+		for i := range status.CameraStats {
+			if status.CameraStats[i].CameraID == camConfig.ID {
+				cs = &status.CameraStats[i]
+				break
+			}
+		}
+
+		if cs == nil {
+			b.log.Info("Retrying camera worker start", "camera", camConfig.ID)
+			if err := b.addCamera(camConfig); err != nil {
+				b.log.Warn("Camera worker retry failed",
+					"camera", camConfig.ID,
+					"error", err)
+			}
+			continue
+		}
+
+		if !b.cameraWorkerIsStale(camConfig, *cs, status.Uptime) {
+			continue
+		}
+
+		b.log.Warn("Restarting stale camera worker",
+			"camera", camConfig.ID,
+			"last_success", cs.LastSuccess,
+			"uptime", status.Uptime)
+		if err := b.orchestrator.RemoveCamera(camConfig.ID); err != nil {
+			b.log.Warn("Failed to remove stale camera worker",
+				"camera", camConfig.ID,
+				"error", err)
+			continue
+		}
+		if err := b.addCamera(camConfig); err != nil {
+			b.log.Warn("Camera worker restart after stale failed",
+				"camera", camConfig.ID,
+				"error", err)
+		}
+	}
 }
 
 // updateTimezone updates the timezone for all camera workers
@@ -827,6 +934,10 @@ func (b *Bridge) getStatus() interface{} {
 			"update_available": updateStatus.UpdateAvailable,
 			"last_check":       updateStatus.LastCheck.Format(time.RFC3339),
 		}
+	}
+
+	if hostRecovery := readRecoveryExhausted(); hostRecovery != nil {
+		status["host_recovery"] = hostRecovery
 	}
 
 	return status

@@ -583,6 +583,51 @@ func TestUpdateCamera_NormalizesCameraType(t *testing.T) {
 	}
 }
 
+func TestHealthz(t *testing.T) {
+	t.Run("hostRecoveryExhaustedReturns503", func(t *testing.T) {
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				return map[string]interface{}{
+					"host_recovery": map[string]interface{}{
+						"exhausted":    true,
+						"reason":       "capture readiness stuck",
+						"restarts_24h": float64(6),
+						"max_per_24h":  float64(6),
+					},
+				}
+			},
+			GetCaptureReadiness: func() (bool, string) {
+				return true, ""
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503, got %d body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("captureNotReadyReturns503", func(t *testing.T) {
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				return map[string]interface{}{"status": "ok"}
+			},
+			GetCaptureReadiness: func() (bool, string) {
+				return false, "camera cam1: last success 2h ago"
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503, got %d", w.Code)
+		}
+	})
+}
+
 func TestReadyz(t *testing.T) {
 	t.Run("notConfiguredReturns200", func(t *testing.T) {
 		s := NewServer(ServerConfig{

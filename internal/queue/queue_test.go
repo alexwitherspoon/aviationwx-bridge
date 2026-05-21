@@ -148,6 +148,37 @@ func TestQueue_DropQueuedImage(t *testing.T) {
 	}
 }
 
+func TestQueue_DropQueuedImage_fileAlreadyRemoved(t *testing.T) {
+	dir := t.TempDir()
+	config := DefaultQueueConfig()
+
+	q, err := NewQueue("test-camera", dir, config, nil)
+	if err != nil {
+		t.Fatalf("NewQueue failed: %v", err)
+	}
+
+	ts := time.Now().UTC()
+	if err := q.Enqueue(createTestJPEG(1024), ts, "bridge_clock", "high"); err != nil {
+		t.Fatalf("Enqueue failed: %v", err)
+	}
+
+	img, err := q.Dequeue()
+	if err != nil {
+		t.Fatalf("Dequeue failed: %v", err)
+	}
+
+	if err := os.Remove(img.FilePath); err != nil {
+		t.Fatalf("remove file: %v", err)
+	}
+
+	if err := q.DropQueuedImage(img); err != nil {
+		t.Fatalf("DropQueuedImage failed: %v", err)
+	}
+	if q.GetImageCount() != 0 {
+		t.Errorf("expected count 0 after resync, got %d", q.GetImageCount())
+	}
+}
+
 func TestQueue_TryResumeCaptureIfPaused_emptyQueueStuckPause(t *testing.T) {
 	dir := t.TempDir()
 	config := DefaultQueueConfig()

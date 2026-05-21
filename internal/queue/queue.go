@@ -351,6 +351,21 @@ func (q *Queue) TryResumeCaptureIfPaused() bool {
 	return wasPaused && !q.state.CapturePaused
 }
 
+// resyncCountsFromDiskLocked rebuilds ImageCount and TotalSizeBytes from directory listing.
+// Caller must hold q.mu.
+func (q *Queue) resyncCountsFromDiskLocked() {
+	files, err := q.listFilesSortedLocked()
+	if err != nil {
+		return
+	}
+	q.state.ImageCount = len(files)
+	var total int64
+	for _, f := range files {
+		total += f.Size()
+	}
+	q.state.TotalSizeBytes = total
+}
+
 // DropQueuedImage removes a queued image file and updates queue state.
 func (q *Queue) DropQueuedImage(img *QueuedImage) error {
 	if img == nil {
@@ -360,7 +375,16 @@ func (q *Queue) DropQueuedImage(img *QueuedImage) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	if err := os.Remove(img.FilePath); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(img.FilePath); err != nil {
+		if os.IsNotExist(err) {
+			q.resyncCountsFromDiskLocked()
+			q.recalculateOldestLocked()
+			q.updateHealthLevelLocked()
+			q.logger.Warn("Dropped unreadable queued image (file already removed)",
+				"camera", q.state.CameraID,
+				"filename", img.Filename)
+			return nil
+		}
 		return fmt.Errorf("remove queued image: %w", err)
 	}
 
@@ -476,13 +500,16 @@ func (q *Queue) MarkUploaded(img *QueuedImage) error {
 
 	if err := os.Remove(img.FilePath); err != nil {
 		if os.IsNotExist(err) {
-			// Already removed, update state anyway
+			q.resyncCountsFromDiskLocked()
+			q.recalculateOldestLocked()
+			q.updateHealthLevelLocked()
+			q.state.ImagesUploaded++
 			q.logger.Warn("Image already removed from queue",
 				"camera", q.state.CameraID,
 				"filename", img.Filename)
-		} else {
-			return fmt.Errorf("remove uploaded file: %w", err)
+			return nil
 		}
+		return fmt.Errorf("remove uploaded file: %w", err)
 	}
 
 	q.state.ImageCount--

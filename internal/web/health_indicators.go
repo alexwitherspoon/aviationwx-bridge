@@ -10,7 +10,7 @@ type healthIndicators struct {
 	orchestratorRunning bool
 	camerasActive       int
 	camerasTotal        int
-	uploadsRecent       int
+	uploadsRecent       int64
 	queueHealth         string
 	ntpHealthy          bool
 	hostRecovery        map[string]interface{}
@@ -60,7 +60,7 @@ func applyOrchestratorIndicators(hi *healthIndicators, orch scheduler.Orchestrat
 	if orch.CameraCount > hi.camerasTotal {
 		hi.camerasTotal = orch.CameraCount
 	}
-	hi.uploadsRecent = int(orch.UploadStats.UploadsSuccess)
+	hi.uploadsRecent = orch.UploadStats.UploadsSuccess
 	hi.queueHealth = worstQueueHealthFromStats(orch.CameraStats)
 	hi.ntpHealthy = orch.TimeInfo.TimeHealthy
 }
@@ -76,7 +76,7 @@ func applyOrchestratorMapIndicators(hi *healthIndicators, orch map[string]interf
 	}
 	if upload, ok := orch["upload_stats"].(map[string]interface{}); ok {
 		if success, ok := upload["uploads_success"].(float64); ok {
-			hi.uploadsRecent = int(success)
+			hi.uploadsRecent = int64(success)
 		}
 	}
 }

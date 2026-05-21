@@ -61,6 +61,20 @@ func TestExtractHealthIndicators_orchestratorStoppedDegraded(t *testing.T) {
 	}
 }
 
+func TestExtractHealthIndicators_uploadsSuccessInt64(t *testing.T) {
+	const large = int64(1<<40) + 7
+	raw := map[string]interface{}{
+		"orchestrator": scheduler.OrchestratorStatus{
+			Running:     true,
+			UploadStats: scheduler.UploadStats{UploadsSuccess: large},
+		},
+	}
+	hi := extractHealthIndicators(raw)
+	if hi.uploadsRecent != large {
+		t.Fatalf("uploadsRecent = %d, want %d", hi.uploadsRecent, large)
+	}
+}
+
 func TestExtractHealthIndicators_orchestratorTimeUnhealthy(t *testing.T) {
 	raw := map[string]interface{}{
 		"cameras": 1,

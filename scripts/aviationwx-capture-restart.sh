@@ -154,7 +154,9 @@ main() {
 	now_epoch=$(date +%s)
 
 	local code
-	code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 10 "$READYZ_URL" || echo "000")
+	if ! code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 10 "$READYZ_URL" 2>/dev/null); then
+		code="000"
+	fi
 
 	local consecutive_unready consecutive_unreachable
 	consecutive_unready=$(jq -r '.consecutive_unready // 0' "$STATE_FILE")

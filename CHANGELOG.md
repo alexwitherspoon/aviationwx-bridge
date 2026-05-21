@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Queue**: Resync queue counts from disk when drop/mark finds file already removed (avoid double decrement).
 - **Upload**: Advance `probeCameraIndex` under write lock (fix RLock data race).
 - **Bridge**: Stale camera worker restart uses `AVIATIONWX_READYZ_GRACE_SECONDS` (same as `/readyz`).
+- **Host**: capture-restart uses `curl ... || code=000` so unreachable does not become `000000`.
 - **Capture**: Immediate wake on `ResumeCapture` (not only when a pending capture exists).
 - **Upload**: Upload timeout interrupts SFTP (`InterruptUpload`) so the next upload is not blocked.
 - **Upload**: Serialize SFTP `Upload` per client so timeout interrupt closes the correct session under concurrent workers.

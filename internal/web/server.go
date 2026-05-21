@@ -729,8 +729,7 @@ func (s *Server) handleTestUpload(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-// handleHealthz reports process and subsystem health.
-// Returns 503 when unhealthy, including when capture readiness fails (same rules as /readyz).
+// handleHealthz reports process and subsystem health. Returns 503 when unhealthy.
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	status := s.buildHealthStatus()
 
@@ -745,9 +744,8 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(status)
 }
 
-// handleReadyz reports whether capture pipelines are healthy enough to serve traffic.
-// Returns 503 when enabled cameras have no recent successful capture.
-// No authentication — intended for host-side watchdog and Docker health checks.
+// handleReadyz reports capture pipeline readiness. Returns 503 when enabled cameras lack a recent successful capture.
+// No authentication. For host watchdog and Docker health checks.
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

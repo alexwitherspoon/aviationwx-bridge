@@ -309,7 +309,7 @@ func (q *Queue) Dequeue() (*QueuedImage, error) {
 }
 
 // DequeueNext returns the next image to upload without removing it.
-// When newestFirst is true, returns the newest image (catch-up / LIFO).
+// When newestFirst is true, returns the newest image (LIFO catch-up).
 func (q *Queue) DequeueNext(newestFirst bool) (*QueuedImage, error) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()

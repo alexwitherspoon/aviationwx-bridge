@@ -834,13 +834,8 @@ func (w *UploadWorker) handleReadFailure(cameraID string, img *queue.QueuedImage
 	}
 
 	w.fileReadFailMu.Lock()
-	count := w.fileReadFailures[img.FilePath]
-	count++
-	if count >= maxFileReadFailures {
-		delete(w.fileReadFailures, img.FilePath)
-	} else {
-		w.fileReadFailures[img.FilePath] = count
-	}
+	count := w.fileReadFailures[img.FilePath] + 1
+	w.fileReadFailures[img.FilePath] = count
 	w.fileReadFailMu.Unlock()
 
 	w.mu.RLock()
@@ -853,6 +848,8 @@ func (w *UploadWorker) handleReadFailure(cameraID string, img *queue.QueuedImage
 				"camera", cameraID,
 				"path", img.FilePath,
 				"error", dropErr)
+		} else {
+			w.clearFileReadFailure(img.FilePath)
 		}
 	}
 

@@ -199,6 +199,7 @@ async function api(endpoint, options = {}) {
     return response.json();
 }
 
+/** @returns {Promise<boolean>} true when status was loaded */
 async function refreshStatus() {
     try {
         status = await api('/status');
@@ -207,12 +208,14 @@ async function refreshStatus() {
         dot.classList.remove('error');
         dot.classList.add('connected');
         document.getElementById('statusText').textContent = 'Connected';
+        return true;
     } catch (err) {
         console.error('Failed to fetch status:', err);
         const dot = document.getElementById('statusDot');
         dot.classList.remove('connected');
         dot.classList.add('error');
         document.getElementById('statusText').textContent = 'Disconnected';
+        return false;
     }
 }
 
@@ -674,7 +677,9 @@ let refreshFailures = 0;
 function startAutoRefresh() {
     const tick = async () => {
         try {
-            await refreshStatus();
+            if (!(await refreshStatus())) {
+                throw new Error('status refresh failed');
+            }
 
             const activeSection = document.querySelector('.section.active');
             if (activeSection && (activeSection.id === 'dashboard' || activeSection.id === 'cameras')) {

@@ -128,6 +128,8 @@ resolve_start_version() {
     echo "${requested:-latest}"
 }
 
+mkdir -p "${DATA_DIR}"
+
 # Version: optional first argument (supervisor update), else last-known-good from boot-update.
 REQUESTED_VERSION="${1:-}"
 if [ -z "$REQUESTED_VERSION" ]; then

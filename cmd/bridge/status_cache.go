@@ -25,21 +25,38 @@ func newStatusCache(ttl time.Duration, refresh func() interface{}) *statusCache 
 
 func (c *statusCache) get() interface{} {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.data != nil && time.Since(c.at) < c.ttl {
-		return c.data
+		data := c.data
+		c.mu.Unlock()
+		return data
 	}
-
 	for c.inflight {
 		c.cond.Wait()
 		if c.data != nil && time.Since(c.at) < c.ttl {
-			return c.data
+			data := c.data
+			c.mu.Unlock()
+			return data
 		}
 	}
-
 	c.inflight = true
-	data := c.refresh()
+	c.mu.Unlock()
+
+	var data interface{}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				c.mu.Lock()
+				c.inflight = false
+				c.cond.Broadcast()
+				c.mu.Unlock()
+				panic(r)
+			}
+		}()
+		data = c.refresh()
+	}()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.data = data
 	c.at = time.Now()
 	c.inflight = false

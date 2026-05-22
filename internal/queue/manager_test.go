@@ -241,6 +241,71 @@ func TestManager_GetTotalImageCount(t *testing.T) {
 	}
 }
 
+func TestManager_SnapshotQueuesUpdatesCurrentTotalSize(t *testing.T) {
+	dir := t.TempDir()
+	config := DefaultGlobalQueueConfig()
+	config.BasePath = dir
+
+	manager, err := NewManager(config, nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	queueConfig := DefaultQueueConfig()
+	q, err := manager.CreateQueue("camera-1", queueConfig)
+	if err != nil {
+		t.Fatalf("CreateQueue: %v", err)
+	}
+
+	imageData := createTestJPEG(2048)
+	if err := q.Enqueue(imageData, time.Now().UTC(), "bridge_clock", "high"); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	_, snapTotal := manager.snapshotQueues()
+	want := int64(len(imageData))
+	if snapTotal != want {
+		t.Fatalf("snapshotQueues total=%d, want %d", snapTotal, want)
+	}
+	if got := manager.GetTotalQueueSize(); got != want {
+		t.Fatalf("GetTotalQueueSize=%d, want %d", got, want)
+	}
+}
+
+func TestManager_SnapshotQueuesConcurrentWithCheckMemoryPressure(t *testing.T) {
+	dir := t.TempDir()
+	config := DefaultGlobalQueueConfig()
+	config.BasePath = dir
+	config.MaxTotalSizeMB = 100
+	config.MaxHeapMB = 400
+
+	manager, err := NewManager(config, nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	q, err := manager.CreateQueue("camera-1", DefaultQueueConfig())
+	if err != nil {
+		t.Fatalf("CreateQueue: %v", err)
+	}
+	imageData := createTestJPEG(1024)
+	_ = q.Enqueue(imageData, time.Now().UTC(), "bridge_clock", "high")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			manager.checkMemoryPressure()
+		}
+	}()
+
+	for i := 0; i < 50; i++ {
+		_, total := manager.snapshotQueues()
+		if total < 0 {
+			t.Fatalf("negative snapshot total")
+		}
+	}
+	<-done
+}
+
 func TestManager_MemoryMonitor(t *testing.T) {
 	dir := t.TempDir()
 	config := DefaultGlobalQueueConfig()

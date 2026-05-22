@@ -66,6 +66,23 @@ func TestStatusCache_ServesStaleWhileRefreshInFlight(t *testing.T) {
 	close(releaseRefresh)
 }
 
+func TestStatusCache_RefreshPanicAllowsSubsequentGet(t *testing.T) {
+	var calls atomic.Int32
+	cache := newStatusCache(time.Minute, func() interface{} {
+		if calls.Add(1) == 1 {
+			panic("refresh failed")
+		}
+		return "ok"
+	})
+	func() {
+		defer func() { _ = recover() }()
+		_ = cache.get()
+	}()
+	if v := cache.get(); v != "ok" {
+		t.Fatalf("got %v after refresh panic, want ok", v)
+	}
+}
+
 func TestStatusCache_WaitInflightTimesOutWithoutCache(t *testing.T) {
 	releaseRefresh := make(chan struct{})
 	var calls atomic.Int32

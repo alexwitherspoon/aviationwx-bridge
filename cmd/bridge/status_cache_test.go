@@ -66,6 +66,30 @@ func TestStatusCache_ServesStaleWhileRefreshInFlight(t *testing.T) {
 	close(releaseRefresh)
 }
 
+func TestStatusCache_WaitInflightTimesOutWithoutCache(t *testing.T) {
+	releaseRefresh := make(chan struct{})
+	var calls atomic.Int32
+	cache := newStatusCache(time.Minute, func() interface{} {
+		if calls.Add(1) == 1 {
+			<-releaseRefresh
+			return "v1"
+		}
+		return "v2"
+	})
+
+	go func() { _ = cache.get() }()
+	time.Sleep(20 * time.Millisecond)
+
+	start := time.Now()
+	if v := cache.get(); v != nil {
+		t.Fatalf("got %v, want nil on wait timeout", v)
+	}
+	if elapsed := time.Since(start); elapsed < 4*time.Second || elapsed > 6*time.Second {
+		t.Fatalf("wait took %v, want ~5s timeout", elapsed)
+	}
+	close(releaseRefresh)
+}
+
 func TestStatusCache_UsesTTL(t *testing.T) {
 	var calls atomic.Int32
 	cache := newStatusCache(100*time.Millisecond, func() interface{} {

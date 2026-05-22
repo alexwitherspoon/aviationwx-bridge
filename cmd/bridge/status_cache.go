@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// Max time to wait on an in-flight refresh when no cached status exists yet.
+const statusCacheInflightWait = 5 * time.Second
+
 // statusCache coalesces concurrent full status builds so UI polling cannot stack
 // unbounded goroutines each blocked in orchestrator.GetStatus().
 type statusCache struct {
@@ -23,6 +26,34 @@ func newStatusCache(ttl time.Duration, refresh func() interface{}) *statusCache 
 	return c
 }
 
+// waitForInflightOrStale waits for an in-flight refresh. Caller must hold c.mu.
+func (c *statusCache) waitForInflightOrStale(wait time.Duration) (interface{}, bool) {
+	deadline := time.Now().Add(wait)
+	for c.inflight {
+		if c.data != nil && time.Since(c.at) < c.ttl {
+			return c.data, true
+		}
+		if c.data != nil {
+			return c.data, true
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, false
+		}
+		timer := time.AfterFunc(remaining, func() {
+			c.mu.Lock()
+			c.cond.Broadcast()
+			c.mu.Unlock()
+		})
+		c.cond.Wait()
+		timer.Stop()
+	}
+	if c.data != nil {
+		return c.data, true
+	}
+	return nil, false
+}
+
 func (c *statusCache) get() interface{} {
 	c.mu.Lock()
 	if c.data != nil && time.Since(c.at) < c.ttl {
@@ -30,24 +61,13 @@ func (c *statusCache) get() interface{} {
 		c.mu.Unlock()
 		return data
 	}
-	// Stale-while-revalidate: do not block on a wedged refresh when cached data exists.
-	if c.inflight && c.data != nil {
-		data := c.data
+	if c.inflight {
+		if data, ok := c.waitForInflightOrStale(statusCacheInflightWait); ok {
+			c.mu.Unlock()
+			return data
+		}
 		c.mu.Unlock()
-		return data
-	}
-	for c.inflight {
-		c.cond.Wait()
-		if c.data != nil && time.Since(c.at) < c.ttl {
-			data := c.data
-			c.mu.Unlock()
-			return data
-		}
-		if c.inflight && c.data != nil {
-			data := c.data
-			c.mu.Unlock()
-			return data
-		}
+		return nil
 	}
 	c.inflight = true
 	c.mu.Unlock()

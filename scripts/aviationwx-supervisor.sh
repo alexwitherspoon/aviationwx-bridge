@@ -1,11 +1,11 @@
 #!/bin/bash
 # AviationWX.org Bridge - Unified Supervisor
 # Handles updates for both host scripts and container
-# Version: 2.2
+# Version: 2.3
 
 set -euo pipefail
 
-readonly SCRIPT_VERSION="2.2"
+readonly SCRIPT_VERSION="2.3"
 readonly GITHUB_REPO="alexwitherspoon/aviationwx.org-bridge"
 readonly IMAGE_NAME="ghcr.io/alexwitherspoon/aviationwx-org-bridge"
 readonly CONTAINER_NAME="aviationwx-org-bridge"

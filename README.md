@@ -257,7 +257,7 @@ docker restart aviationwx-org-bridge
 
 ### Force rollback (Path A only)
 ```bash
-sudo /usr/local/bin/aviationwx-supervisor rollback
+sudo /usr/local/bin/aviationwx-container-start.sh "$(cat /data/aviationwx/last-known-good.txt)"
 ```
 
 ### Complete reinstall

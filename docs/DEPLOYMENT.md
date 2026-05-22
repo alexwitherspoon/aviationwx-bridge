@@ -77,12 +77,12 @@ Supervisor **upgrade checks** compare the running bridge semver and the **GitHub
 
 **Check status:**
 ```bash
-sudo /usr/local/bin/aviationwx-supervisor status
+sudo /usr/local/bin/aviationwx-supervisor.sh status
 ```
 
-**Rollback:**
+**Rollback** (recreate container from last-known-good):
 ```bash
-sudo /usr/local/bin/aviationwx-supervisor rollback
+sudo /usr/local/bin/aviationwx-container-start.sh "$(cat /data/aviationwx/last-known-good.txt)"
 ```
 
 ---
@@ -340,7 +340,7 @@ sudo nano /data/aviationwx/environment
 AVIATIONWX_TMPFS_SIZE=300m
 
 # Restart to apply (uses supervisor to recreate container)
-sudo /usr/local/bin/aviationwx-supervisor update
+sudo /usr/local/bin/aviationwx-supervisor.sh force-update
 ```
 
 #### Docker Run

@@ -161,8 +161,12 @@ echo "[$(date -Iseconds)] Starting container with version: $VERSION"
 
 echo "[$(date -Iseconds)] Pulling ${IMAGE_NAME}:${VERSION}..."
 if ! docker pull "${IMAGE_NAME}:${VERSION}"; then
-    echo "[$(date -Iseconds)] ERROR: failed to pull ${IMAGE_NAME}:${VERSION}" >&2
-    exit 1
+    if docker image inspect "${IMAGE_NAME}:${VERSION}" >/dev/null 2>&1; then
+        echo "[$(date -Iseconds)] WARN: pull failed; using local image ${IMAGE_NAME}:${VERSION}" >&2
+    else
+        echo "[$(date -Iseconds)] ERROR: failed to pull ${IMAGE_NAME}:${VERSION} and no local image" >&2
+        exit 1
+    fi
 fi
 
 # Remove existing container if present

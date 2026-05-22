@@ -644,6 +644,39 @@ func TestHealthz(t *testing.T) {
 		}
 	})
 
+	t.Run("getStatusTimeoutDegraded", func(t *testing.T) {
+		prev := healthStatusCollectTimeout
+		healthStatusCollectTimeout = 50 * time.Millisecond
+		t.Cleanup(func() { healthStatusCollectTimeout = prev })
+
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				time.Sleep(200 * time.Millisecond)
+				return map[string]interface{}{"status": "ok"}
+			},
+			GetCaptureReadiness: func() (bool, string) {
+				return true, ""
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+		}
+		var body map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body["status"] != "degraded" {
+			t.Fatalf("status=%v, want degraded", body["status"])
+		}
+		if details, _ := body["details"].(string); details == "" || !strings.Contains(details, "timed out") {
+			t.Fatalf("details=%q, want timeout mention", details)
+		}
+	})
+
 	t.Run("captureNotReadyReturns503", func(t *testing.T) {
 		s := NewServer(ServerConfig{
 			ConfigService: testServerConfigService(t),

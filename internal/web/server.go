@@ -22,6 +22,9 @@ import (
 //go:embed static/*
 var staticFiles embed.FS
 
+// healthStatusCollectTimeout bounds getStatus() in /healthz (overridable in tests).
+var healthStatusCollectTimeout = 5 * time.Second
+
 // normalizeUploadForAPI trims upload host/username/password, lowercases host, and applies the
 // default host when the trimmed value is empty so SFTP identity keys stay consistent.
 func normalizeUploadForAPI(u *config.Upload) {
@@ -800,10 +803,13 @@ func (s *Server) buildHealthStatus() map[string]interface{} {
 
 	if s.getStatus != nil {
 		var hi healthIndicators
-		if status, ok := runWithTimeout(5*time.Second, s.getStatus); ok {
-			hi = extractHealthIndicators(status)
-		}
 		details := []string{}
+		if status, ok := runWithTimeout(healthStatusCollectTimeout, s.getStatus); ok {
+			hi = extractHealthIndicators(status)
+		} else {
+			health["status"] = "degraded"
+			details = append(details, "status collection timed out")
+		}
 
 		if hi.orchestratorPresent && !hi.orchestratorRunning {
 			health["status"] = "degraded"

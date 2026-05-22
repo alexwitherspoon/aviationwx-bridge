@@ -60,7 +60,7 @@ function getWebPassword() {
 }
 
 function setWebPassword(password) {
-    sessionStorage.setItem(WEB_AUTH_STORAGE_KEY, String(password).trim());
+    sessionStorage.setItem(WEB_AUTH_STORAGE_KEY, String(password));
 }
 
 function clearWebPassword() {

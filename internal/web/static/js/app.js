@@ -68,7 +68,11 @@ function authHeaders() {
     if (!password) {
         return {};
     }
-    return { Authorization: 'Basic ' + btoa('admin:' + password) };
+    const encode = window.encodeBasicAuthHeader;
+    if (!encode) {
+        return {};
+    }
+    return { Authorization: encode('admin', password) };
 }
 
 async function ensureAuth() {

@@ -6,7 +6,9 @@ load test_helper
 setup_file() {
 	export REPO_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../.." && pwd)"
 	export CONTAINER_START_LIB="${BATS_TMPDIR}/container-start-lib.sh"
-	sed -n '1,129p' "$REPO_ROOT/scripts/aviationwx-container-start.sh" >"$CONTAINER_START_LIB"
+	# Omit strict-mode line so sourcing does not mutate the bats harness shell options.
+	sed -n '1,129p' "$REPO_ROOT/scripts/aviationwx-container-start.sh" \
+		| grep -v '^set -euo pipefail$' >"$CONTAINER_START_LIB"
 }
 
 setup() {

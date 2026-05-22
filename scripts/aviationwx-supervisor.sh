@@ -343,7 +343,7 @@ get_latest_release_json() {
     done
 
     if [ -f "$cache_file" ]; then
-        log_event "WARN" "GitHub API unavailable, using stale cache"
+        log_event "WARN" "GitHub API unavailable, using stale cache" >&2
         cat "$cache_file"
         return 0
     fi

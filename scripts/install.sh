@@ -439,8 +439,9 @@ bootstrap_container() {
 
     # Seed last-known-good from GitHub (not the Docker "latest" tag)
     local target_version=""
-    if target_version=$(BOOT_MODE=watchdog /usr/local/bin/aviationwx-supervisor.sh print-target-version 2>/dev/null) \
-        && [[ "$target_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    target_version=$(BOOT_MODE=watchdog /usr/local/bin/aviationwx-supervisor.sh print-target-version 2>/dev/null || true)
+    target_version=$(printf '%s\n' "$target_version" | head -1 | tr -d '[:space:]')
+    if [[ "$target_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         echo "$target_version" > "${DATA_DIR}/last-known-good.txt"
         log_info "Resolved latest release from GitHub: $target_version"
     else
@@ -457,8 +458,9 @@ bootstrap_container() {
         start_version=$(cat "${DATA_DIR}/last-known-good.txt" 2>/dev/null || true)
         if [ -z "$start_version" ] || [ "$start_version" = "latest" ] || [ "$start_version" = "edge" ]; then
             start_version=$(BOOT_MODE=watchdog /usr/local/bin/aviationwx-supervisor.sh print-target-version 2>/dev/null || true)
+            start_version=$(printf '%s\n' "$start_version" | head -1 | tr -d '[:space:]')
         fi
-        if [ -n "$start_version" ]; then
+        if [[ "$start_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]] || [ "$start_version" = "edge" ]; then
             /usr/local/bin/aviationwx-container-start.sh "$start_version"
         else
             log_error "Cannot start container: could not resolve version from GitHub"

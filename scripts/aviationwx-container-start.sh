@@ -118,7 +118,8 @@ resolve_start_version() {
     if [ -x /usr/local/bin/aviationwx-supervisor.sh ]; then
         local resolved
         resolved=$(BOOT_MODE=watchdog /usr/local/bin/aviationwx-supervisor.sh print-target-version 2>/dev/null) || true
-        if [ -n "$resolved" ]; then
+        resolved=$(printf '%s\n' "$resolved" | head -1 | tr -d '[:space:]')
+        if [[ "$resolved" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]]; then
             echo "[$(date -Iseconds)] Resolved floating tag to GitHub release: $resolved" >&2
             echo "$resolved"
             return 0

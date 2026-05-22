@@ -65,3 +65,12 @@ func TestHostDataDir_prefersAviationwxDataDir(t *testing.T) {
 		t.Fatalf("hostDataDir() = %q want %q", got, dir)
 	}
 }
+
+func TestHostDataDir_ignoresConfigSubdir(t *testing.T) {
+	t.Setenv("AVIATIONWX_DATA_DIR", "")
+	t.Setenv("AVIATIONWX_CONFIG_DIR", "/data/config")
+
+	if got := hostDataDir(); got != "/data" {
+		t.Fatalf("hostDataDir() = %q want /data", got)
+	}
+}

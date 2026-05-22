@@ -18,11 +18,8 @@ func hostDataDir() string {
 	if d := os.Getenv("AVIATIONWX_DATA_DIR"); d != "" {
 		return d
 	}
-	configDir := os.Getenv("AVIATIONWX_CONFIG_DIR")
-	if configDir == "" {
-		configDir = "/data"
-	}
-	return configDir
+	// Host scripts write recovery/upgrade files at the mounted volume root (/data in the container).
+	return "/data"
 }
 
 // readHostDataLabel returns trimmed contents of a host-written file under the data dir (empty if missing).

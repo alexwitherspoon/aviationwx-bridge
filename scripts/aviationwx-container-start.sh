@@ -115,9 +115,10 @@ resolve_start_version() {
         echo "edge"
         return 0
     fi
-    if [ -x /usr/local/bin/aviationwx-supervisor.sh ]; then
+    local supervisor="${AVIATIONWX_SUPERVISOR:-/usr/local/bin/aviationwx-supervisor.sh}"
+    if [ -x "$supervisor" ]; then
         local resolved
-        resolved=$(BOOT_MODE=watchdog /usr/local/bin/aviationwx-supervisor.sh print-target-version 2>/dev/null) || true
+        resolved=$(BOOT_MODE=watchdog "$supervisor" print-target-version 2>/dev/null) || true
         resolved=$(printf '%s\n' "$resolved" | head -1 | tr -d '[:space:]')
         if [[ "$resolved" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]]; then
             echo "[$(date -Iseconds)] Resolved floating tag to GitHub release: $resolved" >&2

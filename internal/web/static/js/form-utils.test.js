@@ -160,6 +160,11 @@ test('findConflictingCameraId detects duplicate SFTP identity', () => {
     );
 });
 
+test('encodeBasicAuthHeader encodes ASCII passwords', () => {
+    const header = encodeBasicAuthHeader('admin', 'aviationwx');
+    assert.strictEqual(header, 'Basic ' + Buffer.from('admin:aviationwx').toString('base64'));
+});
+
 test('encodeBasicAuthHeader encodes UTF-8 passwords', () => {
     const header = encodeBasicAuthHeader('admin', 'пароль');
     assert.ok(header.startsWith('Basic '));

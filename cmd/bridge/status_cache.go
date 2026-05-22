@@ -30,9 +30,20 @@ func (c *statusCache) get() interface{} {
 		c.mu.Unlock()
 		return data
 	}
+	// Stale-while-revalidate: do not block on a wedged refresh when cached data exists.
+	if c.inflight && c.data != nil {
+		data := c.data
+		c.mu.Unlock()
+		return data
+	}
 	for c.inflight {
 		c.cond.Wait()
 		if c.data != nil && time.Since(c.at) < c.ttl {
+			data := c.data
+			c.mu.Unlock()
+			return data
+		}
+		if c.inflight && c.data != nil {
 			data := c.data
 			c.mu.Unlock()
 			return data

@@ -31,6 +31,41 @@ func TestStatusCache_CoalescesConcurrentRefresh(t *testing.T) {
 	}
 }
 
+func TestStatusCache_ServesStaleWhileRefreshInFlight(t *testing.T) {
+	refreshStarted := make(chan struct{})
+	releaseRefresh := make(chan struct{})
+	var calls atomic.Int32
+	cache := newStatusCache(50*time.Millisecond, func() interface{} {
+		n := calls.Add(1)
+		if n == 1 {
+			return "v1"
+		}
+		if n == 2 {
+			close(refreshStarted)
+			<-releaseRefresh
+			return "v1"
+		}
+		return "v2"
+	})
+
+	if v := cache.get(); v != "v1" {
+		t.Fatalf("warm cache: got %v, want v1", v)
+	}
+	time.Sleep(60 * time.Millisecond) // past TTL
+
+	go func() { _ = cache.get() }()
+	<-refreshStarted
+
+	start := time.Now()
+	if v := cache.get(); v != "v1" {
+		t.Fatalf("stale while refresh: got %v, want v1", v)
+	}
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Fatalf("blocked %v waiting on refresh, want immediate stale", elapsed)
+	}
+	close(releaseRefresh)
+}
+
 func TestStatusCache_UsesTTL(t *testing.T) {
 	var calls atomic.Int32
 	cache := newStatusCache(100*time.Millisecond, func() interface{} {

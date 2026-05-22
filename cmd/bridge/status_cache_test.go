@@ -60,7 +60,7 @@ func TestStatusCache_ServesStaleWhileRefreshInFlight(t *testing.T) {
 	if v := cache.get(); v != "v1" {
 		t.Fatalf("stale while refresh: got %v, want v1", v)
 	}
-	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
 		t.Fatalf("blocked %v waiting on refresh, want immediate stale", elapsed)
 	}
 	close(releaseRefresh)

@@ -23,13 +23,18 @@ func runWithTimeout(timeout time.Duration, fn func() interface{}) (interface{}, 
 		}()
 		ch <- timeoutResult{value: fn()}
 	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case res := <-ch:
+		if !timer.Stop() {
+			<-timer.C
+		}
 		if res.panicked {
 			return nil, false
 		}
 		return res.value, true
-	case <-time.After(timeout):
+	case <-timer.C:
 		return nil, false
 	}
 }
@@ -52,13 +57,18 @@ func runReadinessWithTimeout(timeout time.Duration, fn func() (bool, string)) (o
 		o, r := fn()
 		ch <- result{ok: o, reason: r}
 	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case res := <-ch:
+		if !timer.Stop() {
+			<-timer.C
+		}
 		if res.panicked {
 			return false, "readiness check failed", true
 		}
 		return res.ok, res.reason, true
-	case <-time.After(timeout):
+	case <-timer.C:
 		return false, "readiness check timed out", false
 	}
 }

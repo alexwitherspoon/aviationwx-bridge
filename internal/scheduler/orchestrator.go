@@ -493,9 +493,11 @@ func (o *Orchestrator) GetStatus() OrchestratorStatus {
 		queueStats := q.GetStats()
 		state := worker.GetState()
 
-		var lastErr string
+		var lastErr *CameraLastError
 		if state.LastError != nil {
-			lastErr = state.LastError.Error()
+			if msg := state.LastError.Error(); msg != "" {
+				lastErr = &CameraLastError{Message: msg}
+			}
 		}
 
 		cameraStats = append(cameraStats, CameraStatus{
@@ -549,12 +551,17 @@ type CaptureReadinessPoint struct {
 	LastSuccess time.Time
 }
 
+// CameraLastError is the capture error shown in the web console (Message matches UI).
+type CameraLastError struct {
+	Message string `json:"Message"`
+}
+
 // CameraStatus represents status for a single camera
 type CameraStatus struct {
 	CameraID     string           `json:"camera_id"`
 	CaptureStats CaptureStats     `json:"capture_stats"`
 	QueueStats   queue.QueueStats `json:"queue_stats"`
 	LastSuccess  time.Time        `json:"last_success"`
-	LastError    string           `json:"last_error,omitempty"`
+	LastError    *CameraLastError `json:"last_error,omitempty"`
 	IsBackingOff bool             `json:"is_backing_off"`
 }

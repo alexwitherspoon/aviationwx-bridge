@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -418,5 +419,29 @@ func TestOrchestrator_WithOnCaptureCallback(t *testing.T) {
 	// Callback should be stored (we can't easily test invocation without starting the worker)
 	if orch.captureWorkers["test-cam"].onCapture == nil {
 		t.Error("Callback should be stored in capture worker")
+	}
+}
+
+func TestCameraStatus_LastErrorJSONShape(t *testing.T) {
+	cs := CameraStatus{
+		CameraID: "cam1",
+		LastError: &CameraLastError{
+			Message: "connection refused",
+		},
+	}
+	data, err := json.Marshal(cs)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	lastErr, ok := decoded["last_error"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("last_error=%T, want object with Message", decoded["last_error"])
+	}
+	if lastErr["Message"] != "connection refused" {
+		t.Fatalf("Message=%v, want connection refused", lastErr["Message"])
 	}
 }

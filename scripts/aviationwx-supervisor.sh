@@ -18,6 +18,7 @@ readonly SCRIPTS_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main
 readonly MIN_RELEASE_AGE_HOURS=2
 readonly SKIP_PRERELEASE=true
 readonly PULL_TIMEOUT=600  # 10 minutes for slow connections (Pi Zero)
+readonly EXEC_TIMEOUT=15   # bound docker exec for version probe
 
 # Dry-run mode for testing
 readonly DRY_RUN="${AVIATIONWX_DRY_RUN:-false}"
@@ -266,7 +267,7 @@ get_running_bridge_version() {
         return 1
     fi
     local ver
-    ver=$(docker exec "$CONTAINER_NAME" /usr/local/bin/bridge -version 2>/dev/null | awk '{print $1}') || return 1
+    ver=$(timeout "$EXEC_TIMEOUT" docker exec "$CONTAINER_NAME" /usr/local/bin/bridge -version 2>/dev/null | awk '{print $1}') || return 1
     if is_semver_tag "$ver"; then
         echo "$ver"
         return 0

@@ -231,7 +231,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	status, ok := runWithTimeout(10*time.Second, s.getStatus)
-	if !ok {
+	if !ok || status == nil {
 		http.Error(w, "Status temporarily unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -804,11 +804,14 @@ func (s *Server) buildHealthStatus() map[string]interface{} {
 	if s.getStatus != nil {
 		var hi healthIndicators
 		details := []string{}
-		if status, ok := runWithTimeout(healthStatusCollectTimeout, s.getStatus); ok {
+		if status, ok := runWithTimeout(healthStatusCollectTimeout, s.getStatus); ok && status != nil {
 			hi = extractHealthIndicators(status)
-		} else {
+		} else if !ok {
 			health["status"] = "degraded"
 			details = append(details, "status collection timed out")
+		} else {
+			health["status"] = "degraded"
+			details = append(details, "status unavailable")
 		}
 
 		if hi.orchestratorPresent && !hi.orchestratorRunning {

@@ -34,23 +34,31 @@ func TestRunReadinessWithTimeout_Completes(t *testing.T) {
 }
 
 func TestRunWithTimeout_RecoversPanic(t *testing.T) {
-	_, ok := runWithTimeout(50*time.Millisecond, func() interface{} {
+	start := time.Now()
+	_, ok := runWithTimeout(time.Second, func() interface{} {
 		panic("boom")
 	})
 	if ok {
-		t.Fatal("expected timeout after panic")
+		t.Fatal("expected failure after panic")
+	}
+	if time.Since(start) > 100*time.Millisecond {
+		t.Fatalf("panic path took %v, want immediate return", time.Since(start))
 	}
 }
 
 func TestRunReadinessWithTimeout_RecoversPanic(t *testing.T) {
-	ok, reason, completed := runReadinessWithTimeout(50*time.Millisecond, func() (bool, string) {
+	start := time.Now()
+	ok, reason, completed := runReadinessWithTimeout(time.Second, func() (bool, string) {
 		panic("boom")
 	})
-	if completed || ok {
+	if !completed || ok {
 		t.Fatalf("got ok=%v completed=%v after panic", ok, completed)
 	}
-	if reason != "readiness check timed out" {
-		t.Fatalf("reason=%q, want readiness check timed out", reason)
+	if reason != "readiness check failed" {
+		t.Fatalf("reason=%q, want readiness check failed", reason)
+	}
+	if time.Since(start) > 100*time.Millisecond {
+		t.Fatalf("panic path took %v, want immediate return", time.Since(start))
 	}
 }
 

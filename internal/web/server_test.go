@@ -644,6 +644,28 @@ func TestHealthz(t *testing.T) {
 		}
 	})
 
+	t.Run("getStatusNilDegraded", func(t *testing.T) {
+		s := NewServer(ServerConfig{
+			ConfigService: testServerConfigService(t),
+			GetStatus: func() interface{} {
+				return nil
+			},
+			GetCaptureReadiness: func() (bool, string) {
+				return true, ""
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		w := httptest.NewRecorder()
+		s.GetMux().ServeHTTP(w, req)
+		var body map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body["status"] != "degraded" {
+			t.Fatalf("status=%v, want degraded", body["status"])
+		}
+	})
+
 	t.Run("getStatusTimeoutDegraded", func(t *testing.T) {
 		prev := healthStatusCollectTimeout
 		healthStatusCollectTimeout = 50 * time.Millisecond
@@ -694,6 +716,23 @@ func TestHealthz(t *testing.T) {
 			t.Fatalf("expected 503, got %d", w.Code)
 		}
 	})
+}
+
+func TestHandleStatusNilReturns503(t *testing.T) {
+	svc := testServerConfigService(t)
+	s := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return nil
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	w := httptest.NewRecorder()
+	s.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d body=%s", w.Code, w.Body.String())
+	}
 }
 
 func TestReadyz(t *testing.T) {

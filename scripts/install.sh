@@ -463,8 +463,8 @@ bootstrap_container() {
         if [[ "$start_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]] || [ "$start_version" = "edge" ]; then
             /usr/local/bin/aviationwx-container-start.sh "$start_version"
         else
-            log_error "Cannot start container: could not resolve version from GitHub"
-            return 1
+            log_warn "Could not resolve release from GitHub; starting with container-start default tag"
+            /usr/local/bin/aviationwx-container-start.sh
         fi
     fi
     

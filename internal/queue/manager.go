@@ -177,15 +177,16 @@ func (m *Manager) StartMemoryMonitor(ctx context.Context) {
 // snapshotQueues copies queue pointers and total byte size without holding the lock during thinning.
 func (m *Manager) snapshotQueues() (queues []*Queue, totalSize int64) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	queues = make([]*Queue, 0, len(m.queues))
 	for _, q := range m.queues {
 		queues = append(queues, q)
 		state := q.GetState()
 		totalSize += state.TotalSizeBytes
 	}
+	m.mu.RUnlock()
+	m.mu.Lock()
 	m.currentTotalSize = totalSize
+	m.mu.Unlock()
 	return queues, totalSize
 }
 

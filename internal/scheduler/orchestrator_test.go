@@ -326,13 +326,14 @@ func TestOrchestrator_GetCaptureReadinessPoints(t *testing.T) {
 	if err := orch.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	time.Sleep(2 * time.Millisecond)
 
 	running, uptime, points := orch.GetCaptureReadinessPoints()
 	if !running {
 		t.Error("expected running")
 	}
 	if uptime <= 0 {
-		t.Error("expected uptime > 0")
+		t.Errorf("expected uptime > 0, got %v", uptime)
 	}
 	if len(points) != 1 {
 		t.Fatalf("points len = %d, want 1", len(points))

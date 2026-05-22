@@ -63,6 +63,10 @@ function setWebPassword(password) {
     sessionStorage.setItem(WEB_AUTH_STORAGE_KEY, String(password).trim());
 }
 
+function clearWebPassword() {
+    sessionStorage.removeItem(WEB_AUTH_STORAGE_KEY);
+}
+
 function authHeaders() {
     const password = getWebPassword();
     if (!password) {
@@ -75,15 +79,39 @@ function authHeaders() {
     return { Authorization: encode('admin', password) };
 }
 
+async function promptForWebPassword() {
+    const entered = window.prompt('Web console password:', 'aviationwx');
+    if (entered === null) {
+        return false;
+    }
+    setWebPassword(entered);
+    return true;
+}
+
 async function ensureAuth() {
     if (getWebPassword()) {
         return;
     }
-    const entered = window.prompt('Web console password:', 'aviationwx');
-    if (entered === null) {
-        return;
+    await promptForWebPassword();
+}
+
+/** fetch with Basic Auth; on 401 clears cached password, re-prompts, and retries once. */
+async function fetchWithAuth(url, options = {}, retried = false) {
+    const response = await fetch(url, {
+        ...options,
+        credentials: 'same-origin',
+        headers: {
+            ...options.headers,
+            ...authHeaders(),
+        },
+    });
+    if (response.status === 401 && !retried) {
+        clearWebPassword();
+        if (await promptForWebPassword()) {
+            return fetchWithAuth(url, options, true);
+        }
     }
-    setWebPassword(entered);
+    return response;
 }
 
 // Initialize application
@@ -155,21 +183,19 @@ function showSection(sectionId) {
 // API calls
 async function api(endpoint, options = {}) {
     const url = `/api${endpoint}`;
-    const response = await fetch(url, {
+    const response = await fetchWithAuth(url, {
         ...options,
-        credentials: 'same-origin',
         headers: {
             'Content-Type': 'application/json',
-            ...authHeaders(),
             ...options.headers,
         },
     });
-    
+
     if (!response.ok) {
         const error = await response.text();
         throw new Error(error || `HTTP ${response.status}`);
     }
-    
+
     return response.json();
 }
 
@@ -1170,10 +1196,9 @@ async function testCamera() {
     }
 
     try {
-        const response = await fetch('/api/test/camera', {
+        const response = await fetchWithAuth('/api/test/camera', {
             method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(camera),
         });
 
@@ -1507,10 +1532,7 @@ function startLiveLogs() {
         if (logsPaused) return;
         
         try {
-            const response = await fetch('/api/logs?tail=100', {
-                credentials: 'same-origin',
-                headers: authHeaders(),
-            });
+            const response = await fetchWithAuth('/api/logs?tail=100');
             
             if (response.ok) {
                 const logs = await response.text();

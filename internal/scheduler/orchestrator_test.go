@@ -308,6 +308,39 @@ func TestOrchestrator_GetStatus(t *testing.T) {
 	}
 }
 
+func TestOrchestrator_GetCaptureReadinessPoints(t *testing.T) {
+	tmpDir := t.TempDir()
+	config := DefaultOrchestratorConfig()
+	config.QueueBasePath = tmpDir
+	orch, err := NewOrchestrator(config)
+	if err != nil {
+		t.Fatalf("NewOrchestrator() error = %v", err)
+	}
+	defer orch.Stop()
+
+	cam := &mockCamera{id: "cam1", camType: "http"}
+	if err := orch.AddCamera(cam, CameraConfig{ID: "cam1", Enabled: true}, 60, &mockUploader{}, nil); err != nil {
+		t.Fatalf("AddCamera: %v", err)
+	}
+	if err := orch.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	running, uptime, points := orch.GetCaptureReadinessPoints()
+	if !running {
+		t.Error("expected running")
+	}
+	if uptime <= 0 {
+		t.Error("expected uptime > 0")
+	}
+	if len(points) != 1 {
+		t.Fatalf("points len = %d, want 1", len(points))
+	}
+	if points[0].CameraID != "cam1" {
+		t.Errorf("camera id = %q, want cam1", points[0].CameraID)
+	}
+}
+
 func TestNewOrchestrator_ExplicitMaxConcurrentCapturesUsesConfiguredValue(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := DefaultOrchestratorConfig()

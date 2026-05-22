@@ -200,7 +200,8 @@ main() {
 		return $?
 	fi
 
-	if [ "$code" = "000" ]; then
+	# curl may print 000 or 000000 when connection fails; treat both as unreachable.
+	if [[ "$code" == 000* ]]; then
 		consecutive_unreachable=$((consecutive_unreachable + 1))
 		consecutive_unreachable=$(clamp_streak "$consecutive_unreachable" "$UNREACHABLE_THRESHOLD")
 		consecutive_unready=0

@@ -174,37 +174,39 @@ func (m *Manager) StartMemoryMonitor(ctx context.Context) {
 	}
 }
 
-// checkMemoryPressure checks global memory usage and triggers emergency thinning if needed
-func (m *Manager) checkMemoryPressure() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+// snapshotQueues copies queue pointers and total byte size without holding the lock during thinning.
+func (m *Manager) snapshotQueues() (queues []*Queue, totalSize int64) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	// Calculate total queue size across all cameras
-	var totalSize int64
+	queues = make([]*Queue, 0, len(m.queues))
 	for _, q := range m.queues {
+		queues = append(queues, q)
 		state := q.GetState()
 		totalSize += state.TotalSizeBytes
 	}
-
 	m.currentTotalSize = totalSize
+	return queues, totalSize
+}
+
+// checkMemoryPressure checks global memory usage and triggers emergency thinning if needed.
+// Thinning runs without the manager mutex so /api/status and /readyz can read queue stats.
+func (m *Manager) checkMemoryPressure() {
+	queues, totalSize := m.snapshotQueues()
 	maxBytes := int64(m.globalConfig.MaxTotalSizeMB) * 1024 * 1024
 
-	// Check queue size limit
 	if totalSize > maxBytes {
 		m.logger.Warn("Global queue size exceeded, triggering emergency thin",
 			"total_mb", float64(totalSize)/(1024*1024),
 			"max_mb", m.globalConfig.MaxTotalSizeMB)
 
-		// Emergency thin all queues
-		for _, q := range m.queues {
+		for _, q := range queues {
 			q.EmergencyThin(m.globalConfig.EmergencyThinRatio)
 		}
 	}
 
-	// Check actual filesystem space (critical safety check)
-	m.checkFilesystemSpace()
+	m.checkFilesystemSpace(queues)
 
-	// Check system memory (heap usage)
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 
@@ -214,28 +216,26 @@ func (m *Manager) checkMemoryPressure() {
 			"heap_mb", float64(mem.HeapAlloc)/(1024*1024),
 			"max_heap_mb", m.globalConfig.MaxHeapMB)
 
-		// Aggressive emergency thin
-		for _, q := range m.queues {
+		for _, q := range queues {
 			q.EmergencyThin(0.3) // Keep only 30%
 		}
-
-		// Force garbage collection
 		runtime.GC()
 	}
 }
 
-// checkFilesystemSpace checks actual tmpfs free space and triggers cleanup if needed
-func (m *Manager) checkFilesystemSpace() {
+// checkFilesystemSpace checks actual tmpfs free space and triggers cleanup if needed.
+func (m *Manager) checkFilesystemSpace(queues []*Queue) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(m.globalConfig.BasePath, &stat); err != nil {
-		// Can't check, skip
 		return
 	}
 
 	totalBytes := stat.Blocks * uint64(stat.Bsize)
 	freeBytes := stat.Bavail * uint64(stat.Bsize)
+	if totalBytes == 0 {
+		return
+	}
 
-	// If less than 10% free space, trigger emergency cleanup
 	freePercent := float64(freeBytes) / float64(totalBytes) * 100
 	if freePercent < 10 {
 		m.logger.Warn("Filesystem critically low on space",
@@ -243,8 +243,7 @@ func (m *Manager) checkFilesystemSpace() {
 			"total_mb", float64(totalBytes)/(1024*1024),
 			"free_percent", freePercent)
 
-		// Aggressive emergency thin all queues - keep only 30%
-		for _, q := range m.queues {
+		for _, q := range queues {
 			q.EmergencyThin(0.3)
 		}
 	} else if freePercent < 20 {
@@ -252,8 +251,7 @@ func (m *Manager) checkFilesystemSpace() {
 			"free_mb", float64(freeBytes)/(1024*1024),
 			"free_percent", freePercent)
 
-		// Moderate thinning - keep 50%
-		for _, q := range m.queues {
+		for _, q := range queues {
 			q.EmergencyThin(0.5)
 		}
 	} else {

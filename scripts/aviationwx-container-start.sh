@@ -2,7 +2,7 @@
 # AviationWX.org Bridge - Container Startup
 # Started by systemd after boot-update; also used by aviationwx-supervisor.sh on update/rollback.
 # Optional first argument: image tag to run (defaults to /data/aviationwx/last-known-good.txt).
-# Version: 2.1
+# Version: 2.2
 # Features: Dynamic resource limits; optional image tag; /readyz healthcheck; TCP keepalive sysctls
 
 set -euo pipefail
@@ -104,11 +104,36 @@ calculate_cpu_limits() {
 # MAIN STARTUP
 # ============================================================================
 
+# resolve_start_version maps floating tags to a concrete tag for docker pull (GitHub for latest).
+resolve_start_version() {
+    local requested="$1"
+    if [[ "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]]; then
+        echo "$requested"
+        return 0
+    fi
+    if [ "$requested" = "edge" ]; then
+        echo "edge"
+        return 0
+    fi
+    if [ -x /usr/local/bin/aviationwx-supervisor.sh ]; then
+        local resolved
+        resolved=$(BOOT_MODE=watchdog /usr/local/bin/aviationwx-supervisor.sh print-target-version 2>/dev/null) || true
+        if [ -n "$resolved" ]; then
+            echo "[$(date -Iseconds)] Resolved floating tag to GitHub release: $resolved" >&2
+            echo "$resolved"
+            return 0
+        fi
+    fi
+    echo "${requested:-latest}"
+}
+
 # Version: optional first argument (supervisor update), else last-known-good from boot-update.
-VERSION="${1:-}"
-if [ -z "$VERSION" ]; then
-    VERSION=$(cat "${DATA_DIR}/last-known-good.txt" 2>/dev/null || echo "latest")
+REQUESTED_VERSION="${1:-}"
+if [ -z "$REQUESTED_VERSION" ]; then
+    REQUESTED_VERSION=$(cat "${DATA_DIR}/last-known-good.txt" 2>/dev/null || echo "latest")
 fi
+echo "$REQUESTED_VERSION" > "${DATA_DIR}/configured-image-tag.txt"
+VERSION=$(resolve_start_version "$REQUESTED_VERSION")
 
 # Detect system resources
 TOTAL_MEMORY_MB=$(get_total_memory_mb)
@@ -130,6 +155,12 @@ echo "  Docker CPU Limit: ${DOCKER_CPUS} CPUs"
 echo "  CPU Shares: ${CPU_SHARES}"
 
 echo "[$(date -Iseconds)] Starting container with version: $VERSION"
+
+echo "[$(date -Iseconds)] Pulling ${IMAGE_NAME}:${VERSION}..."
+if ! docker pull "${IMAGE_NAME}:${VERSION}"; then
+    echo "[$(date -Iseconds)] ERROR: failed to pull ${IMAGE_NAME}:${VERSION}" >&2
+    exit 1
+fi
 
 # Remove existing container if present
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
@@ -164,7 +195,7 @@ docker run -d \
     --sysctl net.ipv4.tcp_keepalive_probes=6 \
     \
     `# Health check` \
-    --health-cmd='wget --no-verbose --tries=1 --spider http://localhost:1229/readyz || exit 1' \
+    --health-cmd='wget --no-verbose --tries=1 --spider http://127.0.0.1:1229/readyz || exit 1' \
     --health-interval=30s \
     --health-timeout=5s \
     --health-start-period=30s \

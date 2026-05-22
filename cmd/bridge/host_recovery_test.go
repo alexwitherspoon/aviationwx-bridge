@@ -38,3 +38,30 @@ func TestReadRecoveryExhausted(t *testing.T) {
 		t.Fatalf("exhausted: got %v", got["exhausted"])
 	}
 }
+
+func TestReadHostDataLabel(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AVIATIONWX_DATA_DIR", dir)
+
+	if got := readHostDataLabel("configured-image-tag.txt"); got != "" {
+		t.Fatalf("missing file: got %q want empty", got)
+	}
+
+	path := filepath.Join(dir, "configured-image-tag.txt")
+	if err := os.WriteFile(path, []byte("  latest \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readHostDataLabel("configured-image-tag.txt"); got != "latest" {
+		t.Fatalf("got %q want latest", got)
+	}
+}
+
+func TestHostDataDir_prefersAviationwxDataDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AVIATIONWX_DATA_DIR", dir)
+	t.Setenv("AVIATIONWX_CONFIG_DIR", t.TempDir())
+
+	if got := hostDataDir(); got != dir {
+		t.Fatalf("hostDataDir() = %q want %q", got, dir)
+	}
+}

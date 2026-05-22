@@ -253,8 +253,8 @@ install_host_scripts() {
         chmod +x "/usr/local/bin/${script}"
     done
 
-    # Create initial host version file
-    echo "2.0" > "${DATA_DIR}/host-version.txt"
+    # Host version tracks supervisor release (see aviationwx-supervisor.sh SCRIPT_VERSION)
+    echo "2.2" > "${DATA_DIR}/host-version.txt"
 
     log_success "Host scripts installed"
 }
@@ -436,23 +436,42 @@ bootstrap_container() {
     migrate_from_old_container
     
     log_info "Running initial boot-update..."
-    
-    # Initialize last-known-good to latest (container-start uses this)
-    echo "latest" > "${DATA_DIR}/last-known-good.txt"
-    
-    # Run boot-update (may fail to parse release; that's ok - we use "latest")
+
+    # Seed last-known-good from GitHub (not the Docker "latest" tag)
+    local target_version=""
+    if target_version=$(BOOT_MODE=watchdog /usr/local/bin/aviationwx-supervisor.sh print-target-version 2>/dev/null) \
+        && [[ "$target_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$target_version" > "${DATA_DIR}/last-known-good.txt"
+        log_info "Resolved latest release from GitHub: $target_version"
+    else
+        log_warn "Could not resolve release from GitHub; boot-update will determine version"
+    fi
+
     /usr/local/bin/aviationwx-supervisor.sh boot-update || true
-    
-    # Start container (boot-update doesn't start it; container-start does)
-    log_info "Starting bridge container..."
-    /usr/local/bin/aviationwx-container-start.sh
+
+    if docker ps --filter "name=${CONTAINER_NAME}" --format '{{.Names}}' 2>/dev/null | grep -qx "${CONTAINER_NAME}"; then
+        log_info "Container already running after boot-update"
+    else
+        log_info "Starting bridge container..."
+        local start_version
+        start_version=$(cat "${DATA_DIR}/last-known-good.txt" 2>/dev/null || true)
+        if [ -z "$start_version" ] || [ "$start_version" = "latest" ] || [ "$start_version" = "edge" ]; then
+            start_version=$(BOOT_MODE=watchdog /usr/local/bin/aviationwx-supervisor.sh print-target-version 2>/dev/null || true)
+        fi
+        if [ -n "$start_version" ]; then
+            /usr/local/bin/aviationwx-container-start.sh "$start_version"
+        else
+            log_error "Cannot start container: could not resolve version from GitHub"
+            return 1
+        fi
+    fi
     
     # Wait for container to be healthy
     log_info "Waiting for bridge to start..."
     local attempts=0
     local max_attempts=30
     while [[ $attempts -lt $max_attempts ]]; do
-        if curl -sf "http://localhost:${WEB_PORT}/readyz" > /dev/null 2>&1; then
+        if curl -sf "http://127.0.0.1:${WEB_PORT}/readyz" > /dev/null 2>&1; then
             log_success "Bridge is running and capture-ready"
             return 0
         fi

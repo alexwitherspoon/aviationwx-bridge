@@ -222,10 +222,19 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if s.getStatus == nil {
+		http.Error(w, "Status not available", http.StatusServiceUnavailable)
+		return
+	}
 
-	status := s.getStatus()
+	status, ok := runWithTimeout(10*time.Second, s.getStatus)
+	if !ok {
+		http.Error(w, "Status temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -761,12 +770,13 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok, reason := s.getCaptureReadiness()
+	// Finish before Docker health timeout (5s) even under load.
+	ok, reason, completed := runReadinessWithTimeout(4*time.Second, s.getCaptureReadiness)
 	body := map[string]interface{}{
 		"status":    "ready",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-	if !ok {
+	if !completed || !ok {
 		body["status"] = "not_ready"
 		if reason != "" {
 			body["reason"] = reason
@@ -789,7 +799,10 @@ func (s *Server) buildHealthStatus() map[string]interface{} {
 	}
 
 	if s.getStatus != nil {
-		hi := extractHealthIndicators(s.getStatus())
+		var hi healthIndicators
+		if status, ok := runWithTimeout(5*time.Second, s.getStatus); ok {
+			hi = extractHealthIndicators(status)
+		}
 		details := []string{}
 
 		if hi.orchestratorPresent && !hi.orchestratorRunning {

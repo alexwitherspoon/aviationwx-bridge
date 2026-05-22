@@ -53,10 +53,40 @@ const TIMEZONES = [
 /** Default web console listen port (matches bridge default when unset on disk). */
 const DEFAULT_WEB_CONSOLE_PORT = 1229;
 
+const WEB_AUTH_STORAGE_KEY = 'aviationwx_web_password';
+
+function getWebPassword() {
+    return sessionStorage.getItem(WEB_AUTH_STORAGE_KEY) || '';
+}
+
+function setWebPassword(password) {
+    sessionStorage.setItem(WEB_AUTH_STORAGE_KEY, String(password).trim());
+}
+
+function authHeaders() {
+    const password = getWebPassword();
+    if (!password) {
+        return {};
+    }
+    return { Authorization: 'Basic ' + btoa('admin:' + password) };
+}
+
+async function ensureAuth() {
+    if (getWebPassword()) {
+        return;
+    }
+    const entered = window.prompt('Web console password:', 'aviationwx');
+    if (entered === null) {
+        return;
+    }
+    setWebPassword(entered);
+}
+
 // Initialize application
 document.addEventListener('DOMContentLoaded', async () => {
     setupNavigation();
     populateTimezones();
+    await ensureAuth();
     await refreshStatus();
     await loadConfig();
     await loadCameras();
@@ -126,6 +156,7 @@ async function api(endpoint, options = {}) {
         credentials: 'same-origin',
         headers: {
             'Content-Type': 'application/json',
+            ...authHeaders(),
             ...options.headers,
         },
     });
@@ -142,11 +173,15 @@ async function refreshStatus() {
     try {
         status = await api('/status');
         updateStatusDisplay();
-        document.getElementById('statusDot').classList.add('connected');
+        const dot = document.getElementById('statusDot');
+        dot.classList.remove('error');
+        dot.classList.add('connected');
         document.getElementById('statusText').textContent = 'Connected';
     } catch (err) {
         console.error('Failed to fetch status:', err);
-        document.getElementById('statusDot').classList.add('error');
+        const dot = document.getElementById('statusDot');
+        dot.classList.remove('connected');
+        dot.classList.add('error');
         document.getElementById('statusText').textContent = 'Disconnected';
     }
 }
@@ -196,6 +231,14 @@ function updateStatusDisplay() {
             ? '<span style="background: #f59e0b; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 0.75em; margin-left: 4px;">EDGE</span>'
             : '<span style="background: #10b981; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 0.75em; margin-left: 4px;">LATEST</span>';
         versionEl.innerHTML = `v${status.version} ${channelBadge}`;
+        const localTag = status.configured_image_tag || status.last_known_good;
+        if (localTag && localTag !== status.version) {
+            const tagNote = document.createElement('span');
+            tagNote.style.opacity = '0.85';
+            tagNote.style.fontSize = '0.85em';
+            tagNote.textContent = ` (tag: ${localTag})`;
+            versionEl.appendChild(tagNote);
+        }
     }
     
     // Update available notification
@@ -595,21 +638,28 @@ function startTimeUpdates() {
     timeUpdateInterval = setInterval(updateTimeDisplay, 1000);
 }
 
+let refreshDelayMs = 5000;
+let refreshFailures = 0;
+
 function startAutoRefresh() {
-    // Refresh status and cameras every second for live countdown/status updates
-    setInterval(async () => {
+    const tick = async () => {
         try {
             await refreshStatus();
-            
-            // Only refresh camera list if on dashboard or cameras page
+
             const activeSection = document.querySelector('.section.active');
             if (activeSection && (activeSection.id === 'dashboard' || activeSection.id === 'cameras')) {
                 await loadCameras();
             }
+            refreshFailures = 0;
+            refreshDelayMs = 5000;
         } catch (error) {
             console.error('Auto-refresh error:', error);
+            refreshFailures++;
+            refreshDelayMs = Math.min(30000, 5000 * (2 ** Math.min(refreshFailures, 3)));
         }
-    }, 1000);
+        setTimeout(tick, refreshDelayMs);
+    };
+    tick();
 }
 
 function updateTimeDisplay() {
@@ -1119,7 +1169,7 @@ async function testCamera() {
         const response = await fetch('/api/test/camera', {
             method: 'POST',
             credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
             body: JSON.stringify(camera),
         });
 
@@ -1454,7 +1504,8 @@ function startLiveLogs() {
         
         try {
             const response = await fetch('/api/logs?tail=100', {
-                credentials: 'same-origin'
+                credentials: 'same-origin',
+                headers: authHeaders(),
             });
             
             if (response.ok) {

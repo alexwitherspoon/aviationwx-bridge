@@ -53,10 +53,72 @@ const TIMEZONES = [
 /** Default web console listen port (matches bridge default when unset on disk). */
 const DEFAULT_WEB_CONSOLE_PORT = 1229;
 
+const WEB_AUTH_STORAGE_KEY = 'aviationwx_web_password';
+
+function getWebPassword() {
+    return sessionStorage.getItem(WEB_AUTH_STORAGE_KEY) || '';
+}
+
+function setWebPassword(password) {
+    sessionStorage.setItem(WEB_AUTH_STORAGE_KEY, String(password));
+}
+
+function clearWebPassword() {
+    sessionStorage.removeItem(WEB_AUTH_STORAGE_KEY);
+}
+
+function authHeaders() {
+    const password = getWebPassword();
+    if (!password) {
+        return {};
+    }
+    const encode = window.encodeBasicAuthHeader;
+    if (!encode) {
+        return {};
+    }
+    return { Authorization: encode('admin', password) };
+}
+
+async function promptForWebPassword() {
+    const entered = window.prompt('Web console password:', 'aviationwx');
+    if (entered === null) {
+        return false;
+    }
+    setWebPassword(entered);
+    return true;
+}
+
+async function ensureAuth() {
+    if (getWebPassword()) {
+        return;
+    }
+    await promptForWebPassword();
+}
+
+/** fetch with Basic Auth; on 401 clears cached password, re-prompts, and retries once. */
+async function fetchWithAuth(url, options = {}, retried = false) {
+    const response = await fetch(url, {
+        ...options,
+        credentials: 'same-origin',
+        headers: {
+            ...options.headers,
+            ...authHeaders(),
+        },
+    });
+    if (response.status === 401 && !retried) {
+        clearWebPassword();
+        if (await promptForWebPassword()) {
+            return fetchWithAuth(url, options, true);
+        }
+    }
+    return response;
+}
+
 // Initialize application
 document.addEventListener('DOMContentLoaded', async () => {
     setupNavigation();
     populateTimezones();
+    await ensureAuth();
     await refreshStatus();
     await loadConfig();
     await loadCameras();
@@ -121,33 +183,39 @@ function showSection(sectionId) {
 // API calls
 async function api(endpoint, options = {}) {
     const url = `/api${endpoint}`;
-    const response = await fetch(url, {
+    const response = await fetchWithAuth(url, {
         ...options,
-        credentials: 'same-origin',
         headers: {
             'Content-Type': 'application/json',
             ...options.headers,
         },
     });
-    
+
     if (!response.ok) {
         const error = await response.text();
         throw new Error(error || `HTTP ${response.status}`);
     }
-    
+
     return response.json();
 }
 
+/** @returns {Promise<boolean>} true when status was loaded */
 async function refreshStatus() {
     try {
         status = await api('/status');
         updateStatusDisplay();
-        document.getElementById('statusDot').classList.add('connected');
+        const dot = document.getElementById('statusDot');
+        dot.classList.remove('error');
+        dot.classList.add('connected');
         document.getElementById('statusText').textContent = 'Connected';
+        return true;
     } catch (err) {
         console.error('Failed to fetch status:', err);
-        document.getElementById('statusDot').classList.add('error');
+        const dot = document.getElementById('statusDot');
+        dot.classList.remove('connected');
+        dot.classList.add('error');
         document.getElementById('statusText').textContent = 'Disconnected';
+        return false;
     }
 }
 
@@ -196,6 +264,14 @@ function updateStatusDisplay() {
             ? '<span style="background: #f59e0b; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 0.75em; margin-left: 4px;">EDGE</span>'
             : '<span style="background: #10b981; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 0.75em; margin-left: 4px;">LATEST</span>';
         versionEl.innerHTML = `v${status.version} ${channelBadge}`;
+        const localTag = status.configured_image_tag || status.last_known_good;
+        if (localTag && localTag !== status.version) {
+            const tagNote = document.createElement('span');
+            tagNote.style.opacity = '0.85';
+            tagNote.style.fontSize = '0.85em';
+            tagNote.textContent = ` (tag: ${localTag})`;
+            versionEl.appendChild(tagNote);
+        }
     }
     
     // Update available notification
@@ -595,21 +671,30 @@ function startTimeUpdates() {
     timeUpdateInterval = setInterval(updateTimeDisplay, 1000);
 }
 
+let refreshDelayMs = 5000;
+let refreshFailures = 0;
+
 function startAutoRefresh() {
-    // Refresh status and cameras every second for live countdown/status updates
-    setInterval(async () => {
+    const tick = async () => {
         try {
-            await refreshStatus();
-            
-            // Only refresh camera list if on dashboard or cameras page
+            if (!(await refreshStatus())) {
+                throw new Error('status refresh failed');
+            }
+
             const activeSection = document.querySelector('.section.active');
             if (activeSection && (activeSection.id === 'dashboard' || activeSection.id === 'cameras')) {
                 await loadCameras();
             }
+            refreshFailures = 0;
+            refreshDelayMs = 5000;
         } catch (error) {
             console.error('Auto-refresh error:', error);
+            refreshFailures++;
+            refreshDelayMs = Math.min(30000, 5000 * (2 ** Math.min(refreshFailures, 3)));
         }
-    }, 1000);
+        setTimeout(tick, refreshDelayMs);
+    };
+    tick();
 }
 
 function updateTimeDisplay() {
@@ -1116,9 +1201,8 @@ async function testCamera() {
     }
 
     try {
-        const response = await fetch('/api/test/camera', {
+        const response = await fetchWithAuth('/api/test/camera', {
             method: 'POST',
-            credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(camera),
         });
@@ -1453,9 +1537,7 @@ function startLiveLogs() {
         if (logsPaused) return;
         
         try {
-            const response = await fetch('/api/logs?tail=100', {
-                credentials: 'same-origin'
-            });
+            const response = await fetchWithAuth('/api/logs?tail=100');
             
             if (response.ok) {
                 const logs = await response.text();

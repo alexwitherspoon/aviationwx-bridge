@@ -141,3 +141,20 @@ export function findConflictingCameraId(cameraList, excludeId, host, port, usern
     }
     return null;
 }
+
+/**
+ * encodeBasicAuthHeader returns an HTTP Basic Authorization header value.
+ * Uses UTF-8 so passwords outside Latin-1 work (btoa alone throws on Unicode).
+ * @param {string} username
+ * @param {string} password
+ * @returns {string}
+ */
+export function encodeBasicAuthHeader(username, password) {
+    const credentials = `${username}:${password}`;
+    const bytes = new TextEncoder().encode(credentials);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return 'Basic ' + btoa(binary);
+}

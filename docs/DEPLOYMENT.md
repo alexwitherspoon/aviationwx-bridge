@@ -62,7 +62,7 @@ Install enables layered recovery instead of a blind daily container restart:
 
 Docker health checks use **`/readyz`** so an alive but non-capturing container is unhealthy.
 
-Legacy `daily-restart.sh` (3 AM cron) is **deprecated**. Do not add a nightly restart unless you have a specific ops reason; capture-restart targets stale state without disrupting healthy sites.
+Do not add a nightly container restart cron unless you have a specific ops reason; capture-restart targets stale state without disrupting healthy sites.
 
 **Existing Pis:** `aviationwx-capture-restart.timer` is enabled automatically on the next `boot-update` / daily update once supervisor v2.2+ is deployed (no `install.sh` rerun). Verify with `systemctl is-enabled aviationwx-capture-restart.timer`.
 
@@ -70,17 +70,19 @@ Legacy `daily-restart.sh` (3 AM cron) is **deprecated**. Do not add a nightly re
 
 **Manual update:**
 ```bash
-sudo /usr/local/bin/aviationwx-supervisor update
+sudo aviationwx update
 ```
+
+Supervisor **upgrade checks** compare the running bridge semver and the **GitHub release** for your channel (not the Docker `:latest` tag alone). The web UI still shows the configured local image tag from `configured-image-tag.txt` / `last-known-good.txt` when it differs from the running version.
 
 **Check status:**
 ```bash
-sudo /usr/local/bin/aviationwx-supervisor status
+sudo /usr/local/bin/aviationwx-supervisor.sh status
 ```
 
-**Rollback:**
+**Rollback** (recreate container from last-known-good):
 ```bash
-sudo /usr/local/bin/aviationwx-supervisor rollback
+sudo /usr/local/bin/aviationwx-container-start.sh "$(cat /data/aviationwx/last-known-good.txt)"
 ```
 
 ---
@@ -338,7 +340,7 @@ sudo nano /data/aviationwx/environment
 AVIATIONWX_TMPFS_SIZE=300m
 
 # Restart to apply (uses supervisor to recreate container)
-sudo /usr/local/bin/aviationwx-supervisor update
+sudo /usr/local/bin/aviationwx-supervisor.sh force-update
 ```
 
 #### Docker Run

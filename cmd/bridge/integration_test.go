@@ -158,7 +158,7 @@ func TestWebServerAPIWithConfigService(t *testing.T) {
 	fakeJPEG := []byte{0xFF, 0xD8, 0xFF, 0xD9}
 	bridge.webServer = web.NewServer(web.ServerConfig{
 		ConfigService:   svc,
-		GetStatus:       bridge.getStatus,
+		GetStatus:       bridge.getStatusCached,
 		GetWorkerStatus: bridge.getWorkerStatus,
 		TestCamera: func(c config.Camera) ([]byte, error) {
 			if c.Type == "http" && c.SnapshotURL != "" {

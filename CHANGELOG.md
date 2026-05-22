@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **Repo**: Unused legacy host scripts `scripts/supervisor.sh` (v1 supervisor) and `scripts/daily-restart.sh` (pre-watchdog cron restart). Production uses `aviationwx-supervisor.sh` and capture-restart instead.
+
+### Fixed
+- **Updates**: Upgrade decisions resolve installed semver from the running binary (not Docker `:latest` alone); GitHub remains target source of truth. UI and status show local image tag / `last-known-good` from file; install and container-start pull resolved semver before start.
+- **Web/API**: `/readyz` uses a lightweight capture snapshot (no global queue stats); `/api/status` and `/healthz` time out instead of hanging; status responses are coalesced (500ms) to survive UI poll storms.
+- **Web UI**: Sends HTTP Basic Auth on API calls; dashboard refresh backs off on failures (5s–30s) instead of every 1s.
+- **Queue**: Emergency thinning no longer holds the queue manager mutex (unblocks status/readyz during cleanup).
+- **Docker**: Healthcheck probes `http://127.0.0.1:1229/readyz` (avoids `localhost` → IPv6 connect timeouts).
+
 ## [2.9.0] - 2026-05-21
 
 ### Added

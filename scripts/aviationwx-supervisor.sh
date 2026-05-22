@@ -18,6 +18,7 @@ readonly SCRIPTS_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main
 readonly MIN_RELEASE_AGE_HOURS=2
 readonly SKIP_PRERELEASE=true
 readonly PULL_TIMEOUT=600  # 10 minutes for slow connections (Pi Zero)
+readonly EXEC_TIMEOUT=15   # bound docker exec for version probe
 
 # Dry-run mode for testing
 readonly DRY_RUN="${AVIATIONWX_DRY_RUN:-false}"
@@ -232,11 +233,81 @@ EOF
 # VERSION DETECTION
 # ============================================================================
 
-get_current_version() {
-    if docker inspect "$CONTAINER_NAME" --format='{{.Config.Image}}' 2>/dev/null | grep -Fq 'aviationwx-org-bridge'; then
-        docker inspect "$CONTAINER_NAME" --format='{{.Config.Image}}' | cut -d: -f2
+# is_semver_tag reports whether the value is a concrete release (e.g. 2.9.0).
+is_semver_tag() {
+    [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]]
+}
+
+# is_floating_image_tag is true for Docker tags that do not pin a release (latest, edge).
+is_floating_image_tag() {
+    case "$1" in
+        latest|edge|"") return 0 ;;
+    esac
+    is_semver_tag "$1" && return 1
+    return 0
+}
+
+# get_container_image_tag returns the Docker image tag (may be "latest", not a semver).
+get_container_image_tag() {
+    local image
+    image=$(docker inspect "$CONTAINER_NAME" --format='{{.Config.Image}}' 2>/dev/null) || return 1
+    if [[ ! "$image" == *aviationwx-org-bridge* ]]; then
+        return 1
+    fi
+    if [[ "$image" == *@sha256:* ]]; then
+        echo "unknown"
+        return 0
+    fi
+    echo "${image##*:}"
+}
+
+# get_running_bridge_version returns the semver compiled into the running container.
+get_running_bridge_version() {
+    if ! docker ps --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER_NAME"; then
+        return 1
+    fi
+    local ver
+    ver=$(timeout "$EXEC_TIMEOUT" docker exec "$CONTAINER_NAME" /usr/local/bin/bridge -version 2>/dev/null | awk '{print $1}') || return 1
+    if is_semver_tag "$ver"; then
+        echo "$ver"
+        return 0
+    fi
+    return 1
+}
+
+# get_last_known_good_label returns last-known-good.txt as stored (may be "latest"; for display).
+get_last_known_good_label() {
+    cat "${DATA_DIR}/last-known-good.txt" 2>/dev/null || echo "none"
+}
+
+# get_installed_version_for_update resolves the semver used when deciding whether to upgrade.
+# Uses running binary and GitHub target semantics, not floating Docker tags or stale files alone.
+get_installed_version_for_update() {
+    local running
+    running=$(get_running_bridge_version 2>/dev/null) || running=""
+    if [ -n "$running" ]; then
+        echo "$running"
+        return 0
+    fi
+
+    local tag
+    tag=$(get_container_image_tag 2>/dev/null) || tag=""
+    if is_semver_tag "$tag"; then
+        echo "$tag"
+        return 0
+    fi
+
+    local lkg
+    lkg=$(get_last_known_good_label)
+    if is_semver_tag "$lkg"; then
+        echo "$lkg"
+        return 0
+    fi
+
+    if [ -n "$tag" ] && [ "$tag" != "unknown" ]; then
+        echo "$tag"
     else
-        cat "${DATA_DIR}/last-known-good.txt" 2>/dev/null || echo "unknown"
+        echo "unknown"
     fi
 }
 
@@ -273,7 +344,7 @@ get_latest_release_json() {
     done
 
     if [ -f "$cache_file" ]; then
-        log_event "WARN" "GitHub API unavailable, using stale cache"
+        log_event "WARN" "GitHub API unavailable, using stale cache" >&2
         cat "$cache_file"
         return 0
     fi
@@ -757,13 +828,19 @@ boot_update() {
         return 0
     }
     
-    # Step 5: Check if update needed
-    local current_version
-    current_version=$(get_current_version)
-    
-    log_event "INFO" "Current: $current_version, Target: $target_version"
-    
-    if [ "$target_version" = "$current_version" ]; then
+    # Step 5: Upgrade decision (resolved install version vs GitHub target; not Docker :latest alone)
+    local installed_version image_tag lkg_label
+    installed_version=$(get_installed_version_for_update)
+    image_tag=$(get_container_image_tag 2>/dev/null || echo "none")
+    lkg_label=$(get_last_known_good_label)
+
+    if is_floating_image_tag "$image_tag"; then
+        log_event "INFO" "Upgrade check: installed=$installed_version target=$target_version (GitHub) local_tag=$image_tag last_known_good=$lkg_label"
+    else
+        log_event "INFO" "Upgrade check: installed=$installed_version target=$target_version local_tag=$image_tag"
+    fi
+
+    if [ "$target_version" = "$installed_version" ]; then
         log_event "INFO" "Already on target version"
         return 0
     fi
@@ -778,7 +855,7 @@ boot_update() {
     if pull_and_validate_update "$target_version"; then
         # Success - record as last known good
         echo "$target_version" > "${DATA_DIR}/last-known-good.txt"
-        log_event "SUCCESS" "Updated: $current_version → $target_version"
+        log_event "SUCCESS" "Updated: $installed_version → $target_version"
     else
         # Failed - rollback
         log_event "ERROR" "Update failed, rolling back"
@@ -800,6 +877,7 @@ Commands:
   boot-update          Run update check at boot time
   daily-update         Run daily update check (same as boot-update)
   force-update         Force update (ignores cache, age checks)
+  print-target-version Print channel target version from GitHub (stdout only)
   status               Show current status
 
 Environment:
@@ -838,11 +916,19 @@ main() {
             export AVIATIONWX_SKIP_AGE_CHECK=true
             boot_update
             ;;
+        print-target-version)
+            local channel
+            channel=$(get_update_channel)
+            determine_target_version "$channel"
+            ;;
         status)
             echo "Supervisor version: v$SCRIPT_VERSION"
-            echo "Container version: $(get_current_version)"
+            echo "Container image tag: $(get_container_image_tag 2>/dev/null || echo 'none')"
+            echo "Last known good (file): $(get_last_known_good_label)"
             echo "Update channel: $(get_update_channel)"
-            echo "Last known good: $(cat "${DATA_DIR}/last-known-good.txt" 2>/dev/null || echo 'none')"
+            if docker ps --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER_NAME"; then
+                echo "Running bridge version: $(get_running_bridge_version 2>/dev/null || echo 'unknown')"
+            fi
             ;;
         *)
             usage

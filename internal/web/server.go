@@ -22,6 +22,12 @@ import (
 //go:embed static/*
 var staticFiles embed.FS
 
+// healthStatusCollectTimeout bounds getStatus() in /healthz (overridable in tests).
+var healthStatusCollectTimeout = 5 * time.Second
+
+// statusAPICollectTimeout bounds getStatus() in /api/status (overridable in tests).
+var statusAPICollectTimeout = 10 * time.Second
+
 // normalizeUploadForAPI trims upload host/username/password, lowercases host, and applies the
 // default host when the trimmed value is empty so SFTP identity keys stay consistent.
 func normalizeUploadForAPI(u *config.Upload) {
@@ -222,10 +228,19 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if s.getStatus == nil {
+		http.Error(w, "Status not available", http.StatusServiceUnavailable)
+		return
+	}
 
-	status := s.getStatus()
+	status, ok := runWithTimeout(statusAPICollectTimeout, s.getStatus)
+	if !ok || status == nil {
+		http.Error(w, "Status temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -761,12 +776,13 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok, reason := s.getCaptureReadiness()
+	// Finish before Docker health timeout (5s) even under load.
+	ok, reason, completed := runReadinessWithTimeout(4*time.Second, s.getCaptureReadiness)
 	body := map[string]interface{}{
 		"status":    "ready",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-	if !ok {
+	if !completed || !ok {
 		body["status"] = "not_ready"
 		if reason != "" {
 			body["reason"] = reason
@@ -789,8 +805,17 @@ func (s *Server) buildHealthStatus() map[string]interface{} {
 	}
 
 	if s.getStatus != nil {
-		hi := extractHealthIndicators(s.getStatus())
+		var hi healthIndicators
 		details := []string{}
+		if status, ok := runWithTimeout(healthStatusCollectTimeout, s.getStatus); ok && status != nil {
+			hi = extractHealthIndicators(status)
+		} else if !ok {
+			health["status"] = "degraded"
+			details = append(details, "status collection timed out")
+		} else {
+			health["status"] = "degraded"
+			details = append(details, "status unavailable")
+		}
 
 		if hi.orchestratorPresent && !hi.orchestratorRunning {
 			health["status"] = "degraded"

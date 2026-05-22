@@ -34,6 +34,13 @@ load test_helper
 	[ "$(jq -r .consecutive_unreachable "$STATE_FILE")" = "1" ]
 }
 
+@test "connection failure (000000) increments consecutive_unreachable" {
+	echo '{"consecutive_unready":0,"consecutive_unreachable":0,"recent_restarts":[]}' >"$STATE_FILE"
+	MOCK_HTTP_CODE=000000 run bash "$SCRIPT"
+	[ "$status" -eq 0 ]
+	[ "$(jq -r .consecutive_unreachable "$STATE_FILE")" = "1" ]
+}
+
 @test "corrupt state file is reset then 200 persists valid JSON" {
 	echo 'not json at all' >"$STATE_FILE"
 	MOCK_HTTP_CODE=200 run bash "$SCRIPT"
@@ -85,6 +92,8 @@ load test_helper
 }
 
 @test "503 streak counter clamps at threshold" {
+	# Streak already at threshold; one more 503 would be 6 but clamp_streak caps at 5.
+	# Six recent restarts block docker restart — state must keep clamped value (not reset to 0).
 	local now
 	now=$(date +%s)
 	local restarts

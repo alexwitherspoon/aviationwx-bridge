@@ -74,7 +74,7 @@ EXPOSE 1229
 # - retries: Mark unhealthy after 3 consecutive failures (90 seconds total)
 # Triggers: Container marked unhealthy → systemd can restart if configured
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:1229/readyz || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:1229/readyz || exit 1
 
 # Environment variables for configuration
 # AVIATIONWX_CONFIG_DIR: Base directory for config files (v2.0+)

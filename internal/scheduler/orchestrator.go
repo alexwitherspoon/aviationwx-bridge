@@ -439,14 +439,51 @@ func (o *Orchestrator) Stop() {
 	o.logger.Info("Orchestrator stopped")
 }
 
-// GetStatus returns the current orchestrator status
+// GetCaptureReadinessPoints returns minimal capture state for /readyz without global queue stats.
+func (o *Orchestrator) GetCaptureReadinessPoints() (running bool, uptime time.Duration, points []CaptureReadinessPoint) {
+	o.mu.RLock()
+	running = o.ctx.Err() == nil
+	if !o.startTime.IsZero() {
+		uptime = time.Since(o.startTime)
+	}
+	workers := make(map[string]*CaptureWorker, len(o.captureWorkers))
+	for cameraID, worker := range o.captureWorkers {
+		workers[cameraID] = worker
+	}
+	o.mu.RUnlock()
+
+	points = make([]CaptureReadinessPoint, 0, len(workers))
+	for cameraID, worker := range workers {
+		lastSuccess, interval := worker.GetReadinessPoint()
+		points = append(points, CaptureReadinessPoint{
+			CameraID:    cameraID,
+			Interval:    interval,
+			LastSuccess: lastSuccess,
+		})
+	}
+	return running, uptime, points
+}
+
+// GetStatus returns the current orchestrator status.
+// Worker and queue stats are collected without holding the orchestrator lock to avoid
+// blocking hot-reload or stalling HTTP handlers during queue maintenance.
 func (o *Orchestrator) GetStatus() OrchestratorStatus {
 	o.mu.RLock()
-	defer o.mu.RUnlock()
-
-	// Gather camera stats
-	cameraStats := make([]CameraStatus, 0, len(o.captureWorkers))
+	running := o.ctx.Err() == nil
+	var uptime time.Duration
+	if !o.startTime.IsZero() {
+		uptime = time.Since(o.startTime)
+	}
+	workers := make(map[string]*CaptureWorker, len(o.captureWorkers))
 	for cameraID, worker := range o.captureWorkers {
+		workers[cameraID] = worker
+	}
+	uploadWorker := o.uploadWorker
+	authority := o.authority
+	o.mu.RUnlock()
+
+	cameraStats := make([]CameraStatus, 0, len(workers))
+	for cameraID, worker := range workers {
 		q, ok := o.queueManager.GetQueue(cameraID)
 		if !ok {
 			continue
@@ -456,35 +493,39 @@ func (o *Orchestrator) GetStatus() OrchestratorStatus {
 		queueStats := q.GetStats()
 		state := worker.GetState()
 
+		var lastErr *CameraLastError
+		if state.LastError != nil {
+			if msg := state.LastError.Error(); msg != "" {
+				lastErr = &CameraLastError{Message: msg}
+			}
+		}
+
 		cameraStats = append(cameraStats, CameraStatus{
 			CameraID:     cameraID,
 			CaptureStats: captureStats,
 			QueueStats:   queueStats,
 			LastSuccess:  state.LastSuccess,
-			LastError:    state.LastError,
+			LastError:    lastErr,
 			IsBackingOff: state.IsBackingOff,
 		})
 	}
 
-	// Gather upload stats
 	var uploadStats UploadStats
-	if o.uploadWorker != nil {
-		uploadStats = o.uploadWorker.GetStats()
+	if uploadWorker != nil {
+		uploadStats = uploadWorker.GetStats()
 	}
 
-	// Global queue stats
 	globalQueueStats := o.queueManager.GetGlobalStats()
 
-	// Time info
 	var timeInfo timepkg.TimeInfo
-	if o.authority != nil {
-		timeInfo = o.authority.GetTimeInfo()
+	if authority != nil {
+		timeInfo = authority.GetTimeInfo()
 	}
 
 	return OrchestratorStatus{
-		Running:          o.ctx.Err() == nil,
-		Uptime:           time.Since(o.startTime),
-		CameraCount:      len(o.captureWorkers),
+		Running:          running,
+		Uptime:           uptime,
+		CameraCount:      len(workers),
 		CameraStats:      cameraStats,
 		UploadStats:      uploadStats,
 		GlobalQueueStats: globalQueueStats,
@@ -503,12 +544,24 @@ type OrchestratorStatus struct {
 	TimeInfo         timepkg.TimeInfo       `json:"time_info"`
 }
 
+// CaptureReadinessPoint is a lightweight capture snapshot for /readyz.
+type CaptureReadinessPoint struct {
+	CameraID    string
+	Interval    time.Duration
+	LastSuccess time.Time
+}
+
+// CameraLastError is the capture error shown in the web console (Message matches UI).
+type CameraLastError struct {
+	Message string `json:"Message"`
+}
+
 // CameraStatus represents status for a single camera
 type CameraStatus struct {
 	CameraID     string           `json:"camera_id"`
 	CaptureStats CaptureStats     `json:"capture_stats"`
 	QueueStats   queue.QueueStats `json:"queue_stats"`
 	LastSuccess  time.Time        `json:"last_success"`
-	LastError    error            `json:"last_error,omitempty"`
+	LastError    *CameraLastError `json:"last_error,omitempty"`
 	IsBackingOff bool             `json:"is_backing_off"`
 }

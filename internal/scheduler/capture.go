@@ -174,22 +174,30 @@ func (w *CaptureWorker) GetState() CameraState {
 	return *w.state
 }
 
+// GetReadinessPoint returns capture timing fields for /readyz without touching the queue.
+func (w *CaptureWorker) GetReadinessPoint() (lastSuccess time.Time, interval time.Duration) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.state.LastSuccess, w.interval
+}
+
 // GetStats returns capture statistics
 func (w *CaptureWorker) GetStats() CaptureStats {
 	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return CaptureStats{
+	stats := CaptureStats{
 		CameraID:           w.camera.ID(),
 		CapturesTotal:      w.capturesTotal,
 		CapturesFailed:     w.capturesFailed,
 		ExifReadFailed:     w.exifReadFailed,
 		ExifWriteFailed:    w.exifWriteFailed,
 		Interval:           w.interval,
-		QueuePaused:        w.queue.IsCapturePaused(),
 		NextCaptureTime:    w.nextCaptureTime,
 		CurrentlyCapturing: w.currentlyCapturing,
 		LastCaptureTime:    w.lastCaptureTime,
 	}
+	w.mu.RUnlock()
+	stats.QueuePaused = w.queue.IsCapturePaused()
+	return stats
 }
 
 // CaptureStats provides capture statistics

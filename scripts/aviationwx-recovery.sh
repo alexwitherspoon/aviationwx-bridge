@@ -101,7 +101,7 @@ action_rollback() {
             -p 1229:1229 \
             -v "${DATA_DIR}:/data" \
             --tmpfs /dev/shm:size=200m \
-            --health-cmd='wget --no-verbose --tries=1 --spider http://localhost:1229/readyz || exit 1' \
+            --health-cmd='wget --no-verbose --tries=1 --spider http://127.0.0.1:1229/readyz || exit 1' \
             --health-interval=30s \
             --health-timeout=3s \
             --health-start-period=10s \

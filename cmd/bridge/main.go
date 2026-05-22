@@ -94,6 +94,8 @@ type Bridge struct {
 	// Worker status tracking
 	cameraWorkerStatus map[string]*CameraWorkerStatus
 	workerStatusMu     sync.RWMutex
+
+	statusCache *statusCache
 }
 
 // CameraWorkerStatus tracks the runtime status of a camera worker
@@ -212,6 +214,7 @@ func main() {
 		lastCaptures:       make(map[string]*CachedImage),
 		cameraWorkerStatus: make(map[string]*CameraWorkerStatus),
 	}
+	bridge.statusCache = newStatusCache(500*time.Millisecond, bridge.buildStatus)
 
 	// Initialize orchestrator
 	if err := bridge.initOrchestrator(); err != nil {
@@ -221,7 +224,7 @@ func main() {
 	// Create web server (no callbacks - uses ConfigService directly)
 	bridge.webServer = web.NewServer(web.ServerConfig{
 		ConfigService:       configService,
-		GetStatus:           bridge.getStatus,
+		GetStatus:           bridge.getStatusCached,
 		GetCaptureReadiness: bridge.getCaptureReadiness,
 		TestCamera:          bridge.testCamera,
 		TestUpload:          bridge.testUpload,
@@ -864,8 +867,15 @@ func (b *Bridge) testUpload(uploadConfig config.Upload) error {
 	return nil
 }
 
-// getStatus returns the current bridge status
-func (b *Bridge) getStatus() interface{} {
+func (b *Bridge) getStatusCached() interface{} {
+	if b.statusCache == nil {
+		return b.buildStatus()
+	}
+	return b.statusCache.get()
+}
+
+// buildStatus returns the current bridge status (uncached).
+func (b *Bridge) buildStatus() interface{} {
 	global := b.configService.GetGlobal()
 	cameras := b.configService.ListCameras()
 
@@ -878,8 +888,9 @@ func (b *Bridge) getStatus() interface{} {
 
 	queuedImages := 0
 	uploadsToday := int64(0)
+	var orchStatus scheduler.OrchestratorStatus
 	if b.orchestrator != nil {
-		orchStatus := b.orchestrator.GetStatus()
+		orchStatus = b.orchestrator.GetStatus()
 		for _, camStatus := range orchStatus.CameraStats {
 			queuedImages += camStatus.QueueStats.ImageCount
 		}
@@ -896,8 +907,13 @@ func (b *Bridge) getStatus() interface{} {
 		"queued_images":  queuedImages,
 		"uploads_today":  uploadsToday,
 	}
+	if tag := readHostDataLabel("configured-image-tag.txt"); tag != "" {
+		status["configured_image_tag"] = tag
+	}
+	if lkg := readHostDataLabel("last-known-good.txt"); lkg != "" {
+		status["last_known_good"] = lkg
+	}
 
-	// Add system health if available
 	if b.systemMonitor != nil {
 		sysStats := b.systemMonitor.GetStats()
 		status["system"] = map[string]interface{}{
@@ -912,13 +928,10 @@ func (b *Bridge) getStatus() interface{} {
 		}
 	}
 
-	// Add orchestrator status with detailed camera stats
 	if b.orchestrator != nil {
-		orchStatus := b.orchestrator.GetStatus()
 		status["orchestrator"] = orchStatus
 	}
 
-	// Add time health if available
 	if b.timeHealth != nil {
 		timeStatus := b.timeHealth.GetStatus()
 		th := map[string]interface{}{
@@ -932,7 +945,6 @@ func (b *Bridge) getStatus() interface{} {
 		status["time_health"] = th
 	}
 
-	// Add update checker status if available
 	if b.updateChecker != nil {
 		updateStatus := b.updateChecker.Status()
 		status["update"] = map[string]interface{}{
@@ -970,7 +982,23 @@ func (b *Bridge) getCaptureReadiness() (bool, string) {
 		return readinessWithNilOrchestrator(hasEnabled)
 	}
 
-	return evalCaptureReadiness(grace, minStale, b.orchestrator.GetStatus(), time.Now())
+	running, uptime, points := b.orchestrator.GetCaptureReadinessPoints()
+	orch := scheduler.OrchestratorStatus{
+		Running:     running,
+		Uptime:      uptime,
+		CameraCount: len(points),
+		CameraStats: make([]scheduler.CameraStatus, len(points)),
+	}
+	for i, p := range points {
+		orch.CameraStats[i] = scheduler.CameraStatus{
+			CameraID: p.CameraID,
+			CaptureStats: scheduler.CaptureStats{
+				Interval: p.Interval,
+			},
+			LastSuccess: p.LastSuccess,
+		}
+	}
+	return evalCaptureReadiness(grace, minStale, orch, time.Now())
 }
 
 func envDurationSeconds(key string, defaultSec int) time.Duration {

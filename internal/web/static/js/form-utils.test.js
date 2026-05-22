@@ -9,6 +9,7 @@ import {
     uploadCredentialKey,
     findConflictingCameraId,
     slugCameraIdFromName,
+    encodeBasicAuthHeader,
 } from './form-utils.js';
 
 test('buildCameraConfigFromFormValues returns null when type is missing', () => {
@@ -157,4 +158,16 @@ test('findConflictingCameraId detects duplicate SFTP identity', () => {
         findConflictingCameraId(list, null, 'upload.aviationwx.org', 2222, 'u3'),
         null,
     );
+});
+
+test('encodeBasicAuthHeader encodes ASCII passwords', () => {
+    const header = encodeBasicAuthHeader('admin', 'aviationwx');
+    assert.strictEqual(header, 'Basic ' + Buffer.from('admin:aviationwx').toString('base64'));
+});
+
+test('encodeBasicAuthHeader encodes UTF-8 passwords', () => {
+    const header = encodeBasicAuthHeader('admin', 'пароль');
+    assert.ok(header.startsWith('Basic '));
+    const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
+    assert.strictEqual(decoded, 'admin:пароль');
 });

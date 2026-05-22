@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -308,6 +309,40 @@ func TestOrchestrator_GetStatus(t *testing.T) {
 	}
 }
 
+func TestOrchestrator_GetCaptureReadinessPoints(t *testing.T) {
+	tmpDir := t.TempDir()
+	config := DefaultOrchestratorConfig()
+	config.QueueBasePath = tmpDir
+	orch, err := NewOrchestrator(config)
+	if err != nil {
+		t.Fatalf("NewOrchestrator() error = %v", err)
+	}
+	defer orch.Stop()
+
+	cam := &mockCamera{id: "cam1", camType: "http"}
+	if err := orch.AddCamera(cam, CameraConfig{ID: "cam1", Enabled: true}, 60, &mockUploader{}, nil); err != nil {
+		t.Fatalf("AddCamera: %v", err)
+	}
+	if err := orch.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+
+	running, uptime, points := orch.GetCaptureReadinessPoints()
+	if !running {
+		t.Error("expected running")
+	}
+	if uptime <= 0 {
+		t.Errorf("expected uptime > 0, got %v", uptime)
+	}
+	if len(points) != 1 {
+		t.Fatalf("points len = %d, want 1", len(points))
+	}
+	if points[0].CameraID != "cam1" {
+		t.Errorf("camera id = %q, want cam1", points[0].CameraID)
+	}
+}
+
 func TestNewOrchestrator_ExplicitMaxConcurrentCapturesUsesConfiguredValue(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := DefaultOrchestratorConfig()
@@ -385,5 +420,29 @@ func TestOrchestrator_WithOnCaptureCallback(t *testing.T) {
 	// Callback should be stored (we can't easily test invocation without starting the worker)
 	if orch.captureWorkers["test-cam"].onCapture == nil {
 		t.Error("Callback should be stored in capture worker")
+	}
+}
+
+func TestCameraStatus_LastErrorJSONShape(t *testing.T) {
+	cs := CameraStatus{
+		CameraID: "cam1",
+		LastError: &CameraLastError{
+			Message: "connection refused",
+		},
+	}
+	data, err := json.Marshal(cs)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	lastErr, ok := decoded["last_error"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("last_error=%T, want object with Message", decoded["last_error"])
+	}
+	if lastErr["Message"] != "connection refused" {
+		t.Fatalf("Message=%v, want connection refused", lastErr["Message"])
 	}
 }

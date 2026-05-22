@@ -5,6 +5,19 @@ import (
 	"time"
 )
 
+func TestRunWithTimeout_FastPathReturnsWithoutWaitingFullTimeout(t *testing.T) {
+	start := time.Now()
+	v, ok := runWithTimeout(500*time.Millisecond, func() interface{} {
+		return "ok"
+	})
+	if !ok || v != "ok" {
+		t.Fatalf("got (%v, %v), want (ok, true)", v, ok)
+	}
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Fatalf("fast path took %v, want immediate return", elapsed)
+	}
+}
+
 func TestRunWithTimeout_Completes(t *testing.T) {
 	v, ok := runWithTimeout(time.Second, func() interface{} {
 		return 42
@@ -21,6 +34,19 @@ func TestRunWithTimeout_TimesOut(t *testing.T) {
 	})
 	if ok {
 		t.Fatal("expected timeout")
+	}
+}
+
+func TestRunReadinessWithTimeout_FastPathReturnsWithoutWaitingFullTimeout(t *testing.T) {
+	start := time.Now()
+	ok, reason, completed := runReadinessWithTimeout(500*time.Millisecond, func() (bool, string) {
+		return true, ""
+	})
+	if !completed || !ok || reason != "" {
+		t.Fatalf("got ok=%v reason=%q completed=%v", ok, reason, completed)
+	}
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Fatalf("fast path took %v, want immediate return", elapsed)
 	}
 }
 

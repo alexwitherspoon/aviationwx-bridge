@@ -25,6 +25,9 @@ var staticFiles embed.FS
 // healthStatusCollectTimeout bounds getStatus() in /healthz (overridable in tests).
 var healthStatusCollectTimeout = 5 * time.Second
 
+// statusAPICollectTimeout bounds getStatus() in /api/status (overridable in tests).
+var statusAPICollectTimeout = 10 * time.Second
+
 // normalizeUploadForAPI trims upload host/username/password, lowercases host, and applies the
 // default host when the trimmed value is empty so SFTP identity keys stay consistent.
 func normalizeUploadForAPI(u *config.Upload) {
@@ -230,7 +233,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, ok := runWithTimeout(10*time.Second, s.getStatus)
+	status, ok := runWithTimeout(statusAPICollectTimeout, s.getStatus)
 	if !ok || status == nil {
 		http.Error(w, "Status temporarily unavailable", http.StatusServiceUnavailable)
 		return

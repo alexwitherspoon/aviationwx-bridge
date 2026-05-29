@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Dependencies**: Bump `golang.org/x/crypto` to v0.52.0 (SSH security fixes), `golang.org/x/sys` to v0.45.0; GitHub Actions Docker and golangci-lint pins (see PR).
+
 ## [2.9.1] - 2026-05-22
 
 ### Removed

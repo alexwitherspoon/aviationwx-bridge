@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.2] - 2026-05-29
+
+### Added
+- **Security**: CodeQL scanning for Go and JavaScript (web console); `SECURITY.md` for private vulnerability reports (PR #44).
+
 ### Changed
-- **Dependencies**: Bump `golang.org/x/crypto` to v0.52.0 (SSH security fixes), `golang.org/x/sys` to v0.45.0; GitHub Actions Docker and golangci-lint pins (see PR #42).
-- **Docker**: Pin builder to `golang:1.26.3-alpine3.23` and runtime to `alpine:3.23.4` (was floating `1.26-alpine` / `3.23`).
-- **Dependencies**: Bump `golang.org/x/net` to v0.55.0.
+- **Dependencies**: Bump `golang.org/x/crypto` to v0.52.0 (SSH security fixes), `golang.org/x/sys` to v0.45.0; GitHub Actions Docker and golangci-lint pins (PR #42).
+- **Docker**: Pin builder to `golang:1.26.3-alpine3.23` and runtime to `alpine:3.23.4` (was floating `1.26-alpine` / `3.23`) (PR #43).
+- **Dependencies**: Bump `golang.org/x/net` to v0.55.0 (PR #43).
 
 ## [2.9.1] - 2026-05-22
 

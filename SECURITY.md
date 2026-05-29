@@ -41,4 +41,4 @@ We do not pursue legal action against researchers who follow this policy and act
 
 ## Automated analysis
 
-Static analysis runs via [CodeQL](.github/workflows/codeql.yml) on `main`, pull requests, and a weekly schedule. Findings appear under the repository **Security** tab when GitHub Advanced Security features are available for the repo.
+Static analysis runs via [CodeQL](.github/workflows/codeql.yml) for **Go** and **JavaScript** (web console) on `main`, pull requests, and a weekly schedule. Findings appear under the repository **Security** tab when GitHub Advanced Security features are available for the repo.

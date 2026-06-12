@@ -47,7 +47,7 @@ Static analysis runs via [CodeQL](.github/workflows/codeql.yml) for **Go** and *
 
 | Finding | Handling |
 | ------- | -------- |
-| SFTP host keys | Bridge stores the first-seen SSH host key per upload host in `{config_dir}/ssh_known_hosts` (TOFU) and rejects key changes. |
+| SFTP host keys | TOFU in `{config_dir}/ssh_known_hosts`. Official key rotations are listed in GitHub release metadata (`upload_ssh_host_keys_sha256`); the bridge syncs that roster and accepts matching new keys without operator action. |
 | Camera config paths | Camera IDs are restricted to alphanumeric characters and hyphens; config file paths must stay under `cameras/`. |
 | Web console password in `sessionStorage` | Accepted for LAN-only Basic Auth UX; cleared on 401. XSS on the console remains the residual risk. |
 | Update dialog `confirm()` text | Version strings are shown in a native `confirm()` (plain text, not HTML); tag-stripping is defensive only. |

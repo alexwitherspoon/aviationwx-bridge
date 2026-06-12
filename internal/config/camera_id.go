@@ -72,7 +72,7 @@ func CameraConfigPath(baseDir, id string) (string, error) {
 	if err != nil || strings.HasPrefix(rel, "..") || strings.Contains(rel, string(filepath.Separator)+"..") {
 		return "", fmt.Errorf("camera id escapes cameras directory")
 	}
-	return path, nil
+	return absPath, nil
 }
 
 // allocateUniqueCameraIDLocked returns a unique camera id from the display name.

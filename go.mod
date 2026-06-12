@@ -7,7 +7,7 @@ require (
 	github.com/korylprince/go-onvif v0.1.5
 	github.com/pkg/sftp v1.13.10
 	golang.org/x/crypto v0.52.0
-	golang.org/x/sys v0.45.0
+	golang.org/x/sys v0.46.0
 )
 
 require (

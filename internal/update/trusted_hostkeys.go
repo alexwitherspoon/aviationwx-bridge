@@ -14,6 +14,9 @@ import (
 
 const trustedHostKeysFile = "upload_ssh_trusted_keys.json"
 
+// trustedHostKeysReleasesURL is injectable for tests (defaults to releasesURL).
+var trustedHostKeysReleasesURL = releasesURL
+
 // trustedHostKeysFileData is persisted under the config directory.
 type trustedHostKeysFileData struct {
 	SHA256    []string  `json:"sha256"`
@@ -42,7 +45,7 @@ func SyncTrustedUploadHostKeys(configDir string) error {
 }
 
 func fetchLatestReleaseBody(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, releasesURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, trustedHostKeysReleasesURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -148,4 +151,14 @@ func LoadTrustedUploadHostKeys(configDir string) ([]string, error) {
 		return nil, err
 	}
 	return normalizeFingerprintList(data.SHA256), nil
+}
+
+// SetTrustedHostKeysReleasesURLForTest overrides the GitHub releases URL (tests only).
+func SetTrustedHostKeysReleasesURLForTest(url string) {
+	trustedHostKeysReleasesURL = url
+}
+
+// TrustedHostKeysReleasesURLForTest returns the current releases URL (tests only).
+func TrustedHostKeysReleasesURLForTest() string {
+	return trustedHostKeysReleasesURL
 }

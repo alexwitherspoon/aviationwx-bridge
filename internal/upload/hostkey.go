@@ -25,6 +25,8 @@ type hostKeyStore struct {
 	mu        sync.Mutex
 
 	lastTrustedFetch time.Time
+	// syncTrusted overrides trusted-key sync (tests only; nil uses update.SyncTrustedUploadHostKeys).
+	syncTrusted func(configDir string) error
 }
 
 func newHostKeyStore(path, configDir string) (*hostKeyStore, error) {
@@ -113,7 +115,11 @@ func (s *hostKeyStore) refreshTrustedFingerprints() bool {
 		return false
 	}
 	s.lastTrustedFetch = time.Now()
-	if err := update.SyncTrustedUploadHostKeys(s.configDir); err != nil {
+	syncFn := s.syncTrusted
+	if syncFn == nil {
+		syncFn = update.SyncTrustedUploadHostKeys
+	}
+	if err := syncFn(s.configDir); err != nil {
 		return false
 	}
 	return true

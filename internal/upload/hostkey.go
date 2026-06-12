@@ -17,6 +17,11 @@ import (
 
 const trustedHostKeyFetchCooldown = time.Hour
 
+var (
+	hostKeyStoresMu sync.Mutex
+	hostKeyStores   = make(map[string]*hostKeyStore)
+)
+
 // hostKeyStore records SSH host keys on first connect (TOFU) and rejects unexpected changes.
 // Keys listed in upload_ssh_trusted_keys.json (from GitHub release metadata) rotate automatically.
 type hostKeyStore struct {
@@ -27,6 +32,21 @@ type hostKeyStore struct {
 	lastTrustedFetch time.Time
 	// syncTrusted overrides trusted-key sync (tests only; nil uses update.SyncTrustedUploadHostKeys).
 	syncTrusted func(configDir string) error
+}
+
+func getSharedHostKeyStore(path, configDir string) (*hostKeyStore, error) {
+	path = filepath.Clean(path)
+	hostKeyStoresMu.Lock()
+	defer hostKeyStoresMu.Unlock()
+	if store, ok := hostKeyStores[path]; ok {
+		return store, nil
+	}
+	store, err := newHostKeyStore(path, configDir)
+	if err != nil {
+		return nil, err
+	}
+	hostKeyStores[path] = store
+	return store, nil
 }
 
 func newHostKeyStore(path, configDir string) (*hostKeyStore, error) {
@@ -227,12 +247,30 @@ func (s *hostKeyStore) writeLines(lines []string) error {
 		b.WriteString(line)
 	}
 	b.WriteByte('\n')
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0600); err != nil {
-		return fmt.Errorf("write known hosts: %w", err)
+	return atomicWriteFile(s.path, []byte(b.String()), 0600)
+}
+
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
 	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		return fmt.Errorf("install known hosts: %w", err)
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("install %s: %w", filepath.Base(path), err)
 	}
 	return nil
 }

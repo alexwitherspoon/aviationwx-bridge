@@ -9,10 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 const trustedHostKeysFile = "upload_ssh_trusted_keys.json"
+
+var trustedHostKeysSyncMu sync.Mutex
 
 // trustedHostKeysReleasesURL is injectable for tests (defaults to releasesURL).
 var trustedHostKeysReleasesURL = releasesURL
@@ -30,6 +33,9 @@ func SyncTrustedUploadHostKeys(configDir string) error {
 	if strings.TrimSpace(configDir) == "" {
 		return fmt.Errorf("config directory is required")
 	}
+	trustedHostKeysSyncMu.Lock()
+	defer trustedHostKeysSyncMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
 
@@ -90,11 +96,24 @@ func writeTrustedHostKeysFile(path string, fps []string, source string) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, encoded, 0600); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return fmt.Errorf("write trusted host keys: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmp.Chmod(0600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write trusted host keys: %w", err)
+	}
+	if _, err := tmp.Write(encoded); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write trusted host keys: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write trusted host keys: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("install trusted host keys: %w", err)
 	}
 	return nil

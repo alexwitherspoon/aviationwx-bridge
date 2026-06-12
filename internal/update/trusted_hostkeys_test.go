@@ -21,6 +21,22 @@ func TestParseUploadSSHHostKeysSHA256_releaseWorkflowFormat(t *testing.T) {
 	}
 }
 
+func TestParseUploadSSHHostKeysSHA256_releaseTemplateFenceFormat(t *testing.T) {
+	body := `## What's Changed
+
+## AVIATIONWX_METADATA
+
+` + "```json\n" + `{
+  "min_host_version": "2.0",
+  "upload_ssh_host_keys_sha256": ["SHA256:fence123"]
+}
+` + "```\n"
+	got := ParseUploadSSHHostKeysSHA256(body)
+	if len(got) != 1 || got[0] != "SHA256:fence123" {
+		t.Fatalf("got %v", got)
+	}
+}
+
 func TestParseUploadSSHHostKeysSHA256_missing(t *testing.T) {
 	if got := ParseUploadSSHHostKeysSHA256("no metadata"); len(got) != 0 {
 		t.Fatalf("got %v", got)

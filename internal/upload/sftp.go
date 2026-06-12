@@ -39,7 +39,7 @@ func NewSFTPClient(cfg Config) (*SFTPClient, error) {
 		cfg.Port = 22 // Default SFTP port
 	}
 
-	store, err := newHostKeyStore(cfg.KnownHostsPath, filepath.Dir(cfg.KnownHostsPath))
+	store, err := getSharedHostKeyStore(cfg.KnownHostsPath, filepath.Dir(cfg.KnownHostsPath))
 	if err != nil {
 		return nil, err
 	}

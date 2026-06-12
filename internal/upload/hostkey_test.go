@@ -342,6 +342,21 @@ func TestReplace_preservesCommentsAndOtherHosts(t *testing.T) {
 	}
 }
 
+func TestGetSharedHostKeyStore_samePath(t *testing.T) {
+	dir, path := testHostKeyDir(t)
+	a, err := getSharedHostKeyStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := getSharedHostKeyStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != b {
+		t.Fatal("expected same hostKeyStore instance for identical known_hosts path")
+	}
+}
+
 func TestHostKeyStore_concurrentVerify(t *testing.T) {
 	dir, path := testHostKeyDir(t)
 	store, err := newHostKeyStore(path, dir)

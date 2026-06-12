@@ -6,7 +6,10 @@ import (
 	"strings"
 )
 
-var releaseMetaRE = regexp.MustCompile(`AVIATIONWX_RELEASE_META\s+(\{[^}]+\})`)
+var (
+	releaseMetaHTMLRE = regexp.MustCompile(`AVIATIONWX_RELEASE_META\s+(\{[^}]+\})`)
+	metadataFenceRE   = regexp.MustCompile("(?is)##\\s*AVIATIONWX_METADATA\\s*\\n+```json\\s*\\n(\\{.*?\\})\\s*```")
+)
 
 // ParseUploadSSHHostKeysSHA256 extracts upload_ssh_host_keys_sha256 from a GitHub release body.
 // Fingerprints use OpenSSH form, e.g. SHA256:base64...
@@ -38,13 +41,16 @@ func ParseUploadSSHHostKeysSHA256(releaseBody string) []string {
 }
 
 func parseReleaseMetaJSON(releaseBody string) map[string]interface{} {
-	m := releaseMetaRE.FindStringSubmatch(releaseBody)
-	if len(m) < 2 {
-		return nil
+	for _, re := range []*regexp.Regexp{releaseMetaHTMLRE, metadataFenceRE} {
+		m := re.FindStringSubmatch(releaseBody)
+		if len(m) < 2 {
+			continue
+		}
+		var meta map[string]interface{}
+		if err := json.Unmarshal([]byte(m[1]), &meta); err != nil {
+			continue
+		}
+		return meta
 	}
-	var meta map[string]interface{}
-	if err := json.Unmarshal([]byte(m[1]), &meta); err != nil {
-		return nil
-	}
-	return meta
+	return nil
 }

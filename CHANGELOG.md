@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.3] - 2026-06-12
+
+### Changed
+- **Dependencies**: Bump `golang.org/x/sys` to v0.46.0 (PR #51).
+- **Docker**: Builder image `golang:1.26.4-alpine3.23` (was `1.26.3-alpine3.23`) (PR #51).
+- **CI**: `actions/checkout` v6.0.3, `codecov/codecov-action` v7.0.0, `docker/setup-qemu-action` v4.1.0, CodeQL action pin refresh (PR #51).
+
 ## [2.9.2] - 2026-05-29
 
 ### Added

@@ -344,6 +344,8 @@ func (s *Service) Subscribe(fn func(ConfigEvent)) {
 func (s *Service) SSHKnownHostsPath() string {
 	return filepath.Join(s.baseDir, "ssh_known_hosts")
 }
+
+// GetWebPassword returns the web console password
 func (s *Service) GetWebPassword() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

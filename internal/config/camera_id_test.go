@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -25,6 +26,42 @@ func TestSlugCameraIDFromName(t *testing.T) {
 				t.Fatalf("SlugCameraIDFromName(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateCameraID(t *testing.T) {
+	if err := ValidateCameraID("tower-north"); err != nil {
+		t.Fatalf("valid id: %v", err)
+	}
+	for _, id := range []string{"", "../x", "bad/id", "dots.not"} {
+		if err := ValidateCameraID(id); err == nil {
+			t.Fatalf("ValidateCameraID(%q) expected error", id)
+		}
+	}
+}
+
+func TestCameraConfigPath_staysUnderCamerasDir(t *testing.T) {
+	base := t.TempDir()
+	path, err := CameraConfigPath(base, "cam-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(path) != "cam-a.json" {
+		t.Fatalf("path = %q", path)
+	}
+	if _, err := CameraConfigPath(base, "../etc/passwd"); err == nil {
+		t.Fatal("expected traversal id to fail")
+	}
+}
+
+func TestDeleteCamera_rejectsInvalidID(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := NewService(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteCamera("../escape"); err == nil {
+		t.Fatal("expected invalid id error")
 	}
 }
 

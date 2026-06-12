@@ -3,6 +3,7 @@ package upload
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,7 +39,7 @@ func NewSFTPClient(cfg Config) (*SFTPClient, error) {
 		cfg.Port = 22 // Default SFTP port
 	}
 
-	store, err := newHostKeyStore(cfg.KnownHostsPath)
+	store, err := newHostKeyStore(cfg.KnownHostsPath, filepath.Dir(cfg.KnownHostsPath))
 	if err != nil {
 		return nil, err
 	}

@@ -163,6 +163,11 @@ func main() {
 	}
 	log.Info("Config service initialized", "dir", configDir)
 
+	if err := update.SyncTrustedUploadHostKeys(configDir); err != nil {
+		log.Warn("Could not sync trusted upload SSH host keys from release", "error", err)
+	}
+	go syncTrustedUploadHostKeysLoop(configDir, log)
+
 	// Create update checker
 	updateChecker := update.NewChecker(Version, GitCommit)
 	updateChecker.Start()
@@ -1023,4 +1028,14 @@ func getUpdateChannel(channel string) string {
 	}
 	// Default to latest for unknown values
 	return "latest"
+}
+
+func syncTrustedUploadHostKeysLoop(configDir string, log *logger.Logger) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		if err := update.SyncTrustedUploadHostKeys(configDir); err != nil {
+			log.Warn("Could not sync trusted upload SSH host keys from release", "error", err)
+		}
+	}
 }

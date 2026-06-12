@@ -3,6 +3,8 @@ package upload
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -28,8 +30,9 @@ func testHostKey(t *testing.T) ssh.PublicKey {
 }
 
 func TestHostKeyStore_TOFUAndMismatch(t *testing.T) {
-	path := testKnownHostsPath(t)
-	store, err := newHostKeyStore(path)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ssh_known_hosts")
+	store, err := newHostKeyStore(path, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +50,36 @@ func TestHostKeyStore_TOFUAndMismatch(t *testing.T) {
 
 	if err := cb("ignored", nil, key1); err != nil {
 		t.Fatalf("repeat connect with same key: %v", err)
+	}
+}
+
+func TestHostKeyStore_trustedRotation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ssh_known_hosts")
+	store, err := newHostKeyStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	key1 := testHostKey(t)
+	cb := store.callback("upload.example.com", 2222)
+	if err := cb("ignored", nil, key1); err != nil {
+		t.Fatalf("first connect: %v", err)
+	}
+
+	key2 := testHostKey(t)
+	fp2 := ssh.FingerprintSHA256(key2)
+	trustedPath := filepath.Join(dir, "upload_ssh_trusted_keys.json")
+	payload := fmt.Sprintf(`{"sha256":["%s"]}`, fp2)
+	if err := os.WriteFile(trustedPath, []byte(payload), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cb("ignored", nil, key2); err != nil {
+		t.Fatalf("trusted rotation: %v", err)
+	}
+	if err := cb("ignored", nil, key2); err != nil {
+		t.Fatalf("after rotation: %v", err)
 	}
 }
 

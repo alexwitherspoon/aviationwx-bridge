@@ -474,6 +474,10 @@ func (s *Server) handleCamera(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cameraID := parts[0]
+	if err := config.ValidateCameraID(cameraID); err != nil {
+		http.Error(w, "Invalid camera ID", http.StatusBadRequest)
+		return
+	}
 	action := ""
 	if len(parts) > 1 {
 		action = parts[1]

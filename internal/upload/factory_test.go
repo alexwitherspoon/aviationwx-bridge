@@ -1,6 +1,7 @@
 package upload
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
@@ -69,7 +70,7 @@ func TestNewClientFromConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewClientFromConfig(tt.cfg)
+			client, err := NewClientFromConfig(tt.cfg, filepath.Join(t.TempDir(), "ssh_known_hosts"))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewClientFromConfig() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -132,7 +133,7 @@ func TestNewClientFromConfig_SFTPBasePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewClientFromConfig(tt.cfg)
+			client, err := NewClientFromConfig(tt.cfg, filepath.Join(t.TempDir(), "ssh_known_hosts"))
 			if err != nil {
 				t.Errorf("NewClientFromConfig() error = %v", err)
 				return

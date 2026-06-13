@@ -43,11 +43,19 @@ func (b *Buffer) Add(entry LogEntry) {
 	}
 }
 
+const maxLogEntriesRequested = 1000
+
 // GetLast returns the last N log entries (newest first)
 func (b *Buffer) GetLast(n int) []LogEntry {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
+	if n < 0 {
+		n = 0
+	}
+	if n > maxLogEntriesRequested {
+		n = maxLogEntriesRequested
+	}
 	if n > b.size {
 		n = b.size
 	}

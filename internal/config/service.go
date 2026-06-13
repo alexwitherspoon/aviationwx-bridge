@@ -183,6 +183,10 @@ func (s *Service) UpdateGlobal(fn func(*GlobalSettings) error) error {
 
 // GetCamera returns a copy of camera config (thread-safe)
 func (s *Service) GetCamera(id string) (*Camera, error) {
+	if err := ValidateCameraID(id); err != nil {
+		return nil, err
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -225,8 +229,9 @@ func (s *Service) AddCamera(cam Camera) (Camera, error) {
 	if cam.ID == "" {
 		cam.ID = s.allocateUniqueCameraIDLocked(cam.Name)
 	}
-
-	// Check for duplicate
+	if err := ValidateCameraID(cam.ID); err != nil {
+		return Camera{}, err
+	}
 	if _, exists := s.cameras[cam.ID]; exists {
 		return Camera{}, fmt.Errorf("camera already exists: %s", cam.ID)
 	}
@@ -254,6 +259,10 @@ func (s *Service) AddCamera(cam Camera) (Camera, error) {
 
 // UpdateCamera updates an existing camera atomically
 func (s *Service) UpdateCamera(id string, fn func(*Camera) error) error {
+	if err := ValidateCameraID(id); err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -295,6 +304,10 @@ func (s *Service) UpdateCamera(id string, fn func(*Camera) error) error {
 
 // DeleteCamera removes a camera atomically
 func (s *Service) DeleteCamera(id string) error {
+	if err := ValidateCameraID(id); err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -302,8 +315,10 @@ func (s *Service) DeleteCamera(id string) error {
 		return fmt.Errorf("camera not found: %s", id)
 	}
 
-	// Delete file first (fail-safe)
-	path := filepath.Join(s.baseDir, "cameras", id+".json")
+	path, err := CameraConfigPath(s.baseDir, id)
+	if err != nil {
+		return err
+	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("delete camera file: %w", err)
 	}
@@ -323,6 +338,11 @@ func (s *Service) Subscribe(fn func(ConfigEvent)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.listeners = append(s.listeners, fn)
+}
+
+// SSHKnownHostsPath returns the path to the SSH known_hosts file for upload connections.
+func (s *Service) SSHKnownHostsPath() string {
+	return filepath.Join(s.baseDir, "ssh_known_hosts")
 }
 
 // GetWebPassword returns the web console password
@@ -395,6 +415,13 @@ func (s *Service) reload() error {
 		// Normalize upload config for backward compatibility
 		NormalizeUploadConfig(cam.Upload)
 
+		if err := ValidateCameraID(cam.ID); err != nil {
+			return fmt.Errorf("camera file %s: %w", entry.Name(), err)
+		}
+		if _, err := CameraConfigPath(s.baseDir, cam.ID); err != nil {
+			return fmt.Errorf("camera file %s: %w", entry.Name(), err)
+		}
+
 		s.cameras[cam.ID] = &cam
 	}
 
@@ -435,7 +462,10 @@ func (s *Service) saveGlobal() error {
 
 // saveCameraFile saves a camera config to disk (caller must hold lock)
 func (s *Service) saveCameraFile(cam Camera) error {
-	path := filepath.Join(s.baseDir, "cameras", cam.ID+".json")
+	path, err := CameraConfigPath(s.baseDir, cam.ID)
+	if err != nil {
+		return err
+	}
 
 	// Backup existing file before overwriting
 	if _, err := os.Stat(path); err == nil {

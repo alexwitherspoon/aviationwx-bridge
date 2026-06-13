@@ -134,7 +134,6 @@ func (s *hostKeyStore) refreshTrustedFingerprints() bool {
 	if time.Since(s.lastTrustedFetch) < trustedHostKeyFetchCooldown {
 		return false
 	}
-	s.lastTrustedFetch = time.Now()
 	syncFn := s.syncTrusted
 	if syncFn == nil {
 		syncFn = update.SyncTrustedUploadHostKeys
@@ -142,6 +141,7 @@ func (s *hostKeyStore) refreshTrustedFingerprints() bool {
 	if err := syncFn(s.configDir); err != nil {
 		return false
 	}
+	s.lastTrustedFetch = time.Now()
 	return true
 }
 

@@ -262,6 +262,43 @@ func TestHostKeyStore_refreshTrustedRespectsCooldown(t *testing.T) {
 	_ = path
 }
 
+func TestHostKeyStore_refreshRetriesAfterSyncFailure(t *testing.T) {
+	dir, path := testHostKeyDir(t)
+	store, err := newHostKeyStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb := store.callback("upload.example.com", 2222)
+	if err := cb("ignored", nil, testHostKey(t)); err != nil {
+		t.Fatal(err)
+	}
+
+	called := 0
+	store.syncTrusted = func(string) error {
+		called++
+		return fmt.Errorf("network down")
+	}
+	store.lastTrustedFetch = time.Time{}
+
+	if err := cb("ignored", nil, testHostKey(t)); err == nil {
+		t.Fatal("expected mismatch")
+	}
+	if called != 1 {
+		t.Fatalf("sync called %d times, want 1", called)
+	}
+	if !store.lastTrustedFetch.IsZero() {
+		t.Fatal("lastTrustedFetch should not advance after failed sync")
+	}
+
+	if err := cb("ignored", nil, testHostKey(t)); err == nil {
+		t.Fatal("expected mismatch on retry")
+	}
+	if called != 2 {
+		t.Fatalf("sync called %d times after retry, want 2", called)
+	}
+	_ = path
+}
+
 func TestHostKeyStore_separateLabelsPerPort(t *testing.T) {
 	dir, path := testHostKeyDir(t)
 	store, err := newHostKeyStore(path, dir)

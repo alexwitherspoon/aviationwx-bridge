@@ -60,17 +60,18 @@ func (b *Buffer) GetLast(n int) []LogEntry {
 		n = b.size
 	}
 
-	entries := make([]LogEntry, 0, maxLogEntriesRequested)
-
-	// Start from current position (oldest) and go backwards
+	var entries []LogEntry
 	r := b.ring
-	for i := 0; i < n && i < b.size; i++ {
+	for i := 0; i < n; i++ {
 		r = r.Prev()
-		if r.Value != nil {
-			if entry, ok := r.Value.(LogEntry); ok {
-				entries = append([]LogEntry{entry}, entries...) // Prepend for newest-first
-			}
+		if r.Value == nil {
+			continue
 		}
+		entry, ok := r.Value.(LogEntry)
+		if !ok {
+			continue
+		}
+		entries = append(entries, entry)
 	}
 
 	return entries

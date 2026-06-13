@@ -60,7 +60,7 @@ func (b *Buffer) GetLast(n int) []LogEntry {
 		n = b.size
 	}
 
-	entries := make([]LogEntry, 0, n)
+	entries := make([]LogEntry, 0, maxLogEntriesRequested)
 
 	// Start from current position (oldest) and go backwards
 	r := b.ring

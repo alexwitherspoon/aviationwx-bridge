@@ -44,6 +44,26 @@ func TestBuffer_GetLast_respectsBufferSize(t *testing.T) {
 	}
 }
 
+func TestBuffer_GetLast_wrapAround(t *testing.T) {
+	buf := NewBuffer(3)
+	for _, msg := range []string{"a", "b", "c", "d"} {
+		buf.Add(LogEntry{Message: msg})
+	}
+
+	got := buf.GetLast(3)
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	if got[0].Message != "d" || got[1].Message != "c" || got[2].Message != "b" {
+		t.Fatalf("got [%s, %s, %s], want [d, c, b]", got[0].Message, got[1].Message, got[2].Message)
+	}
+
+	got = buf.GetLast(2)
+	if len(got) != 2 || got[0].Message != "d" || got[1].Message != "c" {
+		t.Fatalf("tail-2 after wrap: got [%s, %s], want [d, c]", got[0].Message, got[1].Message)
+	}
+}
+
 func TestBuffer_GetLast_negativeReturnsEmpty(t *testing.T) {
 	buf := NewBuffer(3)
 	buf.Add(LogEntry{Message: "x"})

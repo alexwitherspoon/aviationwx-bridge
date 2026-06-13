@@ -60,7 +60,7 @@ func (b *Buffer) GetLast(n int) []LogEntry {
 		n = b.size
 	}
 
-	var entries []LogEntry
+	entries := make([]LogEntry, 0, n)
 	r := b.ring
 	for i := 0; i < n; i++ {
 		r = r.Prev()

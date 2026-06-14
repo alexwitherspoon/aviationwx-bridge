@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Security**: Close CodeQL alert #10 by building log tail slices with bounded `append` instead of `make(..., n)` in `GetLast` (follow-up to PR #53).
+
 ## [2.9.3] - 2026-06-12
 
 ### Changed

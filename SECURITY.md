@@ -51,4 +51,4 @@ Static analysis runs via [CodeQL](.github/workflows/codeql.yml) for **Go** and *
 | Camera config paths | Camera IDs are restricted to alphanumeric characters and hyphens; config file paths must stay under `cameras/`. |
 | Web console password in `sessionStorage` | Accepted for LAN-only Basic Auth UX; cleared on 401. XSS on the console remains the residual risk. |
 | Update dialog `confirm()` text | Version strings are shown in a native `confirm()` (plain text, not HTML); tag-stripping is defensive only. |
-| Log tail allocation | `/api/logs?tail=` is capped at 1000 lines in the handler and in the log buffer reader. |
+| Log tail allocation | `/api/logs?tail=` is capped at 1000 lines in the handler and in `GetLast`. The buffer builds the tail with bounded `append` after clamping, using a constant capacity hint (not `make` sized from the request), which satisfies CodeQL `go/uncontrolled-allocation-size`. |

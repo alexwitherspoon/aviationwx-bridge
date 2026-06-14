@@ -45,10 +45,14 @@ func (b *Buffer) Add(entry LogEntry) {
 
 const maxLogEntriesRequested = 1000
 
+// logTailSlicePrealloc hints append growth for the common /api/logs default tail (100 lines).
+// Capacity is a compile-time constant so CodeQL does not treat allocation as user-controlled.
+const logTailSlicePrealloc = 100
+
 // GetLast returns the last N log entries (newest first).
 // n is clamped to maxLogEntriesRequested and the current buffer size before traversal.
-// The result slice grows via append only (no make sized from n) so CodeQL does not treat
-// allocation as user-controlled; typical tail reads are small (default 100 in the web API).
+// The result slice uses append with a constant capacity hint (not make(..., n)) so CodeQL
+// does not treat allocation as user-controlled.
 func (b *Buffer) GetLast(n int) []LogEntry {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -63,7 +67,7 @@ func (b *Buffer) GetLast(n int) []LogEntry {
 		n = b.size
 	}
 
-	var entries []LogEntry
+	entries := make([]LogEntry, 0, logTailSlicePrealloc)
 	r := b.ring
 	for i := 0; i < n; i++ {
 		r = r.Prev()

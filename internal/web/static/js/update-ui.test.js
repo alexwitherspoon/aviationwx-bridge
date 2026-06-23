@@ -35,6 +35,21 @@ test('releaseNotesURL falls back when latest_url missing or empty', () => {
     assert.match(releaseNotesURL({ latest_url: '   ' }), /github\.com\/alexwitherspoon\/aviationwx\.org-bridge\/releases/);
 });
 
+test('releaseNotesURL rejects non-http(s) schemes', () => {
+    assert.match(
+        releaseNotesURL({ latest_url: 'javascript:alert(1)' }),
+        /github\.com\/alexwitherspoon\/aviationwx\.org-bridge\/releases/,
+    );
+    assert.match(
+        releaseNotesURL({ latest_url: 'ftp://example.com/release' }),
+        /github\.com\/alexwitherspoon\/aviationwx\.org-bridge\/releases/,
+    );
+    assert.match(
+        releaseNotesURL({ latest_url: 'not-a-url' }),
+        /github\.com\/alexwitherspoon\/aviationwx\.org-bridge\/releases/,
+    );
+});
+
 test('manualUpdateConfirmMessage includes release URL', () => {
     const msg = manualUpdateConfirmMessage({
         latest_version: '2.10.0',

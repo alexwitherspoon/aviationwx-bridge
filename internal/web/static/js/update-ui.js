@@ -4,10 +4,22 @@
 
 const defaultReleaseNotesURL = 'https://github.com/alexwitherspoon/aviationwx.org-bridge/releases';
 
+function isSafeHTTPURL(url) {
+    try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
 export function releaseNotesURL(updateInfo) {
     const url = updateInfo?.latest_url;
-    if (typeof url === 'string' && url.trim() !== '') {
-        return url.trim();
+    if (typeof url === 'string') {
+        const trimmed = url.trim();
+        if (trimmed !== '' && isSafeHTTPURL(trimmed)) {
+            return trimmed;
+        }
     }
     return defaultReleaseNotesURL;
 }

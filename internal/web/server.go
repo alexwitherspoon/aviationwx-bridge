@@ -17,6 +17,7 @@ import (
 
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/camera"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/deploy"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/logger"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/paths"
 )
@@ -895,6 +896,17 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.log.Info("Update triggered via web UI")
+
+	if !deploy.SelfUpdateEnabled() {
+		s.log.Info("Update via web UI rejected: self-update disabled for this deployment")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status": "error",
+			"error":  "Self-update is disabled. Pull and recreate the container with your orchestration tooling.",
+		})
+		return
+	}
 
 	// Trigger update by creating a force-update trigger file at the mounted data volume
 	// root (/data in the container; host /data/aviationwx on Pi). The supervisor checks

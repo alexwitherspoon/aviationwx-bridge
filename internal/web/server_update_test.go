@@ -14,11 +14,46 @@ import (
 
 const updateTriggerName = "trigger-update"
 
+func enableSelfUpdate(t *testing.T) {
+	t.Helper()
+	t.Setenv("AVIATIONWX_SELF_UPDATE", "true")
+}
+
+func TestHandleUpdate_rejectedWhenSelfUpdateDisabled(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("AVIATIONWX_DATA_DIR", dataDir)
+	t.Setenv("AVIATIONWX_SELF_UPDATE", "false")
+
+	server := testServerWithAuth(t, ServerConfig{})
+	req := httptest.NewRequest(http.MethodPost, "/api/update", nil)
+	req.SetBasicAuth("admin", "test")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status %d, want 409, body %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["status"] != "error" {
+		t.Fatalf("status field = %q", resp["status"])
+	}
+	if !strings.Contains(resp["error"], "Self-update is disabled") {
+		t.Fatalf("error = %q", resp["error"])
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, updateTriggerName)); !os.IsNotExist(err) {
+		t.Fatal("trigger file must not be created when self-update is disabled")
+	}
+}
+
 func TestHandleUpdate_writesTriggerAtVolumeRoot(t *testing.T) {
 	// Regression: docker-compose and Pi mounts use /data as the data volume root.
 	// The trigger must not live under /data/aviationwx inside the container.
 	dataDir := t.TempDir()
 	t.Setenv("AVIATIONWX_DATA_DIR", dataDir)
+	enableSelfUpdate(t)
 
 	server := testServerWithAuth(t, ServerConfig{})
 	req := httptest.NewRequest(http.MethodPost, "/api/update", nil)
@@ -48,6 +83,7 @@ func TestHandleUpdate_createsMissingDataDir(t *testing.T) {
 	parent := t.TempDir()
 	dataDir := filepath.Join(parent, "fresh", "volume")
 	t.Setenv("AVIATIONWX_DATA_DIR", dataDir)
+	enableSelfUpdate(t)
 
 	server := testServerWithAuth(t, ServerConfig{})
 	req := httptest.NewRequest(http.MethodPost, "/api/update", nil)
@@ -66,6 +102,7 @@ func TestHandleUpdate_createsMissingDataDir(t *testing.T) {
 func TestHandleUpdate_respectsAviationwxDataDir(t *testing.T) {
 	customDir := t.TempDir()
 	t.Setenv("AVIATIONWX_DATA_DIR", customDir)
+	enableSelfUpdate(t)
 
 	server := testServerWithAuth(t, ServerConfig{})
 	req := httptest.NewRequest(http.MethodPost, "/api/update", nil)
@@ -119,6 +156,7 @@ func TestHandleUpdate_requiresAuth(t *testing.T) {
 func TestHandleUpdate_successResponse(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("AVIATIONWX_DATA_DIR", dataDir)
+	enableSelfUpdate(t)
 
 	server := testServerWithAuth(t, ServerConfig{})
 	req := httptest.NewRequest(http.MethodPost, "/api/update", nil)
@@ -148,6 +186,7 @@ func TestHandleUpdate_writeFailureWhenDataDirIsFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AVIATIONWX_DATA_DIR", filePath)
+	enableSelfUpdate(t)
 
 	server := testServerWithAuth(t, ServerConfig{})
 	req := httptest.NewRequest(http.MethodPost, "/api/update", nil)

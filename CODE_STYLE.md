@@ -409,7 +409,8 @@ Breaking change: Requires ONVIF credentials in config.
 
 Write commit messages, PR descriptions, and review replies in plain technical English. Match existing repo tone: direct, specific, no filler.
 
-- Use commas or separate sentences instead of em dashes or en dashes in prose.
+- Do not use the Unicode em dash (U+2014) or en dash in new prose.
+- For a break or aside in commit messages, PR text, and review replies, use a **single ASCII hyphen** (`-`). Avoid a double hyphen (`--`) in those places. Keep `--` and `---` where Markdown or tooling needs them (horizontal rules, CLI flags, fenced code).
 - Do not add Unicode symbols or emoji in new prose you write (commit messages, PR text, script output). Existing examples in this file predate the rule; use ASCII bullets in new sections.
 - Avoid filler openers and padding ("Additionally", "Furthermore", "It's worth noting", "comprehensive", "leverage", "delve into", "ensure that").
 - State what changed and why; skip meta commentary about the change process.

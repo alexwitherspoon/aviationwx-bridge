@@ -194,6 +194,9 @@ docker run -d \
     `# Pass Go memory limit as environment variable` \
     -e "GOMEMLIMIT=${GO_MEM}MiB" \
     \
+    `# Web UI one-click updates (host supervisor consumes /data/trigger-update)` \
+    -e "AVIATIONWX_SELF_UPDATE=1" \
+    \
     `# Network and volumes` \
     -p 1229:1229 \
     -v "${DATA_DIR}:/data" \

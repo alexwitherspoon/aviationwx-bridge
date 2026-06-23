@@ -152,7 +152,7 @@ The bridge checks GitHub for new releases in all deployments. **Applying** an up
 
 | Deployment | `AVIATIONWX_SELF_UPDATE` | Web UI behavior |
 |------------|--------------------------|-----------------|
-| Pi (`install.sh` + supervisor) | `1` (set by `aviationwx-container-start.sh`) | Banner applies update via host supervisor |
+| Pi (`install.sh` + supervisor) | `1` (default in `aviationwx-container-start.sh`; set `AVIATIONWX_SELF_UPDATE=0` to disable) | Banner applies update via host supervisor |
 | Docker / docker-compose (IT-managed) | unset (default) | Banner shows version availability and links to release notes; `POST /api/update` returns 409 |
 
 Do not mount the Docker socket into the bridge container to enable in-container updates.

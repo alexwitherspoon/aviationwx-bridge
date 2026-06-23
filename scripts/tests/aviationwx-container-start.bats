@@ -50,3 +50,8 @@ setup() {
 	"
 	[ "$status" -eq 0 ]
 }
+
+@test "container start passes AVIATIONWX_SELF_UPDATE with host override default" {
+	run grep -F 'AVIATIONWX_SELF_UPDATE=${AVIATIONWX_SELF_UPDATE:-1}' "$REPO_ROOT/scripts/aviationwx-container-start.sh"
+	[ "$status" -eq 0 ]
+}

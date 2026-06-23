@@ -142,20 +142,13 @@ func TestHandleUpdate_successResponse(t *testing.T) {
 	}
 }
 
-func TestHandleUpdate_writeFailureWhenParentNotWritable(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("chmod-based write failure test unreliable as root")
-	}
-
+func TestHandleUpdate_writeFailureWhenDataDirIsFile(t *testing.T) {
 	parent := t.TempDir()
-	readOnly := filepath.Join(parent, "readonly")
-	if err := os.Mkdir(readOnly, 0555); err != nil {
+	filePath := filepath.Join(parent, "not-a-dir")
+	if err := os.WriteFile(filePath, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(readOnly, 0755) })
-
-	// HostDataDir points inside a directory we cannot create subdirs under.
-	t.Setenv("AVIATIONWX_DATA_DIR", filepath.Join(readOnly, "blocked"))
+	t.Setenv("AVIATIONWX_DATA_DIR", filePath)
 
 	server := testServerWithAuth(t, ServerConfig{})
 	req := httptest.NewRequest(http.MethodPost, "/api/update", nil)

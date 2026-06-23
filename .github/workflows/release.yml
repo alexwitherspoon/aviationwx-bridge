@@ -200,7 +200,7 @@ jobs:
             
             ### Installation
             
-            #### Raspberry Pi (Recommended)
+            #### Supervised Install (single-board computer, recommended)
             ```bash
             curl -fsSL https://raw.githubusercontent.com/alexwitherspoon/aviationwx.org-bridge/main/scripts/install.sh | sudo bash
             ```
@@ -214,7 +214,7 @@ jobs:
             
             If you previously used `ghcr.io/alexwitherspoon/aviationwx.org-bridge`, switch to `ghcr.io/alexwitherspoon/aviationwx-org-bridge`. GHCR does not redirect.
             
-            **Raspberry Pi:** Re-run the install script above (idempotent; preserves config).
+            **Supervised install:** Re-run the install script above (idempotent; preserves config).
             
             **Docker:** Stop and remove the old container, then pull and run from `ghcr.io/alexwitherspoon/aviationwx-org-bridge` (see Installation).
             
@@ -233,8 +233,8 @@ jobs:
             | Platform | Binary |
             |----------|--------|
             | Linux (x86_64) | `aviationwx-org-bridge-linux-amd64` |
-            | Linux (ARM64/Pi 4) | `aviationwx-org-bridge-linux-arm64` |
-            | Linux (ARMv7/Pi 3) | `aviationwx-org-bridge-linux-armv7` |
+            | Linux (ARM64, e.g. Pi 4/5, Radxa, Orange Pi) | `aviationwx-org-bridge-linux-arm64` |
+            | Linux (ARMv7, 32-bit, e.g. Pi 3) | `aviationwx-org-bridge-linux-armv7` |
             | macOS (Intel) | `aviationwx-org-bridge-darwin-amd64` |
             | macOS (Apple Silicon) | `aviationwx-org-bridge-darwin-arm64` |
             

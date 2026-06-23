@@ -909,7 +909,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	s.log.Info("Update triggered via web UI")
 
 	// Trigger update by creating a force-update trigger file at the mounted data volume
-	// root (/data in the container; host /data/aviationwx on Pi). The supervisor checks
+	// root (/data in the container; host /data/aviationwx on a supervised install). The supervisor checks
 	// ${DATA_DIR}/trigger-update on the host.
 	dataDir := paths.HostDataDir()
 	updateTriggerFile := filepath.Join(dataDir, "trigger-update")

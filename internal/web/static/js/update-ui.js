@@ -1,5 +1,5 @@
 /**
- * Update banner and apply behavior for Pi supervisor vs IT-managed Docker.
+ * Update banner and apply behavior for supervised install vs IT-managed Docker.
  */
 
 export const DEFAULT_RELEASE_NOTES_URL =

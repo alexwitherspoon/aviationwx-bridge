@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/paths"
 )
 
 const recoveryExhaustedFilename = "recovery-exhausted.json"
@@ -15,11 +17,7 @@ func recoveryExhaustedPath() string {
 }
 
 func hostDataDir() string {
-	if d := os.Getenv("AVIATIONWX_DATA_DIR"); d != "" {
-		return d
-	}
-	// Host scripts write recovery/upgrade files at the mounted volume root (/data in the container).
-	return "/data"
+	return paths.HostDataDir()
 }
 
 // readHostDataLabel returns trimmed contents of a host-written file under the data dir (empty if missing).

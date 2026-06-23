@@ -37,6 +37,9 @@ func TestReadRecoveryExhausted(t *testing.T) {
 	if exhausted, _ := got["exhausted"].(bool); !exhausted {
 		t.Fatalf("exhausted: got %v", got["exhausted"])
 	}
+	if got := recoveryExhaustedPath(); got != filepath.Join(dir, recoveryExhaustedFilename) {
+		t.Fatalf("recoveryExhaustedPath() = %q, want %q", got, filepath.Join(dir, recoveryExhaustedFilename))
+	}
 }
 
 func TestReadHostDataLabel(t *testing.T) {

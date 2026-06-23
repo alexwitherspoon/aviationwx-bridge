@@ -11,12 +11,14 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/camera"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/logger"
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/paths"
 )
 
 //go:embed static/*
@@ -894,11 +896,23 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	s.log.Info("Update triggered via web UI")
 
-	// Trigger update by creating a force-update trigger file
-	// The supervisor script checks for this on boot-update runs
-	updateTriggerFile := "/data/aviationwx/trigger-update"
+	// Trigger update by creating a force-update trigger file at the mounted data volume
+	// root (/data in the container; host /data/aviationwx on Pi). The supervisor checks
+	// ${DATA_DIR}/trigger-update on the host.
+	dataDir := paths.HostDataDir()
+	updateTriggerFile := filepath.Join(dataDir, "trigger-update")
 
 	// Write "force" to indicate we want to skip age checks
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		s.log.Error("Failed to create update trigger directory", "error", err, "dir", dataDir)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status": "error",
+			"error":  fmt.Sprintf("Failed to trigger update: %v", err),
+		})
+		return
+	}
 	if err := os.WriteFile(updateTriggerFile, []byte("force"), 0644); err != nil {
 		s.log.Error("Failed to create update trigger file", "error", err)
 		w.Header().Set("Content-Type", "application/json")

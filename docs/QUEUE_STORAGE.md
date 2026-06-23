@@ -1,6 +1,6 @@
 # Queue Storage & Memory Management
 
-This document explains how AviationWX.org Bridge manages image queues, memory, and storage to ensure reliable operation on resource-constrained devices like the Raspberry Pi Zero 2 W.
+This document explains how AviationWX.org Bridge manages image queues, memory, and storage to ensure reliable operation on resource-constrained single-board computers like the Raspberry Pi Zero 2 W.
 
 ## Overview
 
@@ -161,7 +161,7 @@ The tmpfs size is set at container startup. Default is **200 MB**.
 **To change tmpfs size:**
 
 ```bash
-# Raspberry Pi (via environment file)
+# Supervised install (via environment file)
 sudo nano /data/aviationwx/environment
 # Uncomment and set: AVIATIONWX_TMPFS_SIZE=300m
 sudo /usr/local/bin/aviationwx-supervisor.sh force-update
@@ -326,7 +326,7 @@ The **overall system health** is the worst of all individual levels. If any reso
 2. **Graceful degradation** - Lose old data before losing new data
 3. **Self-healing** - System recovers automatically when resources free up
 4. **Visibility** - All resource usage visible in web UI
-5. **Conservative defaults** - Works out-of-box on Pi Zero 2 W (512 MB RAM)
+5. **Conservative defaults** - Works out-of-box on a 512 MB board such as the Pi Zero 2 W
 
 ## Related Documentation
 

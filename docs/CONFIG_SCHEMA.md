@@ -223,7 +223,7 @@ Each camera has its own upload credentials. SFTP only (protocol "ftps"/"ftp" in 
 
 ### Web console and network exposure
 
-The bridge targets a **private LAN** (for example a Raspberry Pi at a field or home), not a public internet-facing service. Authenticated JSON APIs and unauthenticated health endpoints (`GET /healthz`, `GET /readyz`) assume **trusted local access**: operators on the same network, or host-side automation (for example watchdog scripts using `127.0.0.1`). They are **not** hardened for anonymous access from the internet. Do not port-forward the web console port or place the host on an untrusted network without firewall rules and a deliberate security review.
+The bridge targets a **private LAN** (for example a single-board computer at a field or home), not a public internet-facing service. Authenticated JSON APIs and unauthenticated health endpoints (`GET /healthz`, `GET /readyz`) assume **trusted local access**: operators on the same network, or host-side automation (for example watchdog scripts using `127.0.0.1`). They are **not** hardened for anonymous access from the internet. Do not port-forward the web console port or place the host on an untrusted network without firewall rules and a deliberate security review.
 
 ## Complete Example
 
@@ -340,7 +340,7 @@ Config values can be overridden via environment:
 |----------|-------------|
 | `AVIATIONWX_CONFIG` | Config file path |
 | `AVIATIONWX_DATA_DIR` | Mounted data volume root inside the container (default `/data`) |
-| `AVIATIONWX_SELF_UPDATE` | When `1` or `true`, web UI `POST /api/update` writes the supervisor trigger file (Pi installs). Unset for IT-managed Docker. |
+| `AVIATIONWX_SELF_UPDATE` | When `1` or `true`, web UI `POST /api/update` writes the supervisor trigger file (supervised installs). Unset for IT-managed Docker. |
 | `AVIATIONWX_QUEUE_PATH` | Queue storage path |
 | `LOG_LEVEL` | Log level (debug, info, warn, error) |
 | `LOG_FORMAT` | Log format (text, json) |

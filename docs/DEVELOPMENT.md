@@ -36,7 +36,7 @@ npm run test:sh # optional: scripts/aviationwx-capture-restart.sh (Bats)
 go build -o bridge ./cmd/bridge
 ```
 
-For Raspberry Pi: `GOOS=linux GOARCH=arm64 go build -o bridge ./cmd/bridge`
+For a 64-bit ARM single-board computer (Raspberry Pi 4/5, Radxa, Orange Pi, etc.): `GOOS=linux GOARCH=arm64 go build -o bridge ./cmd/bridge`
 
 ## Docker
 
@@ -71,10 +71,10 @@ Create `docker/data/` with `global.json` and `cameras/*.json`. See CONFIG_SCHEMA
 
 Version updates are configured in [`.github/dependabot.yml`](../.github/dependabot.yml) for Go modules, GitHub Actions, and Docker images. Enable **Dependabot version updates** in the repository **Settings → Code security** if it is not already on. `package.json` lists dev-only tooling (e.g. Bats for shell tests); add an `npm` ecosystem entry in Dependabot if you want automated updates for those.
 
-## Host recovery (Pi)
+## Host recovery (supervised install)
 
 Fresh installs: `install.sh` enables `aviationwx-watchdog.timer` (1 min) and `aviationwx-capture-restart.timer` (5 min).
 
-Existing Pis: `aviationwx-supervisor.sh` enables the capture-restart timer on `boot-update` / daily update (supervisor v2.2+, release `min_host_version` 2.2). Watchdog also invokes `aviationwx-capture-restart.sh` each minute.
+Existing supervised installs: `aviationwx-supervisor.sh` enables the capture-restart timer on `boot-update` / daily update (supervisor v2.2+, release `min_host_version` 2.2). Watchdog also invokes `aviationwx-capture-restart.sh` each minute.
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) (Self-recovery) for behavior.

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Docs**: Generalize deployment language from Raspberry Pi to single-board computers (SBCs). The supervised install (`install.sh` + supervisor) is framed as the universal SBC path; the Docker path remains the IT-managed, no-supervisor option. Added a recommended-hardware tier (3GB or more RAM, Raspberry Pi 4-class or newer) with example boards. Terminology only; no behavior change.
+
 ### Fixed
 - **Security**: Close CodeQL alert #10 by building log tail slices with bounded `append` instead of `make(..., n)` in `GetLast` (follow-up to PR #53).
 

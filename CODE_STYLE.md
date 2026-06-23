@@ -405,6 +405,20 @@ Breaking change: Requires ONVIF credentials in config.
 - `test/` - Test improvements (e.g., `test/add-integration-tests`)
 - `docs/` - Documentation updates (e.g., `docs/update-readme`)
 
+### Prose and PRs
+
+Write commit messages, PR descriptions, and review replies in plain technical English. Match existing repo tone: direct, specific, no filler.
+
+- Do not use the Unicode em dash (U+2014) or en dash in new prose.
+- For a break or aside in commit messages, PR text, and review replies, use a **single ASCII hyphen** (`-`). Avoid a double hyphen (`--`) in those places. Keep `--` and `---` where Markdown or tooling needs them (horizontal rules, CLI flags, fenced code).
+- Do not add Unicode symbols or emoji in new prose you write (commit messages, PR text, script output). Existing examples in this file predate the rule; use ASCII bullets in new sections.
+- Avoid filler openers and padding ("Additionally", "Furthermore", "It's worth noting", "comprehensive", "leverage", "delve into", "ensure that").
+- State what changed and why; skip meta commentary about the change process.
+
+**Exception:** GitHub Copilot is used for automated PR review. Keep [.github/copilot-instructions.md](.github/copilot-instructions.md) current. Replying to Copilot review threads on PRs is expected; use the same plain voice and cite commit SHAs. Do not reference other AI or agent tooling in committed text.
+
+**PR shape:** Summary or Description, bullet Changes, Validation or Testing checklist, `Closes #N` when applicable. Dependency batches may use a Risk/Notes table. Breaking changes get their own section when config or behavior shifts.
+
 ### Breaking Changes
 
 - **Breaking changes are OK** - Project is young, large improvements are welcome

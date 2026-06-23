@@ -29,7 +29,7 @@
 
 ---
 
-⚠️ **IMPORTANT**: Do not include API keys, passwords, or other sensitive credentials in this PR. If adding camera configurations, credentials should be shared privately via email (contact@aviationwx.org) after the PR is merged.
+**IMPORTANT**: Do not include API keys, passwords, or other sensitive credentials in this PR. If adding camera configurations, credentials should be shared privately via email (contact@aviationwx.org) after the PR is merged.
 
 
 

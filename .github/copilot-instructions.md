@@ -2,7 +2,7 @@
 
 ## Project Summary
 
-AviationWX.org Bridge is a **safety-critical** Go daemon that captures webcam snapshots from local network cameras (HTTP, ONVIF, RTSP) and uploads them to aviationwx.org for pilot weather assessment. It runs on low-memory single-board computers such as the Raspberry Pi Zero 2 W (512MB RAM) and comparable boards. Memory and reliability are primary constraints.
+AviationWX.org Bridge is a **safety-critical** Go daemon that captures webcam snapshots from local network cameras (HTTP, ONVIF, RTSP) and uploads them to aviationwx.org for pilot weather assessment. It runs on low-memory single-board computers (1GB minimum, 3GB or more recommended; Raspberry Pi 4-class or newer). Memory and reliability are primary constraints.
 
 **Key facts:**
 - Config version 2; upload credentials are per-camera, not global

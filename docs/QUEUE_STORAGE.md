@@ -1,6 +1,6 @@
 # Queue Storage & Memory Management
 
-This document explains how AviationWX.org Bridge manages image queues, memory, and storage to ensure reliable operation on resource-constrained single-board computers like the Raspberry Pi Zero 2 W.
+This document explains how AviationWX.org Bridge manages image queues, memory, and storage to ensure reliable operation on resource-constrained single-board computers.
 
 ## Overview
 
@@ -12,7 +12,7 @@ The bridge uses a **RAM-based filesystem (tmpfs)** mounted at `/dev/shm` to stor
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    System Memory (512 MB)                   │
+│                    System Memory (1 GB)                     │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌─────────────────┐  ┌──────────────────────────────────┐  │
 │  │   Application   │  │         tmpfs (/dev/shm)         │  │
@@ -263,8 +263,8 @@ The **overall system health** is the worst of all individual levels. If any reso
     "cpu_percent": 12.5,
     "cpu_level": "healthy",
     "mem_used_mb": 234.5,
-    "mem_total_mb": 512.0,
-    "mem_percent": 45.8,
+    "mem_total_mb": 1024.0,
+    "mem_percent": 22.9,
     "mem_level": "healthy",
     "disk_percent": 22.5,
     "disk_level": "healthy",
@@ -326,7 +326,7 @@ The **overall system health** is the worst of all individual levels. If any reso
 2. **Graceful degradation** - Lose old data before losing new data
 3. **Self-healing** - System recovers automatically when resources free up
 4. **Visibility** - All resource usage visible in web UI
-5. **Conservative defaults** - Works out-of-box on a 512 MB board such as the Pi Zero 2 W
+5. **Conservative defaults** - Works out-of-box on low-memory boards (1 GB and up)
 
 ## Related Documentation
 

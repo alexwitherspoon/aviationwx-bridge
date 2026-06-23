@@ -1,6 +1,6 @@
 # AviationWX.org Bridge
 
-Remote bridge device for capturing webcam snapshots and uploading them to AviationWX.org. Designed for low-power single-board computers (SBCs) such as the Raspberry Pi Zero 2 W and comparable boards.
+Remote bridge device for capturing webcam snapshots and uploading them to AviationWX.org. Designed for low-power single-board computers (SBCs) such as the Raspberry Pi 4 and comparable boards.
 
 ## Overview
 
@@ -176,7 +176,7 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 - **Accurate Timestamps**: UTC observation times with EXIF validation (via exiftool)
 - **Web Console**: Modern dashboard with camera preview and management
 - **Secure Upload**: SFTP with fail2ban-aware retry logic
-- **Low Memory**: Optimized for low-memory SBCs such as the Raspberry Pi Zero 2 W (512MB RAM)
+- **Low Memory**: Runs lean on small SBCs (1GB minimum, 3GB or more recommended)
 - **NTP Health**: Automatic time validation and drift detection
 - **Auto Updates**: Critical security updates with automatic rollback (Path A)
 - **Hot-Reload**: Camera, timezone, and SNTP config changes apply instantly (no restart)
@@ -218,18 +218,20 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 
 The bridge runs on any 64-bit Linux host with Docker (ARM64, ARMv7, or x86-64). It is built for small, low-power single-board computers but also runs on a mini-PC or VM.
 
-**Minimum (low-memory SBC, e.g. Raspberry Pi Zero 2 W):**
-- 512MB RAM
-- 8GB SD card (or eMMC/USB)
+RAM is the binding constraint, not CPU.
+
+**Minimum:**
+- 1GB RAM
+- A 64-bit quad-core CPU in the class of the Raspberry Pi 4 (Cortex-A72 at ~1.5 GHz) or newer; a comparable x86 such as an Intel N100 also clears the bar
+- 8GB storage (SD, eMMC, or USB)
 - Network access to cameras and the internet
 
-**Recommended:**
-- 3GB or more RAM (4GB and up is comfortable)
-- A quad-core CPU in the class of the Raspberry Pi 4 or newer
+**Strongly recommended:**
+- 3GB or more RAM, for headroom with multiple cameras and higher resolutions
 - 16GB+ storage (SD, eMMC, or NVMe)
 - Wired ethernet for reliability
 
-**Example boards:** The Raspberry Pi 4 and 5 are the best-documented choices. Comparable single-board computers also work, including the Radxa ROCK series, Orange Pi 5 series, Libre Computer boards, or an Intel N100-class mini-PC. These are examples, not endorsements; any board that runs 64-bit Linux with Docker and meets the recommended specs is a good fit. The Raspberry Pi has the broadest community and OS support, while other boards often offer more RAM, storage, or I/O.
+**Example boards:** The Raspberry Pi 4 and 5 are the best-documented choices. Comparable single-board computers also work, including the Radxa ROCK series, Orange Pi 5 series, Libre Computer boards, or an Intel N100-class mini-PC. These are examples, not endorsements; any board that runs 64-bit Linux with Docker and meets the minimum above is a good fit. The Raspberry Pi has the broadest community and OS support, while other boards often offer more RAM, storage, or I/O.
 
 ---
 

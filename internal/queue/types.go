@@ -115,7 +115,7 @@ type GlobalQueueConfig struct {
 	MaxTotalSizeMB     int     `json:"max_total_size_mb"`    // Default: 100 (all cameras)
 	MemoryCheckSeconds int     `json:"memory_check_seconds"` // Default: 5
 	EmergencyThinRatio float64 `json:"emergency_thin_ratio"` // Default: 0.5 (keep 50%)
-	MaxHeapMB          int     `json:"max_heap_mb"`          // Default: 400 (for 512MB boards)
+	MaxHeapMB          int     `json:"max_heap_mb"`          // Default: 400 (conservative cap for low-memory boards)
 }
 
 // DefaultGlobalQueueConfig returns sensible defaults for global queue config

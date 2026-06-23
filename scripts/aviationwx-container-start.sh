@@ -29,11 +29,11 @@ get_total_cpus() {
 
 # Calculate appropriate Docker memory limit based on total RAM
 # Strategy:
-#   < 1GB:   Use 60% (be very conservative - Pi Zero 2 W)
-#   1-2GB:   Use 65% (still conservative - Pi 3/4 1GB)
+#   < 1GB:   Use 60% (be very conservative - below recommended minimum)
+#   1-2GB:   Use 65% (still conservative - 1GB boards)
 #   2-4GB:   Use 70% (balanced - Pi 4 2GB)
 #   4-8GB:   Use 75% (comfortable - Pi 4 4GB)
-#   > 8GB:   Use 80% (generous - Server/Pi 4 8GB)
+#   > 8GB:   Use 80% (generous - server / Pi 4 8GB)
 calculate_memory_limits() {
     local total_mb=$1
     local docker_limit_mb
@@ -41,7 +41,7 @@ calculate_memory_limits() {
     local tmpfs_mb
     
     if [ "$total_mb" -lt 1024 ]; then
-        # < 1GB: Very conservative (Pi Zero 2 W: 416MB * 0.6 = 250MB)
+        # < 1GB: Very conservative (below recommended minimum; e.g. 768MB * 0.6 = 460MB)
         docker_limit_mb=$((total_mb * 60 / 100))
         go_limit_mb=$((docker_limit_mb * 85 / 100))  # 85% of Docker limit
         tmpfs_mb=100

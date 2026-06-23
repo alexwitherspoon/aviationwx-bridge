@@ -98,7 +98,7 @@ When creating a new release:
 - [ ] `deprecates` includes any versions with known critical issues
 - [ ] For edge releases: add `edge_stable_commit` after stability verification
 - [ ] Docker image is built and published automatically by CI
-- [ ] Test installation on a clean low-memory SBC, e.g. Pi Zero 2 W (if major release)
+- [ ] Test installation on a clean low-memory SBC, e.g. a 1GB Pi 4-class board (if major release)
 
 ## Example Releases
 

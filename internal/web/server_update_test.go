@@ -19,7 +19,6 @@ func TestHandleUpdate_writesTriggerAtVolumeRoot(t *testing.T) {
 	// The trigger must not live under /data/aviationwx inside the container.
 	dataDir := t.TempDir()
 	t.Setenv("AVIATIONWX_DATA_DIR", dataDir)
-	t.Setenv("AVIATIONWX_CONFIG_DIR", dataDir)
 
 	server := testServerWithAuth(t, ServerConfig{})
 	req := httptest.NewRequest(http.MethodPost, "/api/update", nil)

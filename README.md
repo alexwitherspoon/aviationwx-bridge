@@ -1,6 +1,6 @@
 # AviationWX.org Bridge
 
-Remote bridge device for capturing webcam snapshots and uploading them to AviationWX.org. Designed for Raspberry Pi Zero 2 W and other embedded devices.
+Remote bridge device for capturing webcam snapshots and uploading them to AviationWX.org. Designed for low-power single-board computers (SBCs) such as the Raspberry Pi Zero 2 W and comparable boards.
 
 ## Overview
 
@@ -21,9 +21,9 @@ AviationWX.org Bridge is a lightweight daemon that:
 
 Choose the path that matches your environment:
 
-### Path A: Raspberry Pi (Set and Forget)
+### Path A: Supervised Install (Set and Forget)
 
-**Best for:** Dedicated devices at remote locations with minimal IT support.
+**Best for:** Dedicated single-board computers at remote locations with minimal IT support. Works on a Raspberry Pi or a comparable SBC (see [Hardware Requirements](#hardware-requirements)).
 
 One command installs everything:
 
@@ -48,7 +48,7 @@ curl -fsSL https://raw.githubusercontent.com/alexwitherspoon/AviationWX.org-Brid
 
 ### Path B: Docker (IT-Managed)
 
-**Best for:** Professional environments with existing Docker infrastructure and IT teams.
+**Best for:** Professional environments with existing Docker infrastructure and IT teams. This path runs the container directly, without the host supervisor, so updates and rollback are handled by your own tooling.
 
 ```bash
 docker pull ghcr.io/alexwitherspoon/aviationwx-org-bridge:latest
@@ -92,7 +92,7 @@ services:
 
 ## Updates
 
-### Raspberry Pi (Path A)
+### Supervised Install (Path A)
 
 Updates are handled automatically by the supervisor:
 
@@ -116,7 +116,7 @@ cat /data/aviationwx/update-available.json
 
 ### Docker (Path B)
 
-The web console still notifies you when a newer release is available. One-click apply is disabled unless `AVIATIONWX_SELF_UPDATE=1` (Pi supervisor installs set this automatically). Update the image with your orchestration tooling:
+The web console still notifies you when a newer release is available. One-click apply is disabled unless `AVIATIONWX_SELF_UPDATE=1` (supervised installs set this automatically). Update the image with your orchestration tooling:
 
 ```bash
 docker pull ghcr.io/alexwitherspoon/aviationwx-org-bridge:latest
@@ -176,7 +176,7 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 - **Accurate Timestamps**: UTC observation times with EXIF validation (via exiftool)
 - **Web Console**: Modern dashboard with camera preview and management
 - **Secure Upload**: SFTP with fail2ban-aware retry logic
-- **Low Memory**: Optimized for Raspberry Pi Zero 2 W (512MB RAM)
+- **Low Memory**: Optimized for low-memory SBCs such as the Raspberry Pi Zero 2 W (512MB RAM)
 - **NTP Health**: Automatic time validation and drift detection
 - **Auto Updates**: Critical security updates with automatic rollback (Path A)
 - **Hot-Reload**: Camera, timezone, and SNTP config changes apply instantly (no restart)
@@ -216,15 +216,20 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 
 ## Hardware Requirements
 
-**Minimum (Raspberry Pi Zero 2 W):**
+The bridge runs on any 64-bit Linux host with Docker (ARM64, ARMv7, or x86-64). It is built for small, low-power single-board computers but also runs on a mini-PC or VM.
+
+**Minimum (low-memory SBC, e.g. Raspberry Pi Zero 2 W):**
 - 512MB RAM
-- 8GB SD card
-- Network access to cameras and internet
+- 8GB SD card (or eMMC/USB)
+- Network access to cameras and the internet
 
 **Recommended:**
-- Raspberry Pi 4 (2GB+ RAM)
-- 16GB+ SD card
+- 3GB or more RAM (4GB and up is comfortable)
+- A quad-core CPU in the class of the Raspberry Pi 4 or newer
+- 16GB+ storage (SD, eMMC, or NVMe)
 - Wired ethernet for reliability
+
+**Example boards:** The Raspberry Pi 4 and 5 are the best-documented choices. Comparable single-board computers also work, including the Radxa ROCK series, Orange Pi 5 series, Libre Computer boards, or an Intel N100-class mini-PC. These are examples, not endorsements; any board that runs 64-bit Linux with Docker and meets the recommended specs is a good fit. The Raspberry Pi has the broadest community and OS support, while other boards often offer more RAM, storage, or I/O.
 
 ---
 
@@ -246,7 +251,7 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 # Container logs
 docker logs aviationwx-org-bridge
 
-# Supervisor logs (Path A only)
+# Supervisor logs (Path A, supervised install only)
 cat /data/aviationwx/supervisor.log
 ```
 

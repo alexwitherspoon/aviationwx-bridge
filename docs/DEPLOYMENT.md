@@ -15,7 +15,7 @@ Choose the deployment method that matches your environment:
 
 ## Supervised Install (Recommended)
 
-Runs on a Raspberry Pi or a comparable single-board computer (SBC). The install script adds a host supervisor that handles automatic updates, rollback, and self-recovery. See [Recommended hardware](#recommended-hardware) for board options.
+Runs on a Raspberry Pi or a comparable single-board computer (SBC). Run one command and the bridge looks after itself: a host supervisor checks for updates daily, applies critical security fixes automatically, rolls back a bad update when health checks fail, and restarts on its own after a crash or capture stall. This is the recommended path for most installs. See [Recommended hardware](#recommended-hardware) for board options.
 
 ### One-Command Installation
 

@@ -25,6 +25,8 @@ Choose the path that matches your environment:
 
 **Best for:** Dedicated single-board computers at remote locations with minimal IT support. Works on a Raspberry Pi or a comparable SBC (see [Hardware Requirements](#hardware-requirements)).
 
+Run one command and the bridge looks after itself: it checks for updates daily, applies critical security fixes automatically, rolls back a bad update when health checks fail, and restarts on its own after a crash or capture stall. This is the recommended path for most installs.
+
 One command installs everything:
 
 ```bash

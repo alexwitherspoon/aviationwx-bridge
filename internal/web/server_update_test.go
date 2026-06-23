@@ -127,6 +127,9 @@ func TestHandleUpdate_successResponse(t *testing.T) {
 	w := httptest.NewRecorder()
 	server.GetMux().ServeHTTP(w, req)
 
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200, body %s", w.Code, w.Body.String())
+	}
 	var resp map[string]string
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)

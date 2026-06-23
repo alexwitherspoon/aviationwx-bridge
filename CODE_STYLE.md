@@ -405,6 +405,15 @@ Breaking change: Requires ONVIF credentials in config.
 - `test/` - Test improvements (e.g., `test/add-integration-tests`)
 - `docs/` - Documentation updates (e.g., `docs/update-readme`)
 
+### Prose and PRs
+
+Write commit messages, PR descriptions, and review replies in plain technical English. Match existing repo tone: direct, specific, no filler.
+
+- Use commas or separate sentences instead of em dashes or en dashes in prose.
+- Do not use Unicode symbols or emoji in new docs, PR text, or script output (no checkmarks, crosses, warning signs, arrows). ASCII is fine for code and tables.
+- Avoid stock AI phrasing ("Additionally", "Furthermore", "It's worth noting", "comprehensive", "leverage", "delve into", "ensure that").
+- State what changed and why; skip meta commentary about the change process.
+
 ### Breaking Changes
 
 - **Breaking changes are OK** - Project is young, large improvements are welcome

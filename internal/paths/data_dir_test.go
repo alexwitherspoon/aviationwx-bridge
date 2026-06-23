@@ -21,7 +21,7 @@ func TestHostDataDir_ignoresConfigDir(t *testing.T) {
 	t.Setenv("AVIATIONWX_DATA_DIR", "")
 	t.Setenv("AVIATIONWX_CONFIG_DIR", "/data/config")
 	if got := HostDataDir(); got != "/data" {
-		t.Fatalf("HostDataDir() = %q, want /data (config dir must not change data root)", got)
+		t.Fatalf("HostDataDir() = %q, want /data", got)
 	}
 }
 
@@ -33,7 +33,7 @@ func TestUpdateTriggerPath_joinsAtDataRoot(t *testing.T) {
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
-	// Legacy bug path must not be implied by HostDataDir.
+	// Legacy bug nested aviationwx under the data root.
 	legacy := filepath.Join(HostDataDir(), "aviationwx", "trigger-update")
 	if got == legacy {
 		t.Fatal("trigger path must not nest aviationwx under data root")

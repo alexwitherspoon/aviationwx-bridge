@@ -172,7 +172,6 @@ func TestHandleUpdate_writeFailureWhenDataDirIsFile(t *testing.T) {
 }
 
 func TestUpdateTriggerPath_matchesHostSupervisorLayout(t *testing.T) {
-	// Document the contract: container /data + trigger-update == host /data/aviationwx/trigger-update
 	dataDir := t.TempDir()
 	t.Setenv("AVIATIONWX_DATA_DIR", dataDir)
 

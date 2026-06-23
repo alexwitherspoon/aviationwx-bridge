@@ -116,7 +116,7 @@ cat /data/aviationwx/update-available.json
 
 ### Docker (Path B)
 
-Update using your preferred method:
+The web console still notifies you when a newer release is available. One-click apply is disabled unless `AVIATIONWX_SELF_UPDATE=1` (Pi supervisor installs set this automatically). Update the image with your orchestration tooling:
 
 ```bash
 docker pull ghcr.io/alexwitherspoon/aviationwx-org-bridge:latest

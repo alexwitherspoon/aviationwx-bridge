@@ -146,6 +146,17 @@ docker run -d ... # same run command
 
 Or use your existing update tooling (Watchtower, Portainer, ArgoCD, etc.)
 
+### Web console update banner
+
+The bridge checks GitHub for new releases in all deployments. **Applying** an update from the web UI requires the Pi supervisor path:
+
+| Deployment | `AVIATIONWX_SELF_UPDATE` | Web UI behavior |
+|------------|--------------------------|-----------------|
+| Pi (`install.sh` + supervisor) | `1` (set by `aviationwx-container-start.sh`) | Banner applies update via host supervisor |
+| Docker / docker-compose (IT-managed) | unset (default) | Banner shows version availability and links to release notes; `POST /api/update` returns 409 |
+
+Do not mount the Docker socket into the bridge container to enable in-container updates.
+
 ---
 
 ## Configuration

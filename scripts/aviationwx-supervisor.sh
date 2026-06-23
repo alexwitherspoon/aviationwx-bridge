@@ -17,7 +17,7 @@ readonly SCRIPTS_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main
 # Update configuration
 readonly MIN_RELEASE_AGE_HOURS=2
 readonly SKIP_PRERELEASE=true
-readonly PULL_TIMEOUT=600  # 10 minutes for slow connections (Pi Zero)
+readonly PULL_TIMEOUT=600  # 10 minutes for slow connections (low-power SBCs / slow links)
 readonly EXEC_TIMEOUT=15   # bound docker exec for version probe
 
 # Dry-run mode for testing
@@ -158,7 +158,7 @@ update_host_scripts() {
 }
 
 # ============================================================================
-# SYSTEMD (idempotent; for Pis installed before capture-restart timer existed)
+# SYSTEMD (idempotent; for hosts installed before capture-restart timer existed)
 # ============================================================================
 
 # ensure_capture_restart_timer installs/enables aviationwx-capture-restart.timer.

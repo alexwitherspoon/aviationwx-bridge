@@ -122,11 +122,14 @@ install_jq() {
     log_success "jq installed"
 }
 
-# Configure Docker logging for SD card protection (Raspberry Pi)
+# Configure RAM-based Docker logging to protect SD-card-backed single-board
+# computers from log write wear. Detection currently keys on Raspberry Pi, the
+# most common SD-card board; other SBCs use default logging unless configured
+# manually (or run from eMMC/SSD where wear is less of a concern).
 configure_docker_logging() {
     log_info "Configuring Docker logging for SD card protection..."
     
-    # Check if running on Raspberry Pi
+    # Auto-detect Raspberry Pi (most common SD-card-backed SBC)
     if [[ $OS == "raspbian" ]] || grep -qi "raspberry" /proc/cpuinfo 2>/dev/null; then
         log_info "Raspberry Pi detected - configuring journald with volatile storage"
         
@@ -192,7 +195,7 @@ EOF
             return 1
         fi
     else
-        log_info "Not a Raspberry Pi - using default Docker logging"
+        log_info "No Raspberry Pi detected - using default Docker logging (set up RAM-based logging manually on other SD-card-backed boards)"
     fi
 }
 
@@ -220,7 +223,7 @@ setup_data_dir() {
 #   1-2 cameras @ 4K:    200m recommended
 #   3-4 cameras @ 4K:    300m or higher
 #
-# Note: Pi Zero 2 W has 512MB RAM. Keep this + application memory under ~450MB total.
+# Note: on a 512MB board such as the Pi Zero 2 W, keep this + application memory under ~450MB total.
 #
 # AVIATIONWX_TMPFS_SIZE=200m
 EOF

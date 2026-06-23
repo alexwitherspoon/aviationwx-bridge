@@ -895,8 +895,6 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.log.Info("Update triggered via web UI")
-
 	if !deploy.SelfUpdateEnabled() {
 		s.log.Info("Update via web UI rejected: self-update disabled for this deployment")
 		w.Header().Set("Content-Type", "application/json")
@@ -907,6 +905,8 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	s.log.Info("Update triggered via web UI")
 
 	// Trigger update by creating a force-update trigger file at the mounted data volume
 	// root (/data in the container; host /data/aviationwx on Pi). The supervisor checks

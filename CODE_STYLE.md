@@ -411,8 +411,10 @@ Write commit messages, PR descriptions, and review replies in plain technical En
 
 - Use commas or separate sentences instead of em dashes or en dashes in prose.
 - Do not use Unicode symbols or emoji in new docs, PR text, or script output (no checkmarks, crosses, warning signs, arrows). ASCII is fine for code and tables.
-- Avoid stock AI phrasing ("Additionally", "Furthermore", "It's worth noting", "comprehensive", "leverage", "delve into", "ensure that").
+- Avoid filler openers and padding ("Additionally", "Furthermore", "It's worth noting", "comprehensive", "leverage", "delve into", "ensure that").
 - State what changed and why; skip meta commentary about the change process.
+
+**Exception:** GitHub Copilot is used for automated PR review. Keep [.github/copilot-instructions.md](.github/copilot-instructions.md) current. Replying to Copilot review threads on PRs is expected; use the same plain voice and cite commit SHAs. Do not reference other AI or agent tooling in committed text.
 
 ### Breaking Changes
 

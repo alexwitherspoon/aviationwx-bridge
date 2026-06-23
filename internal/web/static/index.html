@@ -390,6 +390,12 @@
         import { buildCameraConfigFromFormValues, uploadCredentialKey, findConflictingCameraId, slugCameraIdFromName, encodeBasicAuthHeader } from '/js/form-utils.js';
         import { shouldRefreshPreview } from '/js/preview-refresh.js';
         import { shouldSkipSettingsHydrate, shouldWarnBeforePageLeave } from '/js/settings-draft.js';
+        import {
+            canApplyUpdateFromUI,
+            updateBannerLabel,
+            manualUpdateConfirmMessage,
+            selfUpdateConfirmMessage,
+        } from '/js/update-ui.js';
         window.buildCameraConfigFromFormValues = buildCameraConfigFromFormValues;
         window.uploadCredentialKey = uploadCredentialKey;
         window.findConflictingCameraId = findConflictingCameraId;
@@ -398,6 +404,10 @@
         window.shouldRefreshPreview = shouldRefreshPreview;
         window.shouldSkipSettingsHydrate = shouldSkipSettingsHydrate;
         window.shouldWarnBeforePageLeave = shouldWarnBeforePageLeave;
+        window.canApplyUpdateFromUI = canApplyUpdateFromUI;
+        window.updateBannerLabel = updateBannerLabel;
+        window.manualUpdateConfirmMessage = manualUpdateConfirmMessage;
+        window.selfUpdateConfirmMessage = selfUpdateConfirmMessage;
     </script>
     <script src="/js/app.js" defer></script>
 </body>

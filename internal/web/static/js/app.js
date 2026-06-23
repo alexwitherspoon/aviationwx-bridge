@@ -278,10 +278,18 @@ function updateStatusDisplay() {
     if (status.update && status.update.update_available) {
         const updateLink = document.getElementById('updateAvailable');
         updateLink.style.display = 'inline-block';
-        updateLink.textContent = `⬆ Update to ${status.update.latest_version}`;
+        const labelFn = window.updateBannerLabel;
+        updateLink.textContent = typeof labelFn === 'function'
+            ? labelFn(status.update.latest_version, status.self_update_enabled)
+            : `Update to ${status.update.latest_version}`;
         updateLink.onclick = (e) => {
             e.preventDefault();
-            showUpdateDialog(status.update);
+            const canApply = window.canApplyUpdateFromUI?.(status.self_update_enabled) ?? false;
+            if (canApply) {
+                showUpdateDialog(status.update);
+            } else {
+                showManualUpdateDialog(status.update);
+            }
         };
     } else {
         document.getElementById('updateAvailable').style.display = 'none';
@@ -1701,17 +1709,26 @@ window.addEventListener('beforeunload', () => {
 
 // Update Management
 function showUpdateDialog(updateInfo) {
-    const message = `
-        <div style="text-align: left; padding: 1rem;">
-            <p><strong>Current Version:</strong> ${updateInfo.current_version}</p>
-            <p><strong>Latest Version:</strong> ${updateInfo.latest_version}</p>
-            <p style="margin-top: 1.5rem;">This will trigger the supervisor script to pull and restart with the new version.</p>
-            <p><strong>⚠️ Warning:</strong> The bridge will be unavailable for 1-2 minutes during the update.</p>
-        </div>
-    `;
-    
-    if (confirm(`Update Available\n\n${message.replace(/<[^>]*>/g, '')}\n\nProceed with update?`)) {
+    const bodyFn = window.selfUpdateConfirmMessage;
+    const body = typeof bodyFn === 'function'
+        ? bodyFn(updateInfo)
+        : `Latest version: ${updateInfo.latest_version}`;
+    if (confirm(`Update Available\n\n${body}\n\nProceed with update?`)) {
         triggerUpdate();
+    }
+}
+
+function showManualUpdateDialog(updateInfo) {
+    const bodyFn = window.manualUpdateConfirmMessage;
+    const body = typeof bodyFn === 'function'
+        ? bodyFn(updateInfo)
+        : `Version ${updateInfo.latest_version} is available. Update the container with your orchestration tooling.`;
+    if (confirm(body)) {
+        const urlFn = window.releaseNotesURL;
+        const fallbackUrl = window.DEFAULT_RELEASE_NOTES_URL
+            || 'https://github.com/alexwitherspoon/aviationwx.org-bridge/releases';
+        const url = typeof urlFn === 'function' ? urlFn(updateInfo) : fallbackUrl;
+        window.open(url, '_blank', 'noopener');
     }
 }
 

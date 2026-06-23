@@ -60,7 +60,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" http://localhost:1229/healthz
 ```bash
 docker build -f docker/Dockerfile -t ghcr.io/alexwitherspoon/aviationwx-org-bridge:local-test .
 mkdir -p docker/data && echo "local-test" > docker/data/last-known-good.txt
-AVIATIONWX_DATA_DIR="$(pwd)/docker/data" ./scripts/aviationwx-container-start.sh local-test
+AVIATIONWX_DATA_DIR="$(pwd)/docker/data" AVIATIONWX_SELF_UPDATE=0 ./scripts/aviationwx-container-start.sh local-test
 ```
 
 ## Config

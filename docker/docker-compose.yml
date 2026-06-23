@@ -31,6 +31,8 @@ services:
     environment:
       # New config structure (v2.0+): file-per-camera
       - AVIATIONWX_CONFIG_DIR=/data
+      # Self-update via web UI requires host supervisor; leave unset for IT-managed Docker
+      # - AVIATIONWX_SELF_UPDATE=1
       # Legacy config path (for automatic migration)
       - AVIATIONWX_CONFIG=/data/config.json
       - AVIATIONWX_QUEUE_PATH=/dev/shm/aviationwx

@@ -339,6 +339,8 @@ Config values can be overridden via environment:
 | Variable | Description |
 |----------|-------------|
 | `AVIATIONWX_CONFIG` | Config file path |
+| `AVIATIONWX_DATA_DIR` | Mounted data volume root inside the container (default `/data`) |
+| `AVIATIONWX_SELF_UPDATE` | When `1` or `true`, web UI `POST /api/update` writes the supervisor trigger file (Pi installs). Unset for IT-managed Docker. |
 | `AVIATIONWX_QUEUE_PATH` | Queue storage path |
 | `LOG_LEVEL` | Log level (debug, info, warn, error) |
 | `LOG_FORMAT` | Log format (text, json) |

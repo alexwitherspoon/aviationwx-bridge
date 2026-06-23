@@ -16,6 +16,7 @@ import (
 
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/camera"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/deploy"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/image"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/logger"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/resource"
@@ -903,14 +904,15 @@ func (b *Bridge) buildStatus() interface{} {
 	}
 
 	status := map[string]interface{}{
-		"version":        Version,
-		"commit":         GitCommit,
-		"update_channel": getUpdateChannel(global.UpdateChannel),
-		"timezone":       global.Timezone,
-		"cameras":        enabledCameras,
-		"total_cameras":  len(cameras),
-		"queued_images":  queuedImages,
-		"uploads_today":  uploadsToday,
+		"version":             Version,
+		"commit":              GitCommit,
+		"update_channel":      getUpdateChannel(global.UpdateChannel),
+		"timezone":            global.Timezone,
+		"cameras":             enabledCameras,
+		"total_cameras":       len(cameras),
+		"queued_images":       queuedImages,
+		"uploads_today":       uploadsToday,
+		"self_update_enabled": deploy.SelfUpdateEnabled(),
 	}
 	if tag := readHostDataLabel("configured-image-tag.txt"); tag != "" {
 		status["configured_image_tag"] = tag
@@ -956,6 +958,7 @@ func (b *Bridge) buildStatus() interface{} {
 			"current_version":  updateStatus.CurrentVersion,
 			"current_commit":   updateStatus.CurrentCommit,
 			"latest_version":   updateStatus.LatestVersion,
+			"latest_url":       updateStatus.LatestURL,
 			"update_available": updateStatus.UpdateAvailable,
 			"last_check":       updateStatus.LastCheck.Format(time.RFC3339),
 		}

@@ -416,6 +416,8 @@ Write commit messages, PR descriptions, and review replies in plain technical En
 
 **Exception:** GitHub Copilot is used for automated PR review. Keep [.github/copilot-instructions.md](.github/copilot-instructions.md) current. Replying to Copilot review threads on PRs is expected; use the same plain voice and cite commit SHAs. Do not reference other AI or agent tooling in committed text.
 
+**PR shape:** Summary or Description, bullet Changes, Validation or Testing checklist, `Closes #N` when applicable. Dependency batches may use a Risk/Notes table. Breaking changes get their own section when config or behavior shifts.
+
 ### Breaking Changes
 
 - **Breaking changes are OK** - Project is young, large improvements are welcome

@@ -79,3 +79,5 @@ Follow [CODE_STYLE.md](CODE_STYLE.md) for all changes.
 Do not commit scratch working docs (analysis, summaries, checklists, implementation plans). Remove or consolidate before commit. Only commit docs that belong long-term.
 
 This file is the in-repo context for **GitHub Copilot** automated PR review. Keep it aligned with [CODE_STYLE.md](../CODE_STYLE.md).
+
+**Maintainer voice:** Plain technical English. PRs use Summary/Description, bullet Changes, Test plan checklists, and `Closes #N`. Review replies: one sentence plus commit SHA; no performative praise.

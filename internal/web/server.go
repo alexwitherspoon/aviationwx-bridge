@@ -914,7 +914,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := os.WriteFile(updateTriggerFile, []byte("force"), 0644); err != nil {
-		s.log.Error("Failed to create update trigger file", "error", err)
+		s.log.Error("Failed to create update trigger file", "error", err, "path", updateTriggerFile)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{

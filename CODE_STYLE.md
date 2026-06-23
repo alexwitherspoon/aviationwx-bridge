@@ -410,7 +410,7 @@ Breaking change: Requires ONVIF credentials in config.
 Write commit messages, PR descriptions, and review replies in plain technical English. Match existing repo tone: direct, specific, no filler.
 
 - Use commas or separate sentences instead of em dashes or en dashes in prose.
-- Do not use Unicode symbols or emoji in new docs, PR text, or script output (no checkmarks, crosses, warning signs, arrows). ASCII is fine for code and tables.
+- Do not add Unicode symbols or emoji in new prose you write (commit messages, PR text, script output). Existing examples in this file predate the rule; use ASCII bullets in new sections.
 - Avoid filler openers and padding ("Additionally", "Furthermore", "It's worth noting", "comprehensive", "leverage", "delve into", "ensure that").
 - State what changed and why; skip meta commentary about the change process.
 

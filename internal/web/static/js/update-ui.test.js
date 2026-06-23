@@ -9,6 +9,7 @@ import {
     manualUpdateConfirmMessage,
     selfUpdateConfirmMessage,
     releaseNotesURL,
+    DEFAULT_RELEASE_NOTES_URL,
 } from './update-ui.js';
 
 test('canApplyUpdateFromUI is true only when enabled', () => {
@@ -48,6 +49,10 @@ test('releaseNotesURL rejects non-http(s) schemes', () => {
         releaseNotesURL({ latest_url: 'not-a-url' }),
         /github\.com\/alexwitherspoon\/aviationwx\.org-bridge\/releases/,
     );
+});
+
+test('DEFAULT_RELEASE_NOTES_URL is https', () => {
+    assert.match(DEFAULT_RELEASE_NOTES_URL, /^https:\/\//);
 });
 
 test('manualUpdateConfirmMessage includes release URL', () => {

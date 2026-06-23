@@ -2,7 +2,8 @@
  * Update banner and apply behavior for Pi supervisor vs IT-managed Docker.
  */
 
-const defaultReleaseNotesURL = 'https://github.com/alexwitherspoon/aviationwx.org-bridge/releases';
+export const DEFAULT_RELEASE_NOTES_URL =
+    'https://github.com/alexwitherspoon/aviationwx.org-bridge/releases';
 
 function isSafeHTTPURL(url) {
     try {
@@ -21,7 +22,7 @@ export function releaseNotesURL(updateInfo) {
             return trimmed;
         }
     }
-    return defaultReleaseNotesURL;
+    return DEFAULT_RELEASE_NOTES_URL;
 }
 
 export function canApplyUpdateFromUI(selfUpdateEnabled) {

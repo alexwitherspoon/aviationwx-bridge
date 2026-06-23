@@ -1725,9 +1725,9 @@ function showManualUpdateDialog(updateInfo) {
         : `Version ${updateInfo.latest_version} is available. Update the container with your orchestration tooling.`;
     if (confirm(body)) {
         const urlFn = window.releaseNotesURL;
-        const url = typeof urlFn === 'function'
-            ? urlFn(updateInfo)
-            : (updateInfo.latest_url || 'https://github.com/alexwitherspoon/aviationwx.org-bridge/releases');
+        const fallbackUrl = window.DEFAULT_RELEASE_NOTES_URL
+            || 'https://github.com/alexwitherspoon/aviationwx.org-bridge/releases';
+        const url = typeof urlFn === 'function' ? urlFn(updateInfo) : fallbackUrl;
         window.open(url, '_blank', 'noopener');
     }
 }

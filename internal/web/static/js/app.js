@@ -1724,9 +1724,11 @@ function showManualUpdateDialog(updateInfo) {
         ? bodyFn(updateInfo)
         : `Version ${updateInfo.latest_version} is available. Update the container with your orchestration tooling.`;
     if (confirm(body)) {
-        if (updateInfo.latest_url) {
-            window.open(updateInfo.latest_url, '_blank', 'noopener');
-        }
+        const urlFn = window.releaseNotesURL;
+        const url = typeof urlFn === 'function'
+            ? urlFn(updateInfo)
+            : (updateInfo.latest_url || 'https://github.com/alexwitherspoon/aviationwx.org-bridge/releases');
+        window.open(url, '_blank', 'noopener');
     }
 }
 

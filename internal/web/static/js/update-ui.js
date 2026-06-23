@@ -2,6 +2,16 @@
  * Update banner and apply behavior for Pi supervisor vs IT-managed Docker.
  */
 
+const defaultReleaseNotesURL = 'https://github.com/alexwitherspoon/aviationwx.org-bridge/releases';
+
+export function releaseNotesURL(updateInfo) {
+    const url = updateInfo?.latest_url;
+    if (typeof url === 'string' && url.trim() !== '') {
+        return url.trim();
+    }
+    return defaultReleaseNotesURL;
+}
+
 export function canApplyUpdateFromUI(selfUpdateEnabled) {
     return selfUpdateEnabled === true;
 }
@@ -16,7 +26,7 @@ export function updateBannerLabel(latestVersion, selfUpdateEnabled) {
 
 export function manualUpdateConfirmMessage(updateInfo) {
     const latest = updateInfo?.latest_version || 'unknown';
-    const url = updateInfo?.latest_url || 'https://github.com/alexwitherspoon/aviationwx.org-bridge/releases';
+    const url = releaseNotesURL(updateInfo);
     return [
         `Version ${latest} is available.`,
         '',

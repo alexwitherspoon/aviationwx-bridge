@@ -8,6 +8,7 @@ import {
     updateBannerLabel,
     manualUpdateConfirmMessage,
     selfUpdateConfirmMessage,
+    releaseNotesURL,
 } from './update-ui.js';
 
 test('canApplyUpdateFromUI is true only when enabled', () => {
@@ -19,6 +20,19 @@ test('canApplyUpdateFromUI is true only when enabled', () => {
 test('updateBannerLabel differs by deployment mode', () => {
     assert.strictEqual(updateBannerLabel('2.10.0', true), 'Update to 2.10.0');
     assert.strictEqual(updateBannerLabel('2.10.0', false), '2.10.0 available');
+});
+
+test('releaseNotesURL uses latest_url when present', () => {
+    assert.strictEqual(
+        releaseNotesURL({ latest_url: 'https://example.com/release' }),
+        'https://example.com/release',
+    );
+});
+
+test('releaseNotesURL falls back when latest_url missing or empty', () => {
+    assert.match(releaseNotesURL({}), /github\.com\/alexwitherspoon\/aviationwx\.org-bridge\/releases/);
+    assert.match(releaseNotesURL({ latest_url: '' }), /github\.com\/alexwitherspoon\/aviationwx\.org-bridge\/releases/);
+    assert.match(releaseNotesURL({ latest_url: '   ' }), /github\.com\/alexwitherspoon\/aviationwx\.org-bridge\/releases/);
 });
 
 test('manualUpdateConfirmMessage includes release URL', () => {

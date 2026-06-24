@@ -1,6 +1,6 @@
 # Queue Storage & Memory Management
 
-This document explains how AviationWX.org Bridge manages image queues, memory, and storage to ensure reliable operation on resource-constrained devices like the Raspberry Pi Zero 2 W.
+This document explains how AviationWX.org Bridge manages image queues, memory, and storage to ensure reliable operation on resource-constrained single-board computers.
 
 ## Overview
 
@@ -12,7 +12,7 @@ The bridge uses a **RAM-based filesystem (tmpfs)** mounted at `/dev/shm` to stor
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    System Memory (512 MB)                   │
+│                    System Memory (1 GB)                     │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌─────────────────┐  ┌──────────────────────────────────┐  │
 │  │   Application   │  │         tmpfs (/dev/shm)         │  │
@@ -160,12 +160,9 @@ The tmpfs size is set at container startup. Default is **200 MB**.
 
 **To change tmpfs size:**
 
-```bash
-# Raspberry Pi (via environment file)
-sudo nano /data/aviationwx/environment
-# Uncomment and set: AVIATIONWX_TMPFS_SIZE=300m
-sudo /usr/local/bin/aviationwx-supervisor.sh force-update
+The supervised install sizes tmpfs automatically from available RAM, so there is no manual knob on that path today. On the Docker path, set it explicitly:
 
+```bash
 # Docker run
 docker run ... --tmpfs /dev/shm:size=300m ...
 
@@ -263,8 +260,8 @@ The **overall system health** is the worst of all individual levels. If any reso
     "cpu_percent": 12.5,
     "cpu_level": "healthy",
     "mem_used_mb": 234.5,
-    "mem_total_mb": 512.0,
-    "mem_percent": 45.8,
+    "mem_total_mb": 1024.0,
+    "mem_percent": 22.9,
     "mem_level": "healthy",
     "disk_percent": 22.5,
     "disk_level": "healthy",
@@ -326,7 +323,7 @@ The **overall system health** is the worst of all individual levels. If any reso
 2. **Graceful degradation** - Lose old data before losing new data
 3. **Self-healing** - System recovers automatically when resources free up
 4. **Visibility** - All resource usage visible in web UI
-5. **Conservative defaults** - Works out-of-box on Pi Zero 2 W (512 MB RAM)
+5. **Conservative defaults** - Works out-of-box on low-memory boards (1 GB and up)
 
 ## Related Documentation
 

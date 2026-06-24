@@ -226,7 +226,7 @@ type QueueGlobal struct {
 	MaxTotalSizeMB     int          `json:"max_total_size_mb,omitempty"`    // Default: 100 (all cameras)
 	MemoryCheckSeconds int          `json:"memory_check_seconds,omitempty"` // Default: 5
 	EmergencyThinRatio float64      `json:"emergency_thin_ratio,omitempty"` // Default: 0.5
-	MaxHeapMB          int          `json:"max_heap_mb,omitempty"`          // Default: 400 (for 512MB Pi)
+	MaxHeapMB          int          `json:"max_heap_mb,omitempty"`          // Default: 400 (conservative cap for low-memory boards)
 	Defaults           *QueueCamera `json:"defaults,omitempty"`             // Default settings for cameras
 }
 

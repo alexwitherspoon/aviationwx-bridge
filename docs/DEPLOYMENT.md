@@ -8,12 +8,14 @@ Choose the deployment method that matches your environment:
 
 | Method | Best For | Updates |
 |--------|----------|---------|
-| [Raspberry Pi Install Script](#raspberry-pi-recommended) | Set-and-forget remote devices | Automatic with rollback |
+| [Supervised Install (SBC)](#supervised-install-recommended) | Set-and-forget remote single-board computers | Automatic with rollback |
 | [Docker (IT-Managed)](#docker-it-managed) | Professional environments | Manual via your tooling |
 
 ---
 
-## Raspberry Pi (Recommended)
+## Supervised Install (Recommended)
+
+Runs on a Raspberry Pi or a comparable single-board computer (SBC). Run one command and the bridge looks after itself: a host supervisor checks for updates daily, applies critical security fixes automatically, rolls back a bad update when health checks fail, and restarts on its own after a crash or capture stall. This is the recommended path for most installs. See [Recommended hardware](#recommended-hardware) for board options.
 
 ### One-Command Installation
 
@@ -27,6 +29,21 @@ This script:
 3. Pulls and starts the AviationWX.org Bridge container
 4. Configures automatic security updates
 5. Sets up automatic restart on boot
+
+The script targets Debian- or Ubuntu-based systems with `systemd`, which covers Raspberry Pi OS and most SBC vendor images.
+
+### Recommended hardware
+
+The supervised install needs a Linux host with Docker and systemd (Raspberry Pi OS or most SBC vendor images). The image itself is multi-arch (ARM64 or x86-64, or 32-bit ARMv7) and is built for small, low-power single-board computers, though it also runs on a mini-PC or VM. RAM is the binding constraint, not CPU. (For a non-Linux host, use the [Docker path](#docker-it-managed), which has no supervisor.)
+
+| Tier | Specs | Notes |
+|------|-------|-------|
+| Minimum | 1GB RAM, quad-core Pi 4-class CPU (Cortex-A72 at ~1.5 GHz or a comparable x86 such as Intel N100), 8GB storage | Single camera, conservative intervals. |
+| Strongly recommended | 3GB or more RAM, 16GB+ storage, wired ethernet | Headroom for multiple cameras and higher resolutions. |
+
+**CPU floor:** A board in the class of the Raspberry Pi 4 or newer. Older or slower boards (for example the Raspberry Pi 3 or Pi Zero 2 W) are below the floor and not recommended, even where the bridge still starts.
+
+**Example boards:** The Raspberry Pi 4 and 5 are the best-documented choices. Comparable single-board computers also work, including the Radxa ROCK series, Orange Pi 5 series, Libre Computer boards, or an Intel N100-class mini-PC. These are examples, not endorsements; any board that runs 64-bit Linux with Docker and meets the minimum above is a good fit. The Raspberry Pi has the broadest community and OS support, while other boards often offer more RAM, storage, or I/O. SD-card-backed boards benefit from the RAM-based logging the install script configures (see below).
 
 ### After Installation
 
@@ -64,7 +81,7 @@ Docker health checks use **`/readyz`** so an alive but non-capturing container i
 
 Do not add a nightly container restart cron unless you have a specific ops reason; capture-restart targets stale state without disrupting healthy sites.
 
-**Existing Pis:** `aviationwx-capture-restart.timer` is enabled automatically on the next `boot-update` / daily update once supervisor v2.2+ is deployed (no `install.sh` rerun). Verify with `systemctl is-enabled aviationwx-capture-restart.timer`.
+**Existing supervised installs:** `aviationwx-capture-restart.timer` is enabled automatically on the next `boot-update` / daily update once supervisor v2.2+ is deployed (no `install.sh` rerun). Verify with `systemctl is-enabled aviationwx-capture-restart.timer`.
 
 **Recovery cap exhausted:** After 6 container restarts in 24h, the host writes `/data/aviationwx/recovery-exhausted.json` (visible in the web UI status and `/healthz` as unhealthy). Cleared when `/readyz` returns 200 or a restart succeeds. Requires manual intervention until the condition clears.
 
@@ -89,7 +106,7 @@ sudo /usr/local/bin/aviationwx-container-start.sh "$(cat /data/aviationwx/last-k
 
 ## Docker (IT-Managed)
 
-For environments with existing Docker infrastructure.
+For environments with existing Docker infrastructure. The image is a standard multi-arch Linux container, so it runs anywhere Docker runs Linux containers - Linux, macOS, or Windows (Docker Desktop / WSL2).
 
 ### Basic Deployment
 
@@ -148,11 +165,11 @@ Or use your existing update tooling (Watchtower, Portainer, ArgoCD, etc.)
 
 ### Web console update banner
 
-The bridge checks GitHub for new releases in all deployments. **Applying** an update from the web UI requires the Pi supervisor path:
+The bridge checks GitHub for new releases in all deployments. **Applying** an update from the web UI requires the supervised install path:
 
 | Deployment | `AVIATIONWX_SELF_UPDATE` | Web UI behavior |
 |------------|--------------------------|-----------------|
-| Pi (`install.sh` + supervisor) | `1` (default in `aviationwx-container-start.sh`; set `AVIATIONWX_SELF_UPDATE=0` to disable) | Banner applies update via host supervisor |
+| Supervised install (`install.sh` + supervisor) | `1` (default in `aviationwx-container-start.sh`; set `AVIATIONWX_SELF_UPDATE=0` to disable) | Banner applies update via host supervisor |
 | Docker / docker-compose (IT-managed) | unset (default) | Banner shows version availability and links to release notes; `POST /api/update` returns 409 |
 
 Do not mount the Docker socket into the bridge container to enable in-container updates.
@@ -271,7 +288,7 @@ docker logs aviationwx-org-bridge -f
 # Last 100 lines
 docker logs aviationwx-org-bridge --tail=100
 
-# Supervisor logs (Pi install only)
+# Supervisor logs (supervised install only)
 cat /data/aviationwx/supervisor.log
 ```
 
@@ -321,7 +338,7 @@ The queue must be large enough to hold images during these periods without losin
 | 1-2 cameras @ 4K | ~3-5 MB | ~20 images | `200m` |
 | 3-4 cameras @ 4K | ~3-5 MB | ~40 images | `300m` or higher |
 
-**Note**: Pi Zero 2 W has 512MB RAM. Keep tmpfs + application memory under ~450MB total.
+**Note**: tmpfs is RAM. The supervised install sizes it from available RAM (smaller on ~1GB boards); the Docker path defaults to `200m`. Either way it sits alongside application memory (typically 150-300MB); raise it only for more cameras or higher resolution.
 
 ### Checking Current Usage
 
@@ -337,22 +354,11 @@ curl http://localhost:1229/api/status | jq '.orchestrator.queue_storage'
 
 ### Changing the tmpfs Size
 
-The tmpfs size is set at container startup via Docker and cannot be changed without restarting the container.
+The tmpfs size is set at container startup and cannot be changed without restarting the container.
 
-#### Raspberry Pi (install script)
+#### Supervised install (install script)
 
-Edit the environment file, then restart:
-
-```bash
-# Edit the environment file
-sudo nano /data/aviationwx/environment
-
-# Uncomment and modify this line:
-AVIATIONWX_TMPFS_SIZE=300m
-
-# Restart to apply (uses supervisor to recreate container)
-sudo /usr/local/bin/aviationwx-supervisor.sh force-update
-```
+The supervised install sizes tmpfs automatically from available RAM (smaller on ~1GB boards, larger on roomier ones), so there is no manual override on this path today. To pin a specific size, run the container yourself with the Docker options below.
 
 #### Docker Run
 
@@ -424,7 +430,7 @@ The `max_total_size_mb` should be less than or equal to your tmpfs size. If you 
 
 ## Resource Limits
 
-### Raspberry Pi Zero 2 W (512MB RAM)
+### Low-memory boards (1GB)
 
 The bridge is optimized for low memory:
 
@@ -477,7 +483,7 @@ docker restart aviationwx-org-bridge
 
 If device fails:
 
-1. Flash fresh Raspberry Pi OS
+1. Flash a fresh OS image for your board (for example Raspberry Pi OS, or your SBC vendor's Debian/Ubuntu image)
 2. Run install script: `curl ... | sudo bash`
 3. Restore config backup
 4. Cameras will resume uploading

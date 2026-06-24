@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Budget: ~500 MB total RAM per concurrent capture (e.g. 512 MB system → 1; 1 GiB → 2).
+// Budget: ~500 MB total RAM per concurrent capture (1 GiB allows 2, 2 GiB allows 4).
 const mbPerConcurrentCapture = 500
 
 // Below this max CPU frequency (MHz), concurrent captures are also limited to about

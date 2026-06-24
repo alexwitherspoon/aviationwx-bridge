@@ -49,7 +49,7 @@ func TestHandleUpdate_rejectedWhenSelfUpdateDisabled(t *testing.T) {
 }
 
 func TestHandleUpdate_writesTriggerAtVolumeRoot(t *testing.T) {
-	// Regression: docker-compose and Pi mounts use /data as the data volume root.
+	// Regression: docker-compose and supervised-install mounts use /data as the data volume root.
 	// The trigger must not live under /data/aviationwx inside the container.
 	dataDir := t.TempDir()
 	t.Setenv("AVIATIONWX_DATA_DIR", dataDir)

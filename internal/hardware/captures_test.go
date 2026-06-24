@@ -156,7 +156,7 @@ func TestCPUFreqMaxMHzFromKHzFileContent(t *testing.T) {
 		content  string
 		expected float64
 	}{
-		{name: "raspberry_pi_style", content: "1500000\n", expected: 1500},
+		{name: "khz_sysfs_style", content: "1500000\n", expected: 1500},
 		{name: "with_whitespace", content: "  2400000  \n", expected: 2400},
 		{name: "invalid", content: "nope", expected: 0},
 		{name: "zero", content: "0", expected: 0},

@@ -202,7 +202,7 @@ check_docker() {
 }
 
 check_temperature() {
-    # Pi-specific check
+    # Thermal check via generic Linux sysfs; skipped on boards that do not expose it
     if [ ! -f /sys/class/thermal/thermal_zone0/temp ]; then
         return 0
     fi

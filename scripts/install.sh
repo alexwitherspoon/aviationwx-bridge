@@ -122,11 +122,14 @@ install_jq() {
     log_success "jq installed"
 }
 
-# Configure Docker logging for SD card protection (Raspberry Pi)
+# Configure RAM-based Docker logging to protect SD-card-backed single-board
+# computers from log write wear. Detection currently keys on Raspberry Pi, the
+# most common SD-card board; other SBCs use default logging unless configured
+# manually (or run from eMMC/SSD where wear is less of a concern).
 configure_docker_logging() {
     log_info "Configuring Docker logging for SD card protection..."
     
-    # Check if running on Raspberry Pi
+    # Auto-detect Raspberry Pi (most common SD-card-backed SBC)
     if [[ $OS == "raspbian" ]] || grep -qi "raspberry" /proc/cpuinfo 2>/dev/null; then
         log_info "Raspberry Pi detected - configuring journald with volatile storage"
         
@@ -192,7 +195,7 @@ EOF
             return 1
         fi
     else
-        log_info "Not a Raspberry Pi - using default Docker logging"
+        log_info "No Raspberry Pi detected - using default Docker logging (set up RAM-based logging manually on other SD-card-backed boards)"
     fi
 }
 
@@ -209,20 +212,11 @@ setup_data_dir() {
     if [[ ! -f "${ENV_FILE}" ]]; then
         cat > "${ENV_FILE}" << 'EOF'
 # AviationWX.org Bridge Environment Configuration
-# Edit this file to customize settings, then restart the container.
 #
-# Tmpfs size for image queue (RAM-based storage)
-# Default: 200m (200 megabytes)
-#
-# Sizing recommendations:
-#   1-2 cameras @ 1080p: 100m is sufficient
-#   3-4 cameras @ 1080p: 200m recommended (default)
-#   1-2 cameras @ 4K:    200m recommended
-#   3-4 cameras @ 4K:    300m or higher
-#
-# Note: Pi Zero 2 W has 512MB RAM. Keep this + application memory under ~450MB total.
-#
-# AVIATIONWX_TMPFS_SIZE=200m
+# The supervised install runs the container via aviationwx-container-start.sh,
+# which sizes the image queue (tmpfs in RAM) automatically from available RAM.
+# This file is not read by the supervised launch today; it is reserved for
+# future overrides, so edits here have no effect yet.
 EOF
         log_info "Created environment file: ${ENV_FILE}"
         chown 1000:1000 "${ENV_FILE}"

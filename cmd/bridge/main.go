@@ -42,7 +42,7 @@ func init() {
 	// which calculates appropriate limits based on system resources
 	//
 	// The startup script sets this based on total system RAM:
-	//   < 1GB:  60% of RAM for Docker, 85% of that for Go (Pi Zero 2 W)
+	//   < 1GB:  60% of RAM for Docker, 85% of that for Go (below recommended minimum)
 	//   1-2GB:  65% of RAM for Docker, 88% of that for Go
 	//   2-4GB:  70% of RAM for Docker, 90% of that for Go
 	//   > 4GB:  75%+ of RAM for Docker, 90% of that for Go

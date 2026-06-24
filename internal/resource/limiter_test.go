@@ -362,7 +362,7 @@ func TestGetTotalMemoryMB(t *testing.T) {
 	}
 
 	// If running on Linux, should detect some memory
-	// Pi Zero 2 W has ~416MB, Pi 4 has 1GB-8GB
+	// Low-memory boards report well under 1GB; Pi 4-class boards report 1GB-8GB
 	t.Logf("Detected total memory: %d MB", memMB)
 }
 

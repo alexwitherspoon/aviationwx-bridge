@@ -1,5 +1,5 @@
 // Package resource provides resource management and limiting for background work
-// to protect interactive/admin UX on resource-constrained devices like Pi Zero 2 W.
+// to protect interactive/admin UX on resource-constrained single-board computers.
 package resource
 
 import (
@@ -49,7 +49,7 @@ type Config struct {
 	MaxConcurrentExifOperations int
 
 	// MemoryPressureThresholdMB is the heap size above which throttling kicks in
-	// Default: 200MB (suitable for Pi Zero 2 W with 512MB total)
+	// Default: 200MB (conservative for low-memory boards)
 	MemoryPressureThresholdMB int
 
 	// GoroutinePressureThreshold is the count above which throttling kicks in
@@ -65,13 +65,13 @@ type Config struct {
 	PressureCheckInterval time.Duration
 }
 
-// DefaultConfig returns sensible defaults for Pi Zero 2 W
+// DefaultConfig returns sensible defaults for low-memory SBCs
 func DefaultConfig() Config {
 	numCPU := runtime.NumCPU()
 	totalMemoryMB := getTotalMemoryMB()
 
-	// On devices with < 1GB RAM (like Pi Zero 2 W with 512MB),
-	// serialize image processing to prevent memory exhaustion
+	// On devices below 1GB RAM (below the recommended minimum),
+	// serialize image processing as a safety net to prevent memory exhaustion
 	maxImageProcessing := 1
 	if totalMemoryMB >= 1024 {
 		maxImageProcessing = max(1, numCPU/2)

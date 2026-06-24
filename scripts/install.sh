@@ -212,11 +212,11 @@ setup_data_dir() {
     if [[ ! -f "${ENV_FILE}" ]]; then
         cat > "${ENV_FILE}" << 'EOF'
 # AviationWX.org Bridge Environment Configuration
-# Edit this file to customize settings, then restart the container.
 #
-# The image queue (tmpfs in RAM) is sized automatically from available RAM
-# on the supervised install, so there is no tmpfs setting to change here.
-# This file is reserved for future overrides.
+# The supervised install runs the container via aviationwx-container-start.sh,
+# which sizes the image queue (tmpfs in RAM) automatically from available RAM.
+# This file is not read by the supervised launch today; it is reserved for
+# future overrides, so edits here have no effect yet.
 EOF
         log_info "Created environment file: ${ENV_FILE}"
         chown 1000:1000 "${ENV_FILE}"

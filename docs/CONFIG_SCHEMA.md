@@ -341,6 +341,7 @@ Config values can be overridden via environment:
 | `AVIATIONWX_CONFIG` | Config file path |
 | `AVIATIONWX_DATA_DIR` | Mounted data volume root inside the container (default `/data`) |
 | `AVIATIONWX_SELF_UPDATE` | When `1` or `true`, web UI `POST /api/update` writes the supervisor trigger file (supervised installs). Unset for IT-managed Docker. |
+| `AVIATIONWX_TMPFS_SIZE` | Override the image-queue tmpfs size with a Docker size token (e.g. `200m`, `1g`). Supervised installs read it from the data-dir environment file and otherwise size tmpfs from available RAM; the Docker Compose path uses it for the `/dev/shm` mount. An invalid value is ignored. |
 | `AVIATIONWX_QUEUE_PATH` | Queue storage path |
 | `LOG_LEVEL` | Log level (debug, info, warn, error) |
 | `LOG_FORMAT` | Log format (text, json) |

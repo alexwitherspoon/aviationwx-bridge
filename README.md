@@ -218,7 +218,7 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 
 ## Hardware Requirements
 
-The bridge runs on any 64-bit Linux host with Docker (ARM64, ARMv7, or x86-64). It is built for small, low-power single-board computers but also runs on a mini-PC or VM.
+The bridge runs on any Linux host with Docker: 64-bit ARM64 or x86-64, or 32-bit ARMv7. It is built for small, low-power single-board computers but also runs on a mini-PC or VM.
 
 RAM is the binding constraint, not CPU.
 

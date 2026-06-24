@@ -212,11 +212,21 @@ setup_data_dir() {
     if [[ ! -f "${ENV_FILE}" ]]; then
         cat > "${ENV_FILE}" << 'EOF'
 # AviationWX.org Bridge Environment Configuration
+# Uncomment a setting, then apply it:
+#   sudo systemctl restart aviationwx-container.service
 #
-# The supervised install runs the container via aviationwx-container-start.sh,
-# which sizes the image queue (tmpfs in RAM) automatically from available RAM.
-# This file is not read by the supervised launch today; it is reserved for
-# future overrides, so edits here have no effect yet.
+# Image queue (tmpfs in RAM). By default the supervised install sizes this
+# automatically from available RAM. Set a Docker size token (e.g. 200m, 1g)
+# to override; an invalid value is ignored and the automatic size is used.
+#
+# Sizing guidance (RAM is the cap - keep tmpfs plus the container memory
+# limit comfortably under total RAM):
+#   1-2 cameras @ 1080p: 100m is sufficient
+#   3-4 cameras @ 1080p: 200m
+#   1-2 cameras @ 4K:    200m
+#   3-4 cameras @ 4K:    300m or higher
+#
+# AVIATIONWX_TMPFS_SIZE=200m
 EOF
         log_info "Created environment file: ${ENV_FILE}"
         chown 1000:1000 "${ENV_FILE}"

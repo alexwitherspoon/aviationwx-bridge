@@ -2,8 +2,8 @@
 # AviationWX.org Bridge - Container Startup
 # Started by systemd after boot-update; also used by aviationwx-supervisor.sh on update/rollback.
 # Optional first argument: image tag to run (defaults to /data/aviationwx/last-known-good.txt).
-# Version: 2.3
-# Features: Dynamic resource limits; optional image tag; /readyz healthcheck; TCP keepalive sysctls
+# Version: 2.4
+# Features: Dynamic resource limits; AVIATIONWX_TMPFS_SIZE override; optional image tag; /readyz healthcheck; TCP keepalive sysctls
 
 set -euo pipefail
 
@@ -100,6 +100,46 @@ calculate_cpu_limits() {
     echo "$docker_cpus $cpu_shares"
 }
 
+# Read a single KEY=VALUE from an environment file without executing it.
+# Returns the last definition; ignores comments and surrounding quotes and
+# strips an inline comment or trailing whitespace. Safer than sourcing the
+# file, which would run arbitrary shell as root.
+read_env_file_var() {
+    local file="$1" key="$2" line val
+    [ -f "$file" ] || return 0
+    line=$(grep -E "^[[:space:]]*${key}=" "$file" 2>/dev/null | tail -n 1) || true
+    [ -n "$line" ] || return 0
+    val="${line#*=}"
+    val="${val#"${val%%[![:space:]]*}"}"   # trim leading whitespace
+    val="${val%%[[:space:]]*}"             # take first token (drops inline comments)
+    val="${val#\"}"; val="${val%\"}"       # strip double quotes
+    val="${val#\'}"; val="${val%\'}"       # strip single quotes
+    printf '%s' "$val"
+}
+
+# Resolve the /dev/shm tmpfs size token. Honors an explicit AVIATIONWX_TMPFS_SIZE
+# override from the process environment or the data-dir environment file;
+# otherwise uses the RAM-derived default. The override is a Docker size token
+# such as 200m, 1g, or 512000k; an invalid value is ignored with a warning.
+resolve_tmpfs_spec() {
+    local default_spec="$1"
+    local override="${AVIATIONWX_TMPFS_SIZE:-}"
+    if [ -z "$override" ]; then
+        override=$(read_env_file_var "${DATA_DIR}/environment" "AVIATIONWX_TMPFS_SIZE")
+    fi
+    if [ -z "$override" ]; then
+        printf '%s' "$default_spec"
+        return 0
+    fi
+    if printf '%s' "$override" | grep -Eq '^[0-9]+[kKmMgG]?$'; then
+        printf '%s' "$override"
+        return 0
+    fi
+    echo "[$(date -Iseconds)] WARN: ignoring invalid AVIATIONWX_TMPFS_SIZE='${override}'; using ${default_spec}" >&2
+    printf '%s' "$default_spec"
+    return 0
+}
+
 # ============================================================================
 # MAIN STARTUP
 # ============================================================================
@@ -151,10 +191,14 @@ echo "  Total CPUs: ${TOTAL_CPUS}"
 read -r DOCKER_MEM GO_MEM TMPFS_SIZE <<< "$(calculate_memory_limits "$TOTAL_MEMORY_MB")"
 read -r DOCKER_CPUS CPU_SHARES <<< "$(calculate_cpu_limits "$TOTAL_CPUS")"
 
+# tmpfs defaults to the RAM-derived size; an explicit AVIATIONWX_TMPFS_SIZE
+# override (process env or the data-dir environment file) takes precedence.
+TMPFS_SPEC=$(resolve_tmpfs_spec "${TMPFS_SIZE}m")
+
 echo "[$(date -Iseconds)] Calculated resource limits:"
 echo "  Docker Memory Limit: ${DOCKER_MEM} MB"
 echo "  Go Memory Limit (GOMEMLIMIT): ${GO_MEM} MB"
-echo "  tmpfs Size: ${TMPFS_SIZE} MB"
+echo "  tmpfs Size: ${TMPFS_SPEC} (RAM-derived default ${TMPFS_SIZE}m)"
 echo "  Docker CPU Limit: ${DOCKER_CPUS} CPUs"
 echo "  CPU Shares: ${CPU_SHARES}"
 
@@ -200,7 +244,7 @@ docker run -d \
     `# Network and volumes` \
     -p 1229:1229 \
     -v "${DATA_DIR}:/data" \
-    --tmpfs "/dev/shm:size=${TMPFS_SIZE}m" \
+    --tmpfs "/dev/shm:size=${TMPFS_SPEC}" \
     --sysctl net.ipv4.tcp_keepalive_time=30 \
     --sysctl net.ipv4.tcp_keepalive_intvl=10 \
     --sysctl net.ipv4.tcp_keepalive_probes=6 \

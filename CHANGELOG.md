@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Deployment**: Supervised installs honor `AVIATIONWX_TMPFS_SIZE`. `aviationwx-container-start.sh` reads the override from the data-dir environment file (or process environment) and falls back to the automatic RAM-derived size; an invalid value is ignored. Apply with `systemctl restart aviationwx-container.service`. Closes the gap where the documented override had no effect on the supervised path (follow-up to PR #64).
+
 ### Changed
 - **Docs**: Generalize deployment language from Raspberry Pi to single-board computers (SBCs). The supervised install (`install.sh` + supervisor) is framed as the universal SBC path; the Docker path remains the IT-managed, no-supervisor option. Documented hardware floor raised to 1GB RAM minimum with a Raspberry Pi 4-class CPU floor (RAM is the binding constraint); 3GB or more strongly recommended. Dropped the Raspberry Pi Zero 2 W / 512MB recommendation. Example boards listed without endorsement. Documentation and comments only; the runtime still degrades conservatively below 1GB and no defaults changed.
 

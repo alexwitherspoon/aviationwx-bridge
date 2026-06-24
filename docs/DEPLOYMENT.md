@@ -338,7 +338,7 @@ The queue must be large enough to hold images during these periods without losin
 | 1-2 cameras @ 4K | ~3-5 MB | ~20 images | `200m` |
 | 3-4 cameras @ 4K | ~3-5 MB | ~40 images | `300m` or higher |
 
-**Note**: tmpfs is RAM. On a 1GB board, the 200MB default plus application memory (typically 150-300MB) stays within budget; size tmpfs up only if you raise camera count or resolution.
+**Note**: tmpfs is RAM. The supervised install sizes it from available RAM (smaller on ~1GB boards); the Docker path defaults to `200m`. Either way it sits alongside application memory (typically 150-300MB); raise it only for more cameras or higher resolution.
 
 ### Checking Current Usage
 

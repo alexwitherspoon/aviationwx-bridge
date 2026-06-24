@@ -223,7 +223,7 @@ setup_data_dir() {
 #   1-2 cameras @ 4K:    200m recommended
 #   3-4 cameras @ 4K:    300m or higher
 #
-# Note: tmpfs is RAM. On a 1GB board the 200m default plus application memory leaves headroom; size up for more cameras or 4K.
+# Note: tmpfs is RAM. The default leaves headroom on a 1GB board; size up for more cameras or 4K.
 #
 # AVIATIONWX_TMPFS_SIZE=200m
 EOF

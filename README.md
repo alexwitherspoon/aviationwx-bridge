@@ -50,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/alexwitherspoon/AviationWX.org-Brid
 
 ### Path B: Docker (IT-Managed)
 
-**Best for:** Professional environments with existing Docker infrastructure and IT teams. This path runs the container directly, without the host supervisor, so updates and rollback are handled by your own tooling.
+**Best for:** Professional environments with existing Docker infrastructure and IT teams. This path runs the container directly, without the host supervisor, so updates and rollback are handled by your own tooling. The image is a standard Linux container, so it runs on any Docker engine - Linux, macOS, or Windows.
 
 ```bash
 docker pull ghcr.io/alexwitherspoon/aviationwx-org-bridge:latest
@@ -218,7 +218,7 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 
 ## Hardware Requirements
 
-The bridge runs on any Linux host with Docker: 64-bit ARM64 or x86-64, or 32-bit ARMv7. It is built for small, low-power single-board computers but also runs on a mini-PC or VM.
+The bridge ships as a standard multi-arch Linux container (ARM64 or x86-64, or 32-bit ARMv7). The Docker path runs anywhere a Docker engine runs Linux containers: a single-board computer, mini-PC, server, or VM, on Linux, macOS, or Windows. The supervised install (Path A) additionally requires a Linux host with systemd. The specs below describe the recommended single-board computer.
 
 RAM is the binding constraint, not CPU.
 

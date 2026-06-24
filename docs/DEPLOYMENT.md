@@ -34,7 +34,7 @@ The script targets Debian- or Ubuntu-based systems with `systemd`, which covers 
 
 ### Recommended hardware
 
-The bridge runs on any Linux host with Docker: 64-bit ARM64 or x86-64, or 32-bit ARMv7. It is built for small, low-power single-board computers but also runs on a mini-PC or VM. RAM is the binding constraint, not CPU.
+The supervised install needs a Linux host with Docker and systemd (Raspberry Pi OS or most SBC vendor images). The image itself is multi-arch (ARM64 or x86-64, or 32-bit ARMv7) and is built for small, low-power single-board computers, though it also runs on a mini-PC or VM. RAM is the binding constraint, not CPU. (For a non-Linux host, use the [Docker path](#docker-it-managed), which has no supervisor.)
 
 | Tier | Specs | Notes |
 |------|-------|-------|
@@ -106,7 +106,7 @@ sudo /usr/local/bin/aviationwx-container-start.sh "$(cat /data/aviationwx/last-k
 
 ## Docker (IT-Managed)
 
-For environments with existing Docker infrastructure.
+For environments with existing Docker infrastructure. The image is a standard multi-arch Linux container, so it runs anywhere Docker runs Linux containers - Linux, macOS, or Windows (Docker Desktop / WSL2).
 
 ### Basic Deployment
 

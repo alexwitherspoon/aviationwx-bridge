@@ -7,13 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-06-24
+
 ### Added
-- **Deployment**: Supervised installs honor `AVIATIONWX_TMPFS_SIZE`. `aviationwx-container-start.sh` reads the override from the data-dir environment file (or process environment) and falls back to the automatic RAM-derived size; an invalid value is ignored. Apply with `systemctl restart aviationwx-container.service`. Closes the gap where the documented override had no effect on the supervised path (follow-up to PR #64).
+- **Deployment**: `AVIATIONWX_SELF_UPDATE` gates web UI `POST /api/update`. Supervised installs default to enabled; IT-managed Docker leaves it unset so the update banner is notify-only and the API returns 409. Status exposes `self_update_enabled` and `latest_url` (PR #63).
+- **Deployment**: Supervised installs honor `AVIATIONWX_TMPFS_SIZE`. `aviationwx-container-start.sh` reads the override from the data-dir environment file (or process environment) and falls back to the automatic RAM-derived size; an invalid value is ignored. Apply with `systemctl restart aviationwx-container.service` (PR #65).
 
 ### Changed
-- **Docs**: Generalize deployment language from Raspberry Pi to single-board computers (SBCs). The supervised install (`install.sh` + supervisor) is framed as the universal SBC path; the Docker path remains the IT-managed, no-supervisor option. Documented hardware floor raised to 1GB RAM minimum with a Raspberry Pi 4-class CPU floor (RAM is the binding constraint); 3GB or more strongly recommended. Dropped the Raspberry Pi Zero 2 W / 512MB recommendation. Example boards listed without endorsement. Documentation and comments only; the runtime still degrades conservatively below 1GB and no defaults changed.
+- **Docs**: Generalize deployment language from Raspberry Pi to single-board computers (SBCs). The supervised install (`install.sh` + supervisor) is framed as the universal SBC path; the Docker path remains the IT-managed, no-supervisor option. Documented hardware floor raised to 1GB RAM minimum with a Raspberry Pi 4-class CPU floor (RAM is the binding constraint); 3GB or more strongly recommended. Dropped the Raspberry Pi Zero 2 W / 512MB recommendation (PR #64).
+- **Dependencies**: Batch Dependabot upgrades for Go modules, GitHub Actions, and Docker base images (supersedes #56-#60).
 
 ### Fixed
+- **Web/API**: Write the supervisor update trigger at the mounted data volume root; log the trigger path on write failure; log "update triggered" only after the self-update gate passes (PR #63).
+- **Web UI**: Validate `releaseNotesURL` scheme (http/https only); open release notes when `latest_url` is empty; use a safe constant when no URL is available (PR #63).
 - **Security**: Close CodeQL alert #10 by building log tail slices with bounded `append` instead of `make(..., n)` in `GetLast` (follow-up to PR #53).
 
 ## [2.9.3] - 2026-06-12

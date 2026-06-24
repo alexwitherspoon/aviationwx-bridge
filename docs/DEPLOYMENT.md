@@ -354,22 +354,11 @@ curl http://localhost:1229/api/status | jq '.orchestrator.queue_storage'
 
 ### Changing the tmpfs Size
 
-The tmpfs size is set at container startup via Docker and cannot be changed without restarting the container.
+The tmpfs size is set at container startup and cannot be changed without restarting the container.
 
 #### Supervised install (install script)
 
-Edit the environment file, then restart:
-
-```bash
-# Edit the environment file
-sudo nano /data/aviationwx/environment
-
-# Uncomment and modify this line:
-AVIATIONWX_TMPFS_SIZE=300m
-
-# Restart to apply (uses supervisor to recreate container)
-sudo /usr/local/bin/aviationwx-supervisor.sh force-update
-```
+The supervised install sizes tmpfs automatically from available RAM (smaller on ~1GB boards, larger on roomier ones), so there is no manual override on this path today. To pin a specific size, run the container yourself with the Docker options below.
 
 #### Docker Run
 

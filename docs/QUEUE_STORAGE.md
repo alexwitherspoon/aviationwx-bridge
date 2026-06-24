@@ -160,12 +160,9 @@ The tmpfs size is set at container startup. Default is **200 MB**.
 
 **To change tmpfs size:**
 
-```bash
-# Supervised install (via environment file)
-sudo nano /data/aviationwx/environment
-# Uncomment and set: AVIATIONWX_TMPFS_SIZE=300m
-sudo /usr/local/bin/aviationwx-supervisor.sh force-update
+The supervised install sizes tmpfs automatically from available RAM, so there is no manual knob on that path today. On the Docker path, set it explicitly:
 
+```bash
 # Docker run
 docker run ... --tmpfs /dev/shm:size=300m ...
 

@@ -214,18 +214,9 @@ setup_data_dir() {
 # AviationWX.org Bridge Environment Configuration
 # Edit this file to customize settings, then restart the container.
 #
-# Tmpfs size for image queue (RAM-based storage)
-# Default: 200m (200 megabytes)
-#
-# Sizing recommendations:
-#   1-2 cameras @ 1080p: 100m is sufficient
-#   3-4 cameras @ 1080p: 200m recommended (default)
-#   1-2 cameras @ 4K:    200m recommended
-#   3-4 cameras @ 4K:    300m or higher
-#
-# Note: tmpfs is RAM. The default leaves headroom on a 1GB board; size up for more cameras or 4K.
-#
-# AVIATIONWX_TMPFS_SIZE=200m
+# The image queue (tmpfs in RAM) is sized automatically from available RAM
+# on the supervised install, so there is no tmpfs setting to change here.
+# This file is reserved for future overrides.
 EOF
         log_info "Created environment file: ${ENV_FILE}"
         chown 1000:1000 "${ENV_FILE}"

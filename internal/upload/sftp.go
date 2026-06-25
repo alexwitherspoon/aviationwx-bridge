@@ -3,7 +3,6 @@ package upload
 import (
 	"fmt"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,11 +16,10 @@ import (
 // Each Upload uses its own SSH/SFTP session; Interrupt closes the active session on timeout.
 // uploadMu serializes Upload (one in-flight per client) so activeSSH is not shared across goroutines.
 type SFTPClient struct {
-	mu           sync.Mutex // serializes TestConnection
-	uploadMu     sync.Mutex // serializes Upload
-	config       Config
-	hostKeyStore *hostKeyStore
-	activeSSH    atomic.Pointer[ssh.Client]
+	mu        sync.Mutex // serializes TestConnection
+	uploadMu  sync.Mutex // serializes Upload
+	config    Config
+	activeSSH atomic.Pointer[ssh.Client]
 }
 
 // NewSFTPClient creates a new SFTP upload client
@@ -39,14 +37,8 @@ func NewSFTPClient(cfg Config) (*SFTPClient, error) {
 		cfg.Port = 22 // Default SFTP port
 	}
 
-	store, err := getSharedHostKeyStore(cfg.KnownHostsPath, filepath.Dir(cfg.KnownHostsPath))
-	if err != nil {
-		return nil, err
-	}
-
 	return &SFTPClient{
-		config:       cfg,
-		hostKeyStore: store,
+		config: cfg,
 	}, nil
 }
 
@@ -142,7 +134,7 @@ func (c *SFTPClient) dial() (*ssh.Client, *sftp.Client, error) {
 		Auth: []ssh.AuthMethod{
 			ssh.Password(c.config.Password),
 		},
-		HostKeyCallback: c.hostKeyStore.callback(c.config.Host, c.config.Port),
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         timeout,
 	}
 

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-06-24
+
+### Fixed
+- **Upload**: Revert SFTP SSH host key verification introduced in 2.10.0. Restores pre-2.10.0 upload behavior (`InsecureIgnoreHostKey`) so supervised bridges recover without manual rollback. Host key TOFU and trusted-key sync remain in the tree for a follow-up once root cause is confirmed fleet-wide.
+
+### Changed
+- **Release**: Deprecates 2.10.0 in GitHub release metadata so the supervisor skips it as an upgrade target.
+
 ## [2.10.0] - 2026-06-24
 
 ### Added

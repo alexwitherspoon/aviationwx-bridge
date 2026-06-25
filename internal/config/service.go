@@ -340,11 +340,6 @@ func (s *Service) Subscribe(fn func(ConfigEvent)) {
 	s.listeners = append(s.listeners, fn)
 }
 
-// SSHKnownHostsPath returns the path to the SSH known_hosts file for upload connections.
-func (s *Service) SSHKnownHostsPath() string {
-	return filepath.Join(s.baseDir, "ssh_known_hosts")
-}
-
 // GetWebPassword returns the web console password
 func (s *Service) GetWebPassword() string {
 	s.mu.RLock()

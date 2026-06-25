@@ -25,7 +25,6 @@ type Config struct {
 	TimeoutConnectSeconds int
 	TimeoutUploadSeconds  int
 	BasePath              string // Base directory for uploads (default: /files)
-	KnownHostsPath        string // SSH known_hosts file (TOFU); required for SFTP
 }
 
 // Error types for upload operations

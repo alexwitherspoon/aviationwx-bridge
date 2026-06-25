@@ -9,8 +9,7 @@ import (
 
 // NewClientFromConfig creates an SFTP upload client from the config package's Upload type.
 // Protocol "ftps" and "ftp" are migrated to SFTP (port 2222) for backward compatibility.
-// knownHostsPath is the SSH known_hosts file used for TOFU host key verification.
-func NewClientFromConfig(cfg config.Upload, knownHostsPath string) (Client, error) {
+func NewClientFromConfig(cfg config.Upload) (Client, error) {
 	// Normalize protocol: migrate deprecated FTPS/FTP to SFTP
 	protocol := strings.ToLower(strings.TrimSpace(cfg.Protocol))
 	if protocol == "" || protocol == "ftps" || protocol == "ftp" {
@@ -38,7 +37,6 @@ func NewClientFromConfig(cfg config.Upload, knownHostsPath string) (Client, erro
 		TimeoutConnectSeconds: cfg.TimeoutConnectSeconds,
 		TimeoutUploadSeconds:  cfg.TimeoutUploadSeconds,
 		BasePath:              basePath,
-		KnownHostsPath:        knownHostsPath,
 	}
 
 	return NewSFTPClient(uploadConfig)

@@ -7,15 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.10.1] - 2026-06-24
+## [2.10.1] - 2026-06-25
+
+Emergency release. Reverts the 2.10.0 SFTP host key verification that stopped weathercam uploads fleet-wide while `/readyz` stayed healthy. Supervised installs on `latest` recover via the normal daily update; `sudo aviationwx update` applies immediately on a reachable host.
 
 ### Fixed
 - **Upload**: Revert SFTP SSH host key verification introduced in 2.10.0. Restores pre-2.10.0 upload behavior (`InsecureIgnoreHostKey`) so supervised bridges recover without manual rollback. Host key TOFU and trusted-key sync remain in the tree for a follow-up once root cause is confirmed fleet-wide.
 
 ### Changed
-- **Release**: Deprecates 2.10.0 in GitHub release metadata so the supervisor skips it as an upgrade target.
+- **Release**: GitHub release metadata marks 2.10.0 deprecated (`critical: true`, `force_update: true`). Restores `upload_ssh_host_keys_sha256` from 2.9.3 for a future host-key rollout.
 
 ## [2.10.0] - 2026-06-24
+
+**Withdrawn.** Do not install. Superseded by 2.10.1 (emergency). 2.10.0 stopped weathercam uploads fleet-wide.
 
 ### Added
 - **Deployment**: `AVIATIONWX_SELF_UPDATE` gates web UI `POST /api/update`. Supervised installs default to enabled; IT-managed Docker leaves it unset so the update banner is notify-only and the API returns 409. Status exposes `self_update_enabled` and `latest_url` (PR #63).

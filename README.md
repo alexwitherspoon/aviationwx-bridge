@@ -25,7 +25,7 @@ Choose the path that matches your environment:
 
 **Best for:** Dedicated single-board computers at remote locations with minimal IT support. Works on a Raspberry Pi or a comparable SBC (see [Hardware Requirements](#hardware-requirements)).
 
-Run one command and the bridge looks after itself: it checks for updates daily, applies critical security fixes automatically, rolls back a bad update when health checks fail, and restarts on its own after a crash or capture stall. This is the recommended path for most installs.
+Run one command and the bridge looks after itself: the host supervisor checks for updates on boot and daily, applies new releases when GitHub has a newer version, rolls back a bad update when health checks fail, and restarts on its own after a crash or capture stall. This is the recommended path for most installs.
 
 One command installs everything:
 
@@ -43,8 +43,8 @@ curl -fsSL https://raw.githubusercontent.com/alexwitherspoon/AviationWX.org-Brid
 **After installation:**
 - Web console: `http://<your-device-ip>:1229`
 - Default password: `aviationwx` (change this immediately!)
-- Updates are checked daily (systemd timer)
-- Critical security updates apply automatically
+- Updates are checked on boot and once per day (systemd timer)
+- New GitHub releases apply automatically when the supervisor finds a newer version (see [Updates](#updates))
 
 ---
 
@@ -96,25 +96,34 @@ services:
 
 ### Supervised Install (Path A)
 
-Updates are handled automatically by the supervisor:
+The host supervisor (`aviationwx-supervisor.sh`) applies container updates. The in-bridge update checker (hourly GitHub poll) only drives the web console banner and `/api/status`; it does not pull images.
 
-| Update Type | Behavior |
-|-------------|----------|
-| **Normal** | Notification shown in web UI; user can apply when convenient |
-| **Critical** | Auto-applies after 24-hour grace period |
-| **Emergency** | Applies immediately (rare, security issues only) |
+| When | Behavior |
+|------|----------|
+| **Boot** | `boot-update` runs before the container starts |
+| **Daily** | `aviationwx-daily-update.timer` fires once per day at midnight local time, with up to 30 minutes jitter |
+| **Manual** | `sudo aviationwx update` or web UI Update (writes `/data/trigger-update`) |
 
-All updates include automatic rollback if health checks fail.
+| Gate | Behavior |
+|------|----------|
+| **Newer version** | When installed semver is behind the GitHub release for your channel (`latest` by default in `global.json`), the supervisor pulls the image and recreates the container |
+| **Release age** | Releases younger than **2 hours** are skipped unless you force an update or the host rebooted after a watchdog recovery |
+| **Rollback** | Failed health checks roll back to `last-known-good.txt` |
+| **Release metadata** | Supervisor reads `min_host_version` and `deprecates` from the GitHub release body. `critical` and `force_update` in release notes are informational today; they are not enforced by the supervisor script |
 
 **Manual update:**
 ```bash
-sudo systemctl start aviationwx-supervisor
+sudo aviationwx update
 ```
 
-**Check update status:**
+**Check status:**
 ```bash
-cat /data/aviationwx/update-available.json
+sudo aviationwx status
+# or
+sudo /usr/local/bin/aviationwx-supervisor.sh status
 ```
+
+Update availability in the web UI comes from `GET /api/status` (`update.update_available`, `update.latest_version`).
 
 ### Docker (Path B)
 
@@ -180,7 +189,7 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 - **Secure Upload**: SFTP with fail2ban-aware retry logic
 - **Low Memory**: Runs lean on small SBCs (1GB minimum, 3GB or more recommended)
 - **NTP Health**: Automatic time validation and drift detection
-- **Auto Updates**: Critical security updates with automatic rollback (Path A)
+- **Auto Updates**: Supervisor applies GitHub releases on boot and daily, with rollback (Path A)
 - **Hot-Reload**: Camera, timezone, and SNTP config changes apply instantly (no restart)
 
 ---
@@ -244,7 +253,7 @@ RAM is the binding constraint, not CPU.
 - SFTP for secure uploads
 - Web console protected by password authentication
 - Read-only filesystem (only `/data` writable)
-- Automatic security updates (Path A)
+- Automatic updates via host supervisor (Path A)
 
 ---
 

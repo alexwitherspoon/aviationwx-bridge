@@ -171,7 +171,7 @@ func TestHostKeyStore_trustedRotation(t *testing.T) {
 	}
 }
 
-func TestHostKeyStore_trustedRotation_caseInsensitiveFingerprint(t *testing.T) {
+func TestHostKeyStore_trustedRotation_normalizedFingerprintPrefix(t *testing.T) {
 	dir, path := testHostKeyDir(t)
 	store, err := newHostKeyStore(path, dir)
 	if err != nil {
@@ -183,11 +183,11 @@ func TestHostKeyStore_trustedRotation_caseInsensitiveFingerprint(t *testing.T) {
 	}
 
 	key2 := testHostKey(t)
-	fp := strings.ToLower(ssh.FingerprintSHA256(key2))
-	writeTrustedJSON(t, dir, fp)
+	fp := ssh.FingerprintSHA256(key2)
+	writeTrustedJSON(t, dir, "sha256:"+strings.TrimPrefix(fp, "SHA256:"))
 
 	if err := cb("ignored", nil, key2); err != nil {
-		t.Fatalf("case-insensitive trusted fp: %v", err)
+		t.Fatalf("normalized trusted fp prefix: %v", err)
 	}
 	_ = path
 }

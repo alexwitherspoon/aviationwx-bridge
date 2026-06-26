@@ -185,7 +185,7 @@ func (s *hostKeyStore) isTrustedFingerprint(fp string) bool {
 	}
 	fp = strings.TrimSpace(fp)
 	for _, t := range trusted {
-		if strings.EqualFold(strings.TrimSpace(t), fp) {
+		if strings.TrimSpace(t) == fp {
 			return true
 		}
 	}

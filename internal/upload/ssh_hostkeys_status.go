@@ -193,7 +193,7 @@ func computeSSHHostKeysStatus(serverFP, pinnedFP string, pinnedOK bool, pinnedKe
 func fingerprintInList(fp string, list []string) bool {
 	fp = strings.TrimSpace(fp)
 	for _, item := range list {
-		if strings.EqualFold(strings.TrimSpace(item), fp) {
+		if strings.TrimSpace(item) == fp {
 			return true
 		}
 	}

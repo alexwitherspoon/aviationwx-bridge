@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
+
+var e2eHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 // HTTPPost sends POST with optional body and returns response body on 2xx.
 func HTTPPost(url string, body []byte) ([]byte, error) {
@@ -19,7 +22,7 @@ func HTTPPost(url string, body []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := e2eHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -69,8 +69,8 @@ func TestNewSFTPClient(t *testing.T) {
 			if !tt.wantErr && client == nil {
 				t.Error("NewSFTPClient() returned nil client without error")
 			}
-			if !tt.wantErr && client.config.Port != 22 && tt.config.Port == 0 {
-				t.Errorf("NewSFTPClient() port = %d, want 22 (default)", client.config.Port)
+			if !tt.wantErr && client.config.Port != 2222 && tt.config.Port == 0 {
+				t.Errorf("NewSFTPClient() port = %d, want 2222 (default)", client.config.Port)
 			}
 		})
 	}

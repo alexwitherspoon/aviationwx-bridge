@@ -35,7 +35,7 @@ func NewSFTPClient(cfg Config) (*SFTPClient, error) {
 		return nil, fmt.Errorf("password is required")
 	}
 	if cfg.Port == 0 {
-		cfg.Port = 22 // Default SFTP port
+		cfg.Port = 2222 // aviationwx.org SFTP port
 	}
 
 	store, err := getSharedHostKeyStore(cfg.KnownHostsPath, "")

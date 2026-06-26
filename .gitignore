@@ -3,6 +3,10 @@ config.json
 configs/config.json
 global.json
 cameras/
+# E2E harness bridge fixtures (safe test credentials)
+!testdata/e2e/bridge/global.json
+!testdata/e2e/bridge/cameras/
+!testdata/e2e/bridge/cameras/**
 *.secrets.env
 secrets.env
 
@@ -77,6 +81,13 @@ docker-compose.override.yml
 docker/data/
 docker/data-test/
 docker/data/  # Runtime configuration and state - do not commit
+testdata/e2e/tls/ca-key.pem
+testdata/e2e/tls/server.pem
+testdata/e2e/tls/server.csr
+testdata/e2e/sftp/
+testdata/e2e/images/
+testdata/e2e/bridge/upload_ssh_trusted_keys.json
+testdata/e2e/bridge/ssh_known_hosts
 
 # Environment variables (local overrides only)
 .env.local

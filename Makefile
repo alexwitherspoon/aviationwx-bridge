@@ -91,4 +91,8 @@ dev-clean: docker-down ## Stop and clean development environment
 	rm -rf docker/data
 	@echo "✓ Development environment cleaned"
 
+e2e: ## Run local E2E integration harness (Docker + go test -tags=e2e)
+	@chmod +x scripts/e2e-run.sh scripts/e2e-preflight.sh scripts/e2e/gen-test-tls.sh scripts/e2e/build-fixtures.sh 2>/dev/null || true
+	@./scripts/e2e-run.sh
+
 check: fmt vet test test-js test-sh ## Run all checks (format, vet, Go tests, JS + Bats)

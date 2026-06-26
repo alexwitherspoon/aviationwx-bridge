@@ -151,7 +151,7 @@ func TestSyncUploadSSHHostKeysHTTPS_non200KeepsFile(t *testing.T) {
 	uploadHostKeysHTTPClient = &http.Client{
 		Transport: &rewriteHostTransport{base: server.URL, inner: http.DefaultTransport},
 	}
-	defer func() { uploadHostKeysHTTPClient = http.DefaultClient }()
+	defer func() { uploadHostKeysHTTPClient = nil }()
 
 	if err := SyncUploadSSHHostKeysHTTPS(dir, "upload.test", 2222); err == nil {
 		t.Fatal("expected error")
@@ -174,6 +174,25 @@ func (t *rewriteHostTransport) RoundTrip(req *http.Request) (*http.Response, err
 		t.inner = http.DefaultTransport
 	}
 	return t.inner.RoundTrip(req2)
+}
+
+func TestSyncUploadSSHHostKeysHTTPS_rejectsRedirect(t *testing.T) {
+	dir := t.TempDir()
+	const host = "upload.test"
+
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://evil.example/roster.json", http.StatusFound)
+	}))
+	defer redirect.Close()
+
+	uploadHostKeysHTTPClient = &http.Client{
+		Transport: &rewriteHostTransport{base: redirect.URL, inner: http.DefaultTransport},
+	}
+	defer func() { uploadHostKeysHTTPClient = nil }()
+
+	if err := SyncUploadSSHHostKeysHTTPS(dir, host, 2222); err == nil {
+		t.Fatal("expected redirect error")
+	}
 }
 
 func TestUploadSSHHostKeysDocument_unmarshal(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -27,8 +28,8 @@ type uploadSSHHostKeysDocument struct {
 	UpdatedAt string   `json:"updated_at"`
 }
 
-// uploadHostKeysHTTPClient is injectable for tests (defaults to http.DefaultClient).
-var uploadHostKeysHTTPClient = http.DefaultClient
+// uploadHostKeysHTTPClient is injectable for tests (nil uses NewUploadHostKeysTLSHTTPClient).
+var uploadHostKeysHTTPClient *http.Client
 
 // SyncUploadSSHHostKeysHTTPS fetches the live roster from the upload host and replaces
 // the on-disk trusted fingerprint list when the response is valid. On fetch or validation
@@ -120,12 +121,8 @@ func validateUploadSSHHostKeysDocument(doc *uploadSSHHostKeysDocument, expectHos
 }
 
 // SetUploadHostKeysHTTPClientForTest overrides the HTTP client used for HTTPS roster fetch.
-// Pass nil to restore http.DefaultClient.
+// Pass nil to restore the production TLS client.
 func SetUploadHostKeysHTTPClientForTest(client *http.Client) {
-	if client == nil {
-		uploadHostKeysHTTPClient = http.DefaultClient
-		return
-	}
 	uploadHostKeysHTTPClient = client
 }
 
@@ -140,6 +137,9 @@ func NewUploadHostKeysTLSHTTPClient(uploadHost string, timeout time.Duration) *h
 	uploadHost = strings.TrimSpace(uploadHost)
 	return &http.Client{
 		Timeout: timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return errors.New("upload ssh host keys roster: redirects not allowed")
+		},
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				ServerName: uploadHost,

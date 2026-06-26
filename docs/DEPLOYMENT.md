@@ -15,7 +15,7 @@ Choose the deployment method that matches your environment:
 
 ## Supervised Install (Recommended)
 
-Runs on a Raspberry Pi or a comparable single-board computer (SBC). Run one command and the bridge looks after itself: a host supervisor checks for updates daily, applies critical security fixes automatically, rolls back a bad update when health checks fail, and restarts on its own after a crash or capture stall. This is the recommended path for most installs. See [Recommended hardware](#recommended-hardware) for board options.
+Runs on a Raspberry Pi or a comparable single-board computer (SBC). Run one command and the bridge looks after itself: a host supervisor checks for updates on boot and daily, applies new GitHub releases when the installed version is behind, rolls back a bad update when health checks fail, and restarts on its own after a crash or capture stall. This is the recommended path for most installs. See [Recommended hardware](#recommended-hardware) for board options.
 
 ### One-Command Installation
 
@@ -57,15 +57,20 @@ AviationWX.org Bridge is a **local LAN utility**: the web console and health end
 
 ### Automatic Updates
 
-The supervisor checks for updates **once per day** (`aviationwx-daily-update.timer`, with up to 30 minutes jitter).
+The supervisor checks for updates **on every boot** (`aviationwx-boot-update.service`) and **once per day** (`aviationwx-daily-update.timer`: midnight local time, with up to 30 minutes jitter).
 
-| Update Type | Behavior |
-|-------------|----------|
-| Normal | Shows in web UI; user applies when ready |
-| Critical (security) | Auto-applies after 24-hour grace period |
-| Emergency | Applies immediately |
+The in-bridge update checker polls GitHub **hourly** for the web console banner only; it does not apply updates.
 
-All updates automatically rollback if health checks fail.
+| When | Behavior |
+|------|----------|
+| Boot / daily | Supervisor compares installed semver to the GitHub release for your channel (`update_channel` in `global.json`, default `latest`). When behind, it pulls the image and recreates the container. |
+| Manual | `sudo aviationwx update` or web UI Update skips the release cache and the 2-hour release age gate. |
+| Rollback | Failed post-update health checks roll back to `last-known-good.txt`. |
+
+| Gate | Detail |
+|------|--------|
+| Release age | `MIN_RELEASE_AGE_HOURS=2` in `aviationwx-supervisor.sh`. Releases younger than 2 hours are skipped on normal boot/daily checks. Overridden by `force-update`, web UI trigger, or boot after watchdog recovery. |
+| Release metadata | Supervisor parses `min_host_version` and `deprecates` from `AVIATIONWX_RELEASE_META` in the GitHub release body. `critical` and `force_update` in release notes are informational; the supervisor does not branch on them today. |
 
 ### Self-recovery (no nightly restart required)
 
@@ -229,7 +234,7 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 
 - [ ] Change default web console password
 - [ ] Use HTTPS proxy if exposing to internet (Caddy, nginx, Tailscale)
-- [ ] Restrict file permissions: `chmod 600 /data/aviationwx/config.json`
+- [ ] Restrict file permissions: `chmod 600 /data/aviationwx/global.json` and `chmod 600 /data/aviationwx/cameras/*.json`
 - [ ] Enable firewall, allow only necessary ports
 - [ ] Keep system and Docker updated
 
@@ -426,7 +431,7 @@ AVIATIONWX_TMPFS_SIZE=300m
 
 ### Application-Level Queue Settings
 
-In addition to the tmpfs size (filesystem limit), the application has its own queue limits in `config.json`:
+In addition to the tmpfs size (filesystem limit), the application has its own queue limits in `global.json` (`queue` object):
 
 ```json
 {
@@ -471,22 +476,24 @@ Queue stored in tmpfs (`/dev/shm`) - no SD card wear.
 
 ### Backup Config
 
-```bash
-# Manual backup
-cp /data/aviationwx/config.json ~/config-backup.json
+Supervised installs store config under `/data/aviationwx/` on the host (mounted at `/data` in the container): `global.json`, `cameras/*.json`, plus SSH host key files (`ssh_known_hosts`, `upload_ssh_trusted_keys.json`).
 
-# Or via Docker volume
+```bash
+# Manual backup (supervised install host paths)
+sudo tar czf ~/aviationwx-config-backup.tar.gz -C /data aviationwx
+
+# Or via Docker volume name
 docker run --rm \
   -v aviationwx-data:/data \
   -v $(pwd):/backup \
-  alpine tar czf /backup/config-backup.tar.gz -C /data .
+  alpine tar czf /backup/aviationwx-backup.tar.gz -C /data .
 ```
 
 ### Restore Config
 
 ```bash
-# Copy back
-cp ~/config-backup.json /data/aviationwx/config.json
+# Extract backup (adjust archive path)
+sudo tar xzf ~/aviationwx-config-backup.tar.gz -C /data
 
 # Restart
 docker restart aviationwx-org-bridge
@@ -511,8 +518,8 @@ If device fails:
 # Check logs
 docker logs aviationwx-org-bridge
 
-# Validate config
-python3 -m json.tool /data/aviationwx/config.json
+# Validate global config (supervised install host path)
+python3 -m json.tool /data/aviationwx/global.json
 
 # Check resources
 free -h
@@ -543,7 +550,7 @@ UPLOAD_HOST=upload.aviationwx.org
 curl -fsS "https://${UPLOAD_HOST}/.well-known/aviationwx-upload-ssh-host-keys.json" | jq .
 ssh-keyscan -p 2222 -t rsa,ed25519 "${UPLOAD_HOST}" 2>/dev/null | ssh-keygen -lf -
 
-# On the bridge host: pinned and cached rosters
+# On the bridge (container paths; same files under /data/aviationwx/ on the supervised host)
 cat /data/ssh_known_hosts
 cat /data/upload_ssh_trusted_keys.json
 ```

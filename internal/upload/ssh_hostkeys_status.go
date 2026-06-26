@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -96,7 +97,7 @@ func ProbeSSHHostKeyFingerprint(host string, port int, timeout time.Duration) (s
 		Timeout: timeout,
 	}
 
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	client, err := ssh.Dial("tcp", addr, sshConfig)
 	if client != nil {
 		_ = client.Close()

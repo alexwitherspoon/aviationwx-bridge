@@ -2,7 +2,9 @@ package upload
 
 import (
 	"fmt"
+	"net"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,6 +38,9 @@ func NewSFTPClient(cfg Config) (*SFTPClient, error) {
 	}
 	if cfg.Port == 0 {
 		cfg.Port = 2222 // aviationwx.org SFTP port
+	}
+	if strings.TrimSpace(cfg.KnownHostsPath) == "" {
+		return nil, fmt.Errorf("known hosts path is required")
 	}
 
 	store, err := getSharedHostKeyStore(cfg.KnownHostsPath, "")
@@ -145,7 +150,7 @@ func (c *SFTPClient) dial() (*ssh.Client, *sftp.Client, error) {
 		Timeout:         timeout,
 	}
 
-	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
+	addr := net.JoinHostPort(c.config.Host, strconv.Itoa(c.config.Port))
 	sshClient, err := ssh.Dial("tcp", addr, sshConfig)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ssh dial: %w", err)

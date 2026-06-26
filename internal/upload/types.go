@@ -25,6 +25,7 @@ type Config struct {
 	TimeoutConnectSeconds int
 	TimeoutUploadSeconds  int
 	BasePath              string // Base directory for uploads (default: /files)
+	KnownHostsPath        string // SSH known_hosts for TOFU host key verification
 }
 
 // Error types for upload operations

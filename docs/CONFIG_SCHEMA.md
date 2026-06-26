@@ -221,6 +221,17 @@ Each camera has its own upload credentials. SFTP only (protocol "ftps"/"ftp" in 
 | `port` | integer | `1229` | Web console port |
 | `password` | string | `"aviationwx"` | Login password |
 
+### Upload SSH host key files (not in JSON)
+
+The bridge stores SFTP host key state under the config directory (`AVIATIONWX_CONFIG_DIR`, default `/data`):
+
+| File | Purpose |
+|------|---------|
+| `ssh_known_hosts` | TOFU pin for each `upload.host:port` the bridge has connected to |
+| `upload_ssh_trusted_keys.json` | Cached HTTPS roster SHA256 fingerprints (`source`: `https-roster`) |
+
+Primary trust is the HTTPS roster at `https://{upload.host}/.well-known/aviationwx-upload-ssh-host-keys.json`. The bridge fetches it on startup and hourly, and forces a refresh when the live server key does not match the pin or roster. When HTTPS is unreachable, the last cached roster is used until it can be refreshed.
+
 ### Web console and network exposure
 
 The bridge targets a **private LAN** (for example a single-board computer at a field or home), not a public internet-facing service. Authenticated JSON APIs and unauthenticated health endpoints (`GET /healthz`, `GET /readyz`) assume **trusted local access**: operators on the same network, or host-side automation (for example watchdog scripts using `127.0.0.1`). They are **not** hardened for anonymous access from the internet. Do not port-forward the web console port or place the host on an untrusted network without firewall rules and a deliberate security review.

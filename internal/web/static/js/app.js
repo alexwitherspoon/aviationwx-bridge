@@ -174,6 +174,7 @@ function showSection(sectionId) {
     // Load section-specific data
     if (sectionId === 'settings') {
         loadGlobalSettings();
+        loadUploadSshKeys();
     }
     
     // Update URL
@@ -1378,6 +1379,124 @@ async function loadGlobalSettings() {
     }
 
     updateSettingsUnsavedHints();
+}
+
+function uploadSshStatusLabel(status) {
+    switch (status) {
+        case 'ok':
+            return 'OK';
+        case 'mismatch':
+            return 'Mismatch';
+        case 'mismatch_pending_heal':
+            return 'Mismatch (trusted roster)';
+        case 'roster_unavailable':
+            return 'Roster unavailable';
+        case 'probe_failed':
+            return 'Probe failed';
+        default:
+            return status || 'Unknown';
+    }
+}
+
+function uploadSshStatusClass(status) {
+    switch (status) {
+        case 'ok':
+            return 'status-ok';
+        case 'mismatch':
+        case 'mismatch_pending_heal':
+            return 'status-warn';
+        case 'roster_unavailable':
+        case 'probe_failed':
+            return 'status-error';
+        default:
+            return '';
+    }
+}
+
+function formatTrustedUpdatedAt(value) {
+    if (!value) return '—';
+    try {
+        return new Date(value).toLocaleString();
+    } catch (_) {
+        return value;
+    }
+}
+
+function renderUploadSshKeys(endpoints) {
+    const panel = document.getElementById('uploadSshKeysPanel');
+    if (!panel) return;
+    if (!endpoints || endpoints.length === 0) {
+        panel.innerHTML = '<p class="form-help">No upload targets configured.</p>';
+        return;
+    }
+
+    panel.innerHTML = endpoints.map((ep) => {
+        const target = escapeHtml(`${ep.host}:${ep.port}`);
+        const statusClass = uploadSshStatusClass(ep.status);
+        const statusLabel = escapeHtml(uploadSshStatusLabel(ep.status));
+        const serverKey = ep.server_key_sha256
+            ? escapeHtml(ep.server_key_sha256)
+            : (ep.server_key_error ? escapeHtml(`Error: ${ep.server_key_error}`) : '—');
+        const pinnedKey = ep.pinned_key_sha256
+            ? escapeHtml(ep.pinned_key_sha256)
+            : (ep.pinned_key_error ? escapeHtml(`Error: ${ep.pinned_key_error}`) : '—');
+        const roster = (ep.trusted_roster_sha256 && ep.trusted_roster_sha256.length)
+            ? escapeHtml(ep.trusted_roster_sha256.join(', '))
+            : '—';
+        const source = ep.trusted_source
+            ? escapeHtml(`${ep.trusted_source} (${formatTrustedUpdatedAt(ep.trusted_updated_at)})`)
+            : '—';
+        const rosterURL = ep.https_roster_url ? escapeHtml(ep.https_roster_url) : '—';
+        return `
+            <div class="upload-ssh-endpoint">
+                <div class="info-row">
+                    <span>Target</span>
+                    <code>${target}</code>
+                </div>
+                <div class="info-row">
+                    <span>Status</span>
+                    <span class="upload-ssh-status ${statusClass}">${statusLabel}</span>
+                </div>
+                <div class="info-row">
+                    <span>Server key (live)</span>
+                    <code>${serverKey}</code>
+                </div>
+                <div class="info-row">
+                    <span>Pinned key</span>
+                    <code>${pinnedKey}</code>
+                </div>
+                <div class="info-row">
+                    <span>Trusted roster</span>
+                    <code>${roster}</code>
+                </div>
+                <div class="info-row">
+                    <span>Roster source</span>
+                    <span>${source}</span>
+                </div>
+                <div class="info-row">
+                    <span>HTTPS roster URL</span>
+                    <code>${rosterURL}</code>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function loadUploadSshKeys() {
+    const panel = document.getElementById('uploadSshKeysPanel');
+    if (!panel) return;
+    panel.innerHTML = '<p class="form-help">Loading SSH host key status…</p>';
+    try {
+        const data = await api('/upload/ssh-host-keys');
+        renderUploadSshKeys(data.endpoints || []);
+    } catch (err) {
+        console.error('Failed to load SSH host keys:', err);
+        panel.innerHTML = `<p class="form-help" style="color:var(--color-danger);">Could not load SSH host key status: ${err.message}</p>`;
+    }
+}
+
+async function refreshUploadSshKeys() {
+    await loadUploadSshKeys();
 }
 
 async function saveGlobalSettings() {

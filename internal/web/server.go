@@ -20,6 +20,7 @@ import (
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/deploy"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/logger"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/paths"
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/upload"
 )
 
 //go:embed static/*
@@ -144,6 +145,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/time", s.authMiddleware(s.handleTime))
 	s.mux.HandleFunc("/api/test/camera", s.authMiddleware(s.handleTestCamera))
 	s.mux.HandleFunc("/api/test/upload", s.authMiddleware(s.handleTestUpload))
+	s.mux.HandleFunc("/api/upload/ssh-host-keys", s.authMiddleware(s.handleUploadSSHHostKeys))
 	s.mux.HandleFunc("/api/update", s.authMiddleware(s.handleUpdate))
 
 	// Health check (no auth)
@@ -749,6 +751,28 @@ func (s *Server) handleTestUpload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleUploadSSHHostKeys(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	glob := s.configService.GetGlobal()
+	probeTimeout := upload.SSHHostKeysProbeTimeout(glob.TimeoutConnectSeconds)
+
+	status := upload.CollectSSHHostKeysStatus(
+		s.configService.ConfigDir(),
+		s.configService.SSHKnownHostsPath(),
+		s.configService.ListCameras(),
+		probeTimeout,
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"endpoints": status,
+	})
 }
 
 // handleHealthz reports process and subsystem health. Returns 503 when unhealthy.

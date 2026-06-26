@@ -1,11 +1,9 @@
 package update
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,67 +15,11 @@ const trustedHostKeysFile = "upload_ssh_trusted_keys.json"
 
 var trustedHostKeysSyncMu sync.Mutex
 
-// trustedHostKeysReleasesURL is injectable for tests (defaults to releasesURL).
-var trustedHostKeysReleasesURL = releasesURL
-
 // trustedHostKeysFileData is persisted under the config directory.
 type trustedHostKeysFileData struct {
 	SHA256    []string  `json:"sha256"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Source    string    `json:"source,omitempty"`
-}
-
-// SyncTrustedUploadHostKeys fetches the latest GitHub release metadata and persists
-// trusted upload host key fingerprints for unsupervised SSH key rotation.
-func SyncTrustedUploadHostKeys(configDir string) error {
-	if strings.TrimSpace(configDir) == "" {
-		return fmt.Errorf("config directory is required")
-	}
-	trustedHostKeysSyncMu.Lock()
-	defer trustedHostKeysSyncMu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	defer cancel()
-
-	body, err := fetchLatestReleaseBody(ctx)
-	if err != nil {
-		return err
-	}
-	fps := ParseUploadSSHHostKeysSHA256(body)
-	if len(fps) == 0 {
-		return nil
-	}
-	return writeTrustedHostKeysFile(filepath.Join(configDir, trustedHostKeysFile), fps, "github-release")
-}
-
-func fetchLatestReleaseBody(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, trustedHostKeysReleasesURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	req.Header.Set("User-Agent", "aviationwx-org-bridge/trusted-hostkeys")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return "", nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
-	}
-
-	var release struct {
-		Body string `json:"body"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return "", err
-	}
-	return release.Body, nil
 }
 
 func writeTrustedHostKeysFile(path string, fps []string, source string) error {
@@ -152,6 +94,19 @@ func normalizeFingerprint(fp string) string {
 
 // LoadTrustedUploadHostKeys reads persisted trusted fingerprints (empty slice if missing).
 func LoadTrustedUploadHostKeys(configDir string) ([]string, error) {
+	data, err := loadTrustedHostKeysFileData(configDir)
+	if err != nil || data == nil {
+		return nil, err
+	}
+	return data.SHA256, nil
+}
+
+// LoadTrustedUploadHostKeysFileData reads persisted trusted key metadata (nil if missing).
+func LoadTrustedUploadHostKeysFileData(configDir string) (*trustedHostKeysFileData, error) {
+	return loadTrustedHostKeysFileData(configDir)
+}
+
+func loadTrustedHostKeysFileData(configDir string) (*trustedHostKeysFileData, error) {
 	path := filepath.Join(configDir, trustedHostKeysFile)
 	f, err := os.Open(path)
 	if err != nil {
@@ -169,15 +124,6 @@ func LoadTrustedUploadHostKeys(configDir string) ([]string, error) {
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return nil, err
 	}
-	return normalizeFingerprintList(data.SHA256), nil
-}
-
-// SetTrustedHostKeysReleasesURLForTest overrides the GitHub releases URL (tests only).
-func SetTrustedHostKeysReleasesURLForTest(url string) {
-	trustedHostKeysReleasesURL = url
-}
-
-// TrustedHostKeysReleasesURLForTest returns the current releases URL (tests only).
-func TrustedHostKeysReleasesURLForTest() string {
-	return trustedHostKeysReleasesURL
+	data.SHA256 = normalizeFingerprintList(data.SHA256)
+	return &data, nil
 }

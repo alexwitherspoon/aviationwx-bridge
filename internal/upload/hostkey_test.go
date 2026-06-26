@@ -107,10 +107,10 @@ func TestVerify_rejectsInvalidInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := testHostKey(t)
-	if err := store.verify("", key); err == nil {
+	if err := store.verify("", key, "", 0); err == nil {
 		t.Fatal("expected error for empty label")
 	}
-	if err := store.verify("[h]:2222", nil); err == nil {
+	if err := store.verify("[h]:2222", nil, "", 0); err == nil {
 		t.Fatal("expected error for nil key")
 	}
 }
@@ -210,6 +210,19 @@ func TestHostKeyStore_trustedRotation_ignoresUntrustedList(t *testing.T) {
 	_ = path
 }
 
+func TestHostKeyStore_trustedFirstConnectRejectsUnknownKey(t *testing.T) {
+	dir, path := testHostKeyDir(t)
+	store, err := newHostKeyStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTrustedJSON(t, dir, "SHA256:notTheServersKey")
+	cb := store.callback("upload.example.com", 2222)
+	if err := cb("ignored", nil, testHostKey(t)); err == nil {
+		t.Fatal("expected rejection when trusted roster exists but server key is not listed")
+	}
+}
+
 func TestHostKeyStore_refreshTrustedOnMismatch(t *testing.T) {
 	dir, path := testHostKeyDir(t)
 	store, err := newHostKeyStore(path, dir)
@@ -224,7 +237,7 @@ func TestHostKeyStore_refreshTrustedOnMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store.syncTrusted = func(configDir string) error {
+	store.syncHTTPS = func(configDir, host string, port int) error {
 		writeTrustedJSON(t, configDir, ssh.FingerprintSHA256(key2))
 		return nil
 	}
@@ -235,7 +248,7 @@ func TestHostKeyStore_refreshTrustedOnMismatch(t *testing.T) {
 	}
 }
 
-func TestHostKeyStore_refreshTrustedRespectsCooldown(t *testing.T) {
+func TestHostKeyStore_refreshTrustedForceOnMismatch(t *testing.T) {
 	dir, path := testHostKeyDir(t)
 	store, err := newHostKeyStore(path, dir)
 	if err != nil {
@@ -247,7 +260,7 @@ func TestHostKeyStore_refreshTrustedRespectsCooldown(t *testing.T) {
 	}
 
 	called := 0
-	store.syncTrusted = func(string) error {
+	store.syncHTTPS = func(string, string, int) error {
 		called++
 		return nil
 	}
@@ -256,8 +269,8 @@ func TestHostKeyStore_refreshTrustedRespectsCooldown(t *testing.T) {
 	if err := cb("ignored", nil, testHostKey(t)); err == nil {
 		t.Fatal("expected mismatch")
 	}
-	if called != 0 {
-		t.Fatalf("sync called %d times during cooldown, want 0", called)
+	if called != 1 {
+		t.Fatalf("force refresh on mismatch: sync called %d times, want 1", called)
 	}
 	_ = path
 }
@@ -274,7 +287,7 @@ func TestHostKeyStore_refreshRetriesAfterSyncFailure(t *testing.T) {
 	}
 
 	called := 0
-	store.syncTrusted = func(string) error {
+	store.syncHTTPS = func(string, string, int) error {
 		called++
 		return fmt.Errorf("network down")
 	}
@@ -371,10 +384,10 @@ func TestReplace_preservesCommentsAndOtherHosts(t *testing.T) {
 	if countKnownHostLines(t, path, labelB) != 1 {
 		t.Fatal("label B should remain")
 	}
-	if err := store.verify(labelA, rotated); err != nil {
+	if err := store.verify(labelA, rotated, "upload.a", 2222); err != nil {
 		t.Fatalf("rotated key should verify: %v", err)
 	}
-	if err := store.verify(labelA, initial); err == nil {
+	if err := store.verify(labelA, initial, "upload.a", 2222); err == nil {
 		t.Fatal("initial key should no longer verify")
 	}
 }

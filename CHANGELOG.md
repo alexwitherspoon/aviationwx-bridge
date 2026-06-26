@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Upload**: HTTPS SFTP host key roster client (`/.well-known/aviationwx-upload-ssh-host-keys.json`) with on-disk cache in `upload_ssh_trusted_keys.json`. Re-enables SSH host key verification removed in 2.10.1.
+- **Web console**: Settings panel and `GET /api/upload/ssh-host-keys` show live server key, pinned key, and trusted roster status per upload host.
+
+### Changed
+- **Upload**: Trusted roster sync on startup and hourly from the upload host HTTPS well-known endpoint only; forced refresh on host key mismatch bypasses the hourly cooldown. Successful sync replaces the cached roster (removed keys do not stay trusted). Removes GitHub release `upload_ssh_host_keys_sha256` roster sync. Production HTTPS roster at `upload.aviationwx.org` verified 2026-06-26 (`curl` fingerprints match `ssh-keyscan` for RSA, ED25519, and ECDSA).
+
 ## [2.10.1] - 2026-06-25
 
 Emergency release. Reverts the 2.10.0 SFTP host key verification that stopped weathercam uploads fleet-wide while `/readyz` stayed healthy. Supervised installs on `latest` recover via the normal daily update; `sudo aviationwx update` applies immediately on a reachable host.

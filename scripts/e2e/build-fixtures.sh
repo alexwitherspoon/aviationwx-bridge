@@ -17,6 +17,17 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
   exit 1
 fi
 
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "sha256sum or shasum is required to build E2E image fixtures" >&2
+    return 1
+  fi
+}
+
 echo '{"images":{' > "${MANIFEST}.tmp"
 first=1
 for i in 1 2 3; do
@@ -28,7 +39,7 @@ for i in 1 2 3; do
   exiftool -overwrite_original -q -q \
     -UserComment="AviationWX-E2E:seq-${i}" \
     "${out}" >/dev/null
-  sha=$(shasum -a 256 "${out}" | awk '{print $1}')
+  sha=$(sha256_file "${out}")
   if [[ "${first}" -eq 1 ]]; then
     first=0
   else

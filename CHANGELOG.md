@@ -7,12 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-06-26
+
+Restores SFTP SSH host key verification using a TLS-verified HTTPS roster at the upload host. Supersedes the 2.10.1 emergency bypass (`InsecureIgnoreHostKey`). Supervised installs on `latest` pick this up on the next daily update; `sudo aviationwx update` applies immediately on a reachable host.
+
 ### Added
 - **Upload**: HTTPS SFTP host key roster client (`/.well-known/aviationwx-upload-ssh-host-keys.json`) with on-disk cache in `upload_ssh_trusted_keys.json`. Re-enables SSH host key verification removed in 2.10.1.
 - **Web console**: Settings panel and `GET /api/upload/ssh-host-keys` show live server key, pinned key, and trusted roster status per upload host.
 
 ### Changed
 - **Upload**: Trusted roster sync on startup and hourly from the upload host HTTPS well-known endpoint only; forced refresh on host key mismatch bypasses the hourly cooldown. Successful sync replaces the cached roster (removed keys do not stay trusted). Removes GitHub release `upload_ssh_host_keys_sha256` roster sync. Production HTTPS roster at `upload.aviationwx.org` verified 2026-06-26 (`curl` fingerprints match `ssh-keyscan` for RSA, ED25519, and ECDSA).
+
+### Release
+- Marks 2.10.0 and 2.10.1 deprecated. Hosts on 2.10.1 should upgrade to restore host key verification.
 
 ## [2.10.1] - 2026-06-25
 

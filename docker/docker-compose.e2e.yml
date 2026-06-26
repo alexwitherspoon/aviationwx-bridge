@@ -37,7 +37,7 @@ services:
           "CMD",
           "curl",
           "-fsSk",
-          "https://127.0.0.1/.well-known/aviationwx-upload-ssh-host-keys.json",
+          "https://127.0.0.1/.well-known/aviationwx-upload-ssh-host-keys.json"
         ]
       interval: 10s
       timeout: 10s
@@ -79,7 +79,7 @@ services:
           "--no-verbose",
           "--tries=1",
           "--spider",
-          "http://127.0.0.1:1229/readyz",
+          "http://127.0.0.1:1229/readyz"
         ]
       interval: 10s
       timeout: 5s

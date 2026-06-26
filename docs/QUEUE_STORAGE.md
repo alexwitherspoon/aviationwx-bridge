@@ -178,7 +178,7 @@ On the supervised install the value is a Docker size token (e.g. `200m`, `1g`); 
 
 ### Application Queue Settings
 
-In `config.json`:
+In `global.json` (`queue` object):
 
 ```json
 {

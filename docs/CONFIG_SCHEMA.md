@@ -2,7 +2,12 @@
 
 **Config Version**: 2  
 **Format**: JSON  
-**Location**: `/data/config.json` (or `$AVIATIONWX_CONFIG`)
+**Location**: Config directory (`AVIATIONWX_CONFIG_DIR`, default `/data` in the container):
+
+- `global.json` - bridge-wide settings
+- `cameras/*.json` - one file per camera
+
+Legacy single-file config: `AVIATIONWX_CONFIG` (default `/data/config.json`). New installs use the directory layout above.
 
 ## Quick Reference
 
@@ -43,6 +48,7 @@
 |-------|------|----------|---------|-------------|
 | `version` | integer | Yes | - | Schema version (must be `2`) |
 | `timezone` | string | No | `"UTC"` | IANA timezone (e.g., `"America/Chicago"`) |
+| `update_channel` | string | No | `"latest"` | Supervisor update channel: `"latest"` or `"edge"` |
 | `max_concurrent_uploads` | integer | No | `2` | Parallel SFTP uploads (also mirrored under `global`) |
 | `max_concurrent_captures` | integer | No | (profile) | Parallel capture jobs (also mirrored under `global`); if omitted, derived from RAM (~500 MB per slot, max 10) and, when max CPU frequency &lt; 2 GHz, capped to about one concurrent capture per two logical CPUs; if RAM cannot be detected, default **1**. An explicit value (1–10) is used as-is and is not adjusted by profiling |
 | `cameras` | array | Yes | - | Array of camera configurations |
@@ -258,11 +264,12 @@ The bridge targets a **private LAN** (for example a single-board computer at a f
       },
       "capture_interval_seconds": 60,
       "upload": {
+        "protocol": "sftp",
         "host": "upload.aviationwx.org",
-        "port": 21,
+        "port": 2222,
         "username": "kord-west-user",
         "password": "kord-west-pass",
-        "tls": true
+        "base_path": "/files"
       }
     },
     {
@@ -282,10 +289,12 @@ The bridge targets a **private LAN** (for example a single-board computer at a f
         "quality": 80
       },
       "upload": {
+        "protocol": "sftp",
         "host": "upload.aviationwx.org",
+        "port": 2222,
         "username": "kord-east-user",
         "password": "kord-east-pass",
-        "tls": true
+        "base_path": "/files"
       }
     }
   ],
@@ -351,7 +360,8 @@ Config values can be overridden via environment:
 
 | Variable | Description |
 |----------|-------------|
-| `AVIATIONWX_CONFIG` | Config file path |
+| `AVIATIONWX_CONFIG_DIR` | Config directory (`global.json`, `cameras/`) |
+| `AVIATIONWX_CONFIG` | Legacy single-file config path (migration source) |
 | `AVIATIONWX_DATA_DIR` | Mounted data volume root inside the container (default `/data`) |
 | `AVIATIONWX_SELF_UPDATE` | When `1` or `true`, web UI `POST /api/update` writes the supervisor trigger file (supervised installs). Unset for IT-managed Docker. |
 | `AVIATIONWX_TMPFS_SIZE` | Override the image-queue tmpfs size with a Docker size token (e.g. `200m`, `1g`). Supervised installs read it from the data-dir environment file and otherwise size tmpfs from available RAM; the Docker Compose path uses it for the `/dev/shm` mount. An invalid value is ignored. |

@@ -75,10 +75,7 @@ func fetchUploadSSHHostKeysDocument(ctx context.Context, uploadHost string, uplo
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", uploadSSHHostKeysHTTPSUserAgent)
 
-	client := uploadHostKeysHTTPClient
-	if client == nil {
-		client = NewUploadHostKeysTLSHTTPClient(uploadHost, requestTimeout)
-	}
+	client := rosterHTTPClient(uploadHost, requestTimeout)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -118,6 +115,20 @@ func validateUploadSSHHostKeysDocument(doc *uploadSSHHostKeysDocument, expectHos
 		return fmt.Errorf("roster port %d does not match upload port %d", doc.Port, expectPort)
 	}
 	return nil
+}
+
+func rosterHTTPClient(uploadHost string, timeout time.Duration) *http.Client {
+	if uploadHostKeysHTTPClient == nil {
+		return NewUploadHostKeysTLSHTTPClient(uploadHost, timeout)
+	}
+	if uploadHostKeysHTTPClient.CheckRedirect != nil {
+		return uploadHostKeysHTTPClient
+	}
+	copy := *uploadHostKeysHTTPClient
+	copy.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return errors.New("upload ssh host keys roster: redirects not allowed")
+	}
+	return &copy
 }
 
 // SetUploadHostKeysHTTPClientForTest overrides the HTTP client used for HTTPS roster fetch.

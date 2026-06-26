@@ -1,6 +1,7 @@
 package upload
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -28,6 +29,8 @@ type SSHHostKeysEndpointStatus struct {
 
 // SSHHostKeysProbeMaxTimeout caps live SSH probes from the web console (independent of upload connect timeout).
 const SSHHostKeysProbeMaxTimeout = 15 * time.Second
+
+var errHostKeyProbeAbort = errors.New("host key captured; abort probe")
 
 // SSHHostKeysProbeTimeout returns the probe timeout for the settings API, capped at SSHHostKeysProbeMaxTimeout.
 func SSHHostKeysProbeTimeout(connectSeconds int) time.Duration {
@@ -79,7 +82,7 @@ func ProbeSSHHostKeyFingerprint(host string, port int, timeout time.Duration) (s
 		// codeql[go/insecure-hostkeycallback]: read-only fingerprint probe for Settings UI (same role as ssh-keyscan); uploads use hostKeyStore verification.
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			fingerprint = ssh.FingerprintSHA256(key)
-			return nil
+			return errHostKeyProbeAbort
 		},
 		Timeout: timeout,
 	}

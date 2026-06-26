@@ -1491,7 +1491,7 @@ async function loadUploadSshKeys() {
         renderUploadSshKeys(data.endpoints || []);
     } catch (err) {
         console.error('Failed to load SSH host keys:', err);
-        panel.innerHTML = `<p class="form-help" style="color:var(--color-danger);">Could not load SSH host key status: ${err.message}</p>`;
+        panel.innerHTML = `<p class="form-help" style="color:var(--color-danger);">Could not load SSH host key status: ${escapeHtml(err.message)}</p>`;
     }
 }
 

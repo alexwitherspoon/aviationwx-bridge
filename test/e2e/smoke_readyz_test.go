@@ -11,7 +11,7 @@ import (
 
 func TestSmoke_BridgeReadyz(t *testing.T) {
 	harness.RequireE2EStack(t)
-	if err := harness.WaitHTTPGET(harness.BridgeWebURL+"/readyz", http.StatusOK, harness.DefaultWaitTimeout); err != nil {
+	if err := harness.WaitHTTPGET(harness.BridgeWebURL()+"/readyz", http.StatusOK, harness.DefaultWaitTimeout); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -41,7 +41,7 @@ func TestUploadIdentity_RosterCachedAndAPIOk(t *testing.T) {
 	}
 
 	client := &http.Client{Timeout: 20 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, harness.BridgeWebURL+"/api/upload/ssh-host-keys", nil)
+	req, err := http.NewRequest(http.MethodGet, harness.BridgeWebURL()+"/api/upload/ssh-host-keys", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

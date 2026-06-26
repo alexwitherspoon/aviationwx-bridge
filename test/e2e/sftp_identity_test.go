@@ -23,7 +23,7 @@ func TestSFTPIdentity_TestUploadAPI(t *testing.T) {
 		"username": harness.E2EUploadSFTPUser(),
 		"password": harness.E2EUploadSFTPPassword(),
 	})
-	req, err := http.NewRequest(http.MethodPost, harness.BridgeWebURL+"/api/test/upload", bytes.NewReader(payload))
+	req, err := http.NewRequest(http.MethodPost, harness.BridgeWebURL()+"/api/test/upload", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatal(err)
 	}

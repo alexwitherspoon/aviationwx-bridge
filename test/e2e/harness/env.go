@@ -16,13 +16,20 @@ const (
 	SimulatorHost = "camera-simulator"
 	SimulatorHTTP = "http://camera-simulator"
 
-	BridgeWebURL = "http://127.0.0.1:1231"
-	BridgeUser   = "admin"
-	BridgePass   = "aviationwx"
+	BridgeUser = "admin"
+	BridgePass = "aviationwx"
 
 	DefaultWaitTimeout = 3 * time.Minute
 	DefaultPoll        = 2 * time.Second
 )
+
+// BridgeWebURL returns the bridge web console base URL for E2E tests.
+func BridgeWebURL() string {
+	if v := os.Getenv("E2E_BRIDGE_URL"); v != "" {
+		return v
+	}
+	return "http://127.0.0.1:1231"
+}
 
 // UploadRosterURL returns the HTTPS roster URL for the E2E upload host.
 func UploadRosterURL() string {

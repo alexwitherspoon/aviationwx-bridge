@@ -45,6 +45,9 @@ func SyncUploadSSHHostKeysHTTPS(configDir, uploadHost string, uploadPort int) er
 	if uploadPort <= 0 {
 		uploadPort = 2222
 	}
+	if _, err := loadUploadRosterRootCAs(); err != nil {
+		return err
+	}
 
 	trustedHostKeysSyncMu.Lock()
 	defer trustedHostKeysSyncMu.Unlock()
@@ -146,17 +149,21 @@ func UploadSSHHostKeysWellKnownURL(uploadHost string) string {
 // NewUploadHostKeysTLSHTTPClient returns an HTTP client that verifies TLS for uploadHost.
 func NewUploadHostKeysTLSHTTPClient(uploadHost string, timeout time.Duration) *http.Client {
 	uploadHost = strings.TrimSpace(uploadHost)
+	tlsConfig, err := rosterTLSConfig(uploadHost)
+	if err != nil {
+		tlsConfig = &tls.Config{
+			ServerName: uploadHost,
+			MinVersion: tls.VersionTLS12,
+		}
+	}
 	return &http.Client{
 		Timeout: timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return errors.New("upload ssh host keys roster: redirects not allowed")
 		},
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				ServerName: uploadHost,
-				MinVersion: tls.VersionTLS12,
-			},
-			DialContext: (&net.Dialer{Timeout: timeout}).DialContext,
+			TLSClientConfig: tlsConfig,
+			DialContext:     (&net.Dialer{Timeout: timeout}).DialContext,
 		},
 	}
 }

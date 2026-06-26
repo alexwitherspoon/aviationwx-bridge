@@ -366,6 +366,7 @@ Config values can be overridden via environment:
 | `AVIATIONWX_SELF_UPDATE` | When `1` or `true`, web UI `POST /api/update` writes the supervisor trigger file (supervised installs). Unset for IT-managed Docker. |
 | `AVIATIONWX_TMPFS_SIZE` | Override the image-queue tmpfs size with a Docker size token (e.g. `200m`, `1g`). Supervised installs read it from the data-dir environment file and otherwise size tmpfs from available RAM; the Docker Compose path uses it for the `/dev/shm` mount. An invalid value is ignored. |
 | `AVIATIONWX_QUEUE_PATH` | Queue storage path |
+| `AVIATIONWX_UPLOAD_ROSTER_CA_FILE` | Optional PEM file with extra root CAs for HTTPS SFTP host key roster fetch. Unset in production. E2E harness sets this to trust `upload.e2e.test` TLS. |
 | `LOG_LEVEL` | Log level (debug, info, warn, error) |
 | `LOG_FORMAT` | Log format (text, json) |
 

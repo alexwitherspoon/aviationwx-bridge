@@ -56,8 +56,7 @@ func RosterHTTPClient() (*http.Client, error) {
 			MinVersion: tls.VersionTLS12,
 		},
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			_ = ctx
-			return dialer.Dial(network, net.JoinHostPort(host, port))
+			return dialer.DialContext(ctx, network, net.JoinHostPort(host, port))
 		},
 	}
 	return &http.Client{Timeout: 15 * time.Second, Transport: transport}, nil

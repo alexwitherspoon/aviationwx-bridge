@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
@@ -45,16 +46,24 @@ func SSHHostKeysProbeTimeout(connectSeconds int) time.Duration {
 }
 
 // probeSSHHostKeyFingerprintHook overrides ProbeSSHHostKeyFingerprint in tests (nil uses the default).
-var probeSSHHostKeyFingerprintHook func(host string, port int, timeout time.Duration) (string, error)
+var (
+	probeHookMu                      sync.RWMutex
+	probeSSHHostKeyFingerprintHook func(host string, port int, timeout time.Duration) (string, error)
+)
 
 // SetProbeSSHHostKeyFingerprintForTest overrides the SSH host key probe (tests only).
 func SetProbeSSHHostKeyFingerprintForTest(fn func(host string, port int, timeout time.Duration) (string, error)) {
+	probeHookMu.Lock()
 	probeSSHHostKeyFingerprintHook = fn
+	probeHookMu.Unlock()
 }
 
 func probeSSHHostKeyFingerprint(host string, port int, timeout time.Duration) (string, error) {
-	if probeSSHHostKeyFingerprintHook != nil {
-		return probeSSHHostKeyFingerprintHook(host, port, timeout)
+	probeHookMu.RLock()
+	hook := probeSSHHostKeyFingerprintHook
+	probeHookMu.RUnlock()
+	if hook != nil {
+		return hook(host, port, timeout)
 	}
 	return ProbeSSHHostKeyFingerprint(host, port, timeout)
 }

@@ -15,7 +15,6 @@ var (
 	rosterCAMu     sync.Mutex
 	rosterCACached *x509.CertPool
 	rosterCAPath   string
-	rosterCAErr    error
 )
 
 // loadUploadRosterRootCAs returns extra root CAs from AVIATIONWX_UPLOAD_ROSTER_CA_FILE.
@@ -28,18 +27,13 @@ func loadUploadRosterRootCAs() (*x509.CertPool, error) {
 
 	rosterCAMu.Lock()
 	defer rosterCAMu.Unlock()
-	if rosterCAPath == path && (rosterCAErr != nil || rosterCACached != nil) {
-		return rosterCACached, rosterCAErr
+	if rosterCAPath == path && rosterCACached != nil {
+		return rosterCACached, nil
 	}
-
-	rosterCAPath = path
-	rosterCACached = nil
-	rosterCAErr = nil
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		rosterCAErr = fmt.Errorf("read upload roster CA file: %w", err)
-		return nil, rosterCAErr
+		return nil, fmt.Errorf("read upload roster CA file: %w", err)
 	}
 
 	pool, err := x509.SystemCertPool()
@@ -47,10 +41,10 @@ func loadUploadRosterRootCAs() (*x509.CertPool, error) {
 		pool = x509.NewCertPool()
 	}
 	if !pool.AppendCertsFromPEM(raw) {
-		rosterCAErr = fmt.Errorf("upload roster CA file contains no valid PEM certificates")
-		return nil, rosterCAErr
+		return nil, fmt.Errorf("upload roster CA file contains no valid PEM certificates")
 	}
 
+	rosterCAPath = path
 	rosterCACached = pool
 	return rosterCACached, nil
 }
@@ -61,7 +55,6 @@ func resetUploadRosterCAForTest() {
 	defer rosterCAMu.Unlock()
 	rosterCACached = nil
 	rosterCAPath = ""
-	rosterCAErr = nil
 }
 
 func rosterTLSConfig(serverName string) (*tls.Config, error) {

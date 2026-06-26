@@ -80,7 +80,7 @@ func ProbeSSHHostKeyFingerprint(host string, port int, timeout time.Duration) (s
 		port = 2222
 	}
 	if timeout <= 0 {
-		timeout = 15 * time.Second
+		timeout = SSHHostKeysProbeMaxTimeout
 	}
 
 	var fingerprint string

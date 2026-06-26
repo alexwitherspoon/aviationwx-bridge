@@ -67,8 +67,12 @@ func main() {
 			return
 		}
 		st.mu.Lock()
-		idx := st.index[cam]
+		idx, ok := st.index[cam]
 		st.mu.Unlock()
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
 		path := filepath.Join(imageDir, fmt.Sprintf("seq-%03d.jpg", idx+1))
 		data, err := os.ReadFile(path)
 		if err != nil {

@@ -13,65 +13,52 @@ Each release should follow this structure:
 - Fix: Brief description
 - Breaking: Major change description (if any)
 
-## AVIATIONWX_METADATA
-
-```json
-{
-  "min_host_version": "2.0",
-  "deprecates": ["v1.0.0", "v1.1.0"],
-  "edge_stable_commit": "abc123def456"
-}
-```
+<!-- AVIATIONWX_RELEASE_META {"version": "2.11.0", "min_host_version": "2.3", "critical": true, "force_update": false, "rollback_safe": true, "deprecates": ["2.10.0", "2.10.1"]} -->
 
 ## Full Changelog
 
-https://github.com/alexwitherspoon/AviationWX.org-Bridge/compare/v1.9.0...v2.0.0
+https://github.com/alexwitherspoon/aviationwx.org-bridge/compare/v2.10.1...v2.11.0
 ```
 
-## Metadata Fields
+CI (`.github/workflows/release.yml`) emits a default `AVIATIONWX_RELEASE_META` block when a tag is pushed. Edit the published release notes after CI if you need `deprecates`, `critical`, or extra operator context.
 
-### `min_host_version` (required)
+## Metadata block
 
-The minimum host script version required to run this release. If the host scripts are older than this version, they will be automatically updated before the container update proceeds.
+Use an HTML comment so the JSON is machine-readable but unobtrusive in rendered release notes:
 
-**Example:**
-```json
-"min_host_version": "2.0"
+```html
+<!-- AVIATIONWX_RELEASE_META {"version": "2.11.0", "min_host_version": "2.3", ...} -->
 ```
 
-**Usage:**
-- Set to `"2.0"` for all releases requiring the new watchdog/supervisor architecture
-- Bump only when host scripts have breaking changes or critical new features
-- Format: Semantic version string without 'v' prefix
+The JSON must be on one line inside the comment.
 
-### `deprecates` (optional)
+### Fields
 
-Array of version tags that are explicitly deprecated and should trigger an update.
+| Field | Required | Parsed by supervisor | Description |
+|-------|----------|----------------------|-------------|
+| `version` | Yes | No | Container release version (no `v` prefix) |
+| `min_host_version` | Yes | **Yes** | Minimum `aviationwx-supervisor.sh` version (`SCRIPT_VERSION`). Host scripts update before the container when older. |
+| `deprecates` | No | **Yes** | Semver strings **without** `v` prefix (e.g. `"2.10.0"`). Listed in release notes; supervisor skips upgrading **to** a deprecated target version. |
+| `critical` | No | No | Operator signal for security-sensitive releases. Not enforced by `aviationwx-supervisor.sh` today. |
+| `force_update` | No | No | Operator signal to prioritize fleet rollout. Not enforced by the supervisor today. |
+| `rollback_safe` | No | No | Documented expectation; rollback uses `last-known-good.txt` and health checks. |
+| `edge_stable_commit` | Edge only | No | Git commit hash after edge stability verification |
 
-**Example:**
-```json
-"deprecates": ["v1.0.0", "v1.1.0", "v1.2.0"]
-```
+**Removed in 2.11.0:** `upload_ssh_host_keys_sha256` in release metadata. SFTP host key trust uses the HTTPS roster at `https://{upload.host}/.well-known/aviationwx-upload-ssh-host-keys.json` (see `SECURITY.md`).
 
-**Usage:**
-- Include versions with critical security issues
-- Include versions with data corruption bugs
-- Include versions incompatible with current API/services
-- Format: Full tag names including 'v' prefix
+### What the supervisor enforces
 
-### `edge_stable_commit` (optional, edge releases only)
+From `scripts/aviationwx-supervisor.sh`:
 
-For edge releases, the git commit hash that passed stability testing.
+- **Boot** and **daily** (`aviationwx-daily-update.timer`, midnight local + up to 30 min jitter) run the same upgrade check.
+- Target version comes from the GitHub release for the bridge's `update_channel` (`global.json`, default `latest`).
+- Applies when installed semver is behind target.
+- **`MIN_RELEASE_AGE_HOURS=2`**: skips releases younger than 2 hours unless `force-update`, web UI trigger, or boot after watchdog recovery.
+- **`min_host_version`**: pulls newer host scripts from `main` before container update when needed.
+- **`deprecates`**: if the target version appears in the list, the upgrade is skipped.
+- Post-update health failure rolls back to `last-known-good.txt`.
 
-**Example:**
-```json
-"edge_stable_commit": "abc123def456789"
-```
-
-**Usage:**
-- Set on edge pre-releases after 24h of successful testing
-- Allows edge failback logic to determine if an edge release is stable enough
-- If missing or mismatched, edge channel will failback to latest
+`critical` and `force_update` belong in release notes for operators; do not assume the supervisor reads them until host script support is added.
 
 ## Release Checklist
 
@@ -79,105 +66,34 @@ When creating a new release:
 
 - [ ] Update `CHANGELOG.md` with all changes
 - [ ] Tag follows semantic versioning: `vMAJOR.MINOR.PATCH`
-- [ ] Release notes include `AVIATIONWX_METADATA` block
-- [ ] `min_host_version` set correctly
-- [ ] `deprecates` includes any versions with known critical issues
+- [ ] Release notes include `AVIATIONWX_RELEASE_META` (edit after CI if needed)
+- [ ] `min_host_version` matches current `SCRIPT_VERSION` in `aviationwx-supervisor.sh` when host behavior changed
+- [ ] `deprecates` lists semver strings without `v` prefix
 - [ ] For edge releases: add `edge_stable_commit` after stability verification
 - [ ] Docker image is built and published automatically by CI
 - [ ] Test installation on a clean low-memory SBC, e.g. a 1GB Pi 4-class board (if major release)
 
-## Example Releases
-
-### Stable Release
+## Example: stable release
 
 ```markdown
-# v2.1.0 - Enhanced Camera Support
+## AviationWX.org Bridge v2.11.0
 
-## What's Changed
+Restores SFTP SSH host key verification via HTTPS roster.
 
-- Feature: Add support for ONVIF PTZ controls
-- Feature: New web UI for camera positioning
-- Fix: EXIF timestamp handling for cameras without RTC
-- Fix: Memory leak in RTSP stream handling
+<!-- AVIATIONWX_RELEASE_META {"version": "2.11.0", "min_host_version": "2.3", "critical": true, "force_update": false, "rollback_safe": true, "deprecates": ["2.10.0", "2.10.1"]} -->
 
-## AVIATIONWX_METADATA
+### What's changed
 
-```json
-{
-  "min_host_version": "2.0",
-  "deprecates": ["v2.0.0", "v2.0.1"]
-}
-```
+- Upload: HTTPS SFTP host key roster client with on-disk cache
+- Web console: Settings panel for SSH host key status
 
 ## Full Changelog
 
-https://github.com/alexwitherspoon/AviationWX.org-Bridge/compare/v2.0.2...v2.1.0
-```
-
-### Edge Pre-Release
-
-```markdown
-# v2.2.0-edge.1 - Experimental Multi-Upload
-
-## What's Changed
-
-⚠️ **This is an EDGE release - may be unstable**
-
-- Feature: Experimental support for multiple upload destinations per camera
-- Breaking: Upload config format changed (auto-migrated)
-
-## AVIATIONWX_METADATA
-
-```json
-{
-  "min_host_version": "2.0"
-}
-```
-
-**Note:** `edge_stable_commit` will be added after 24h stability verification.
-
-## Testing
-
-This release has passed CI but needs real-world testing. If you experience issues, the system will automatically failback to the latest stable release.
-
-## Full Changelog
-
-https://github.com/alexwitherspoon/AviationWX.org-Bridge/compare/v2.1.0...v2.2.0-edge.1
-```
-
-### Edge Release (After Stability Verification)
-
-```markdown
-# v2.2.0-edge.2 - Experimental Multi-Upload (Stable)
-
-## What's Changed
-
-⚠️ **This is an EDGE release**
-
-- Feature: Experimental support for multiple upload destinations per camera
-- Breaking: Upload config format changed (auto-migrated)
-- Fix: Handle upload retry logic correctly for multiple destinations
-
-## AVIATIONWX_METADATA
-
-```json
-{
-  "min_host_version": "2.0",
-  "edge_stable_commit": "7f3a2b8c9d1e4f5g"
-}
-```
-
-✅ **Stability verified** - This edge release has been running successfully for 24+ hours in production.
-
-## Full Changelog
-
-https://github.com/alexwitherspoon/AviationWX.org-Bridge/compare/v2.1.0...v2.2.0-edge.2
+https://github.com/alexwitherspoon/aviationwx.org-bridge/compare/v2.10.1...v2.11.0
 ```
 
 ## Notes
 
-- The `AVIATIONWX_METADATA` block must be valid JSON
-- The metadata is parsed by `aviationwx-supervisor.sh` using `grep` and basic parsing
-- Keep metadata simple - complex logic should be in the host scripts, not the metadata
-- Edge releases should be marked as "pre-release" in GitHub
-- Stable releases should NOT be marked as "pre-release"
+- Keep metadata JSON simple; complex logic belongs in host scripts.
+- Edge releases should be marked as pre-release in GitHub.
+- Stable releases should not be marked as pre-release.

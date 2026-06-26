@@ -1,6 +1,7 @@
 package upload
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -16,6 +17,9 @@ func TestHostKeyRotation_endToEnd(t *testing.T) {
 	store, err := newHostKeyStore(path, dir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	store.syncHTTPS = func(string, string, int) error {
+		return fmt.Errorf("offline")
 	}
 	cb := store.callback("upload.aviationwx.org", 2222)
 	if err := cb("ignored", nil, key1); err != nil {

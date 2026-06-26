@@ -99,7 +99,27 @@ func (s *hostKeyStore) verify(label string, key ssh.PublicKey, uploadHost string
 		return err
 	}
 	if !found {
-		return s.verifyFirstConnect(label, key, uploadHost, uploadPort)
+		fp := ssh.FingerprintSHA256(key)
+		if !s.isTrustedFingerprint(fp) {
+			s.mu.Unlock()
+			s.syncTrustedRosterUnlocked(true, uploadHost, uploadPort)
+			s.mu.Lock()
+		}
+		if s.hasTrustedRoster() && !s.isTrustedFingerprint(fp) {
+			return fmt.Errorf("ssh host key %s not in trusted upload roster", fp)
+		}
+		stored, found, err := s.lookup(label)
+		if err != nil {
+			return err
+		}
+		if found {
+			if keysEqual(stored, key) {
+				return nil
+			}
+			return fmt.Errorf("ssh host key mismatch for %s (got %s, want %s)",
+				label, fp, ssh.FingerprintSHA256(stored))
+		}
+		return s.append(label, key)
 	}
 	if keysEqual(stored, key) {
 		return nil
@@ -117,14 +137,40 @@ func (s *hostKeyStore) verify(label string, key ssh.PublicKey, uploadHost string
 		label, fp, ssh.FingerprintSHA256(stored))
 }
 
-func (s *hostKeyStore) verifyFirstConnect(label string, key ssh.PublicKey, uploadHost string, uploadPort int) error {
-	fp := ssh.FingerprintSHA256(key)
-	if s.hasTrustedRoster() && !s.isTrustedFingerprint(fp) {
-		if !s.tryRefreshTrustedWhileLocked(true, uploadHost, uploadPort) || !s.isTrustedFingerprint(fp) {
-			return fmt.Errorf("ssh host key %s not in trusted upload roster", fp)
-		}
+// syncTrustedRosterUnlocked fetches the HTTPS roster. The caller must not hold s.mu.
+func (s *hostKeyStore) syncTrustedRosterUnlocked(force bool, uploadHost string, uploadPort int) bool {
+	if strings.TrimSpace(uploadHost) == "" {
+		return false
 	}
-	return s.append(label, key)
+	s.mu.Lock()
+	if !force && time.Since(s.lastTrustedFetch) < trustedHostKeyFetchCooldown {
+		s.mu.Unlock()
+		return false
+	}
+	s.mu.Unlock()
+
+	httpsFn := s.syncHTTPS
+	if httpsFn == nil {
+		httpsFn = update.SyncUploadSSHHostKeysHTTPS
+	}
+	err := httpsFn(s.configDir, uploadHost, uploadPort)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		return false
+	}
+	s.lastTrustedFetch = time.Now()
+	return true
+}
+
+// tryRefreshTrustedWhileLocked fetches the HTTPS roster when allowed. The caller must hold
+// s.mu; the lock is released for network I/O and re-acquired before return.
+func (s *hostKeyStore) tryRefreshTrustedWhileLocked(force bool, uploadHost string, uploadPort int) bool {
+	s.mu.Unlock()
+	ok := s.syncTrustedRosterUnlocked(force, uploadHost, uploadPort)
+	s.mu.Lock()
+	return ok
 }
 
 func (s *hostKeyStore) hasTrustedRoster() bool {
@@ -144,29 +190,6 @@ func (s *hostKeyStore) isTrustedFingerprint(fp string) bool {
 		}
 	}
 	return false
-}
-
-// tryRefreshTrustedWhileLocked fetches the HTTPS roster when allowed. The caller must hold
-// s.mu; the lock is released for network I/O and re-acquired before return.
-func (s *hostKeyStore) tryRefreshTrustedWhileLocked(force bool, uploadHost string, uploadPort int) bool {
-	if !force && time.Since(s.lastTrustedFetch) < trustedHostKeyFetchCooldown {
-		return false
-	}
-	if strings.TrimSpace(uploadHost) == "" {
-		return false
-	}
-	httpsFn := s.syncHTTPS
-	if httpsFn == nil {
-		httpsFn = update.SyncUploadSSHHostKeysHTTPS
-	}
-	s.mu.Unlock()
-	err := httpsFn(s.configDir, uploadHost, uploadPort)
-	s.mu.Lock()
-	if err != nil {
-		return false
-	}
-	s.lastTrustedFetch = time.Now()
-	return true
 }
 
 func (s *hostKeyStore) lookup(label string) (ssh.PublicKey, bool, error) {

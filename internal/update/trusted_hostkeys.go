@@ -95,8 +95,11 @@ func normalizeFingerprint(fp string) string {
 // LoadTrustedUploadHostKeys reads persisted trusted fingerprints (empty slice if missing).
 func LoadTrustedUploadHostKeys(configDir string) ([]string, error) {
 	data, err := loadTrustedHostKeysFileData(configDir)
-	if err != nil || data == nil {
+	if err != nil {
 		return nil, err
+	}
+	if data == nil {
+		return []string{}, nil
 	}
 	return data.SHA256, nil
 }

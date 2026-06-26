@@ -81,6 +81,9 @@ docker-compose.override.yml
 docker/data/
 docker/data-test/
 docker/data/  # Runtime configuration and state - do not commit
+testdata/e2e/tls/ca.pem
+testdata/e2e/tls/fullchain.pem
+testdata/e2e/tls/privkey.pem
 testdata/e2e/tls/ca-key.pem
 testdata/e2e/tls/server.pem
 testdata/e2e/tls/server.csr

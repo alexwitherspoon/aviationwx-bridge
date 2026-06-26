@@ -79,7 +79,9 @@ if [[ -n "${AVIATIONWX_ORG_SHA:-}" ]]; then
   git -C "${ORG_ROOT}" checkout "${AVIATIONWX_ORG_SHA}"
 fi
 
-if [[ ! -f "${ROOT}/testdata/e2e/tls/ca.pem" ]]; then
+if ! [[ -f "${ROOT}/testdata/e2e/tls/ca.pem" \
+  && -f "${ROOT}/testdata/e2e/tls/fullchain.pem" \
+  && -f "${ROOT}/testdata/e2e/tls/privkey.pem" ]]; then
   "${ROOT}/scripts/e2e/gen-test-tls.sh"
 fi
 

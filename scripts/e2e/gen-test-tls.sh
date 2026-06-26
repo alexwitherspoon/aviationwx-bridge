@@ -16,6 +16,12 @@ SERVER_CSR="${TLS_DIR}/server.csr"
 SERVER_CERT="${TLS_DIR}/server.pem"
 FULLCHAIN="${TLS_DIR}/fullchain.pem"
 
+# A committed or leftover ca.pem without the matching ca-key.pem breaks signing.
+if [[ -f "${CA_CERT}" && ! -f "${CA_KEY}" ]]; then
+  echo "Removing stale ${CA_CERT} (CA private key missing)" >&2
+  rm -f "${CA_CERT}"
+fi
+
 if [[ ! -f "${CA_KEY}" ]]; then
   openssl genrsa -out "${CA_KEY}" 4096
   chmod 600 "${CA_KEY}"

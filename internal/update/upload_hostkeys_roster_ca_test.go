@@ -33,9 +33,6 @@ func TestSyncUploadSSHHostKeysHTTPS_trustsRosterCAFile(t *testing.T) {
 	caPath := filepath.Join(t.TempDir(), "ca.pem")
 	writePEM(t, caPath, "CERTIFICATE", caCert.Raw)
 
-	pool := x509.NewCertPool()
-	pool.AddCert(caCert)
-
 	t.Setenv(uploadRosterCAFileEnv, caPath)
 	resetUploadRosterCAForTest()
 	t.Cleanup(func() {
@@ -43,16 +40,12 @@ func TestSyncUploadSSHHostKeysHTTPS_trustsRosterCAFile(t *testing.T) {
 		resetUploadRosterCAForTest()
 	})
 
-	inner := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			RootCAs:    pool,
-			ServerName: "upload.test",
-			MinVersion: tls.VersionTLS12,
-		},
-	}
+	prod := NewUploadHostKeysTLSHTTPClient("upload.test", requestTimeout)
 	old := uploadHostKeysHTTPClient
 	uploadHostKeysHTTPClient = &http.Client{
-		Transport: &rewriteHostTransport{base: server.URL, inner: inner},
+		Timeout:       prod.Timeout,
+		CheckRedirect: prod.CheckRedirect,
+		Transport:     &rewriteHostTransport{base: server.URL, inner: prod.Transport},
 	}
 	defer func() { uploadHostKeysHTTPClient = old }()
 
@@ -78,8 +71,6 @@ func TestSyncUploadSSHHostKeysHTTPS_rejectsUntrustedRosterCA(t *testing.T) {
 	otherCAPath := filepath.Join(t.TempDir(), "other-ca.pem")
 	_, otherCert := generateTestCA(t)
 	writePEM(t, otherCAPath, "CERTIFICATE", otherCert.Raw)
-	otherPool := x509.NewCertPool()
-	otherPool.AddCert(otherCert)
 
 	t.Setenv(uploadRosterCAFileEnv, otherCAPath)
 	resetUploadRosterCAForTest()
@@ -88,16 +79,12 @@ func TestSyncUploadSSHHostKeysHTTPS_rejectsUntrustedRosterCA(t *testing.T) {
 		resetUploadRosterCAForTest()
 	})
 
-	inner := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			RootCAs:    otherPool,
-			ServerName: "upload.test",
-			MinVersion: tls.VersionTLS12,
-		},
-	}
+	prod := NewUploadHostKeysTLSHTTPClient("upload.test", requestTimeout)
 	old := uploadHostKeysHTTPClient
 	uploadHostKeysHTTPClient = &http.Client{
-		Transport: &rewriteHostTransport{base: server.URL, inner: inner},
+		Timeout:       prod.Timeout,
+		CheckRedirect: prod.CheckRedirect,
+		Transport:     &rewriteHostTransport{base: server.URL, inner: prod.Transport},
 	}
 	defer func() { uploadHostKeysHTTPClient = old }()
 

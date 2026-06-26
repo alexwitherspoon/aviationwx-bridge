@@ -47,8 +47,9 @@ Static analysis runs via [CodeQL](.github/workflows/codeql.yml) for **Go** and *
 
 | Finding | Handling |
 | ------- | -------- |
-| SFTP host keys | TOFU in `{config_dir}/ssh_known_hosts`. Official key rotations are listed in GitHub release metadata (`upload_ssh_host_keys_sha256`); the bridge syncs that roster and accepts matching new keys without operator action. |
+| SFTP host keys | TOFU in `{config_dir}/ssh_known_hosts`. Trusted roster from `https://{upload.host}/.well-known/aviationwx-upload-ssh-host-keys.json` (TLS-verified, cached in `{config_dir}/upload_ssh_trusted_keys.json`). When HTTPS is unreachable, the bridge uses the last cached roster only. Mismatched keys fail closed; trusted roster rotations update the pin without operator action. |
 | Camera config paths | Camera IDs are restricted to alphanumeric characters and hyphens; config file paths must stay under `cameras/`. |
 | Web console password in `sessionStorage` | Accepted for LAN-only Basic Auth UX; cleared on 401. XSS on the console remains the residual risk. |
 | Update dialog `confirm()` text | Version strings are shown in a native `confirm()` (plain text, not HTML); tag-stripping is defensive only. |
 | Log tail allocation | `/api/logs?tail=` is capped at 1000 lines in the handler and in `GetLast`. The buffer builds the tail with bounded `append` after clamping, using a constant capacity hint (not `make` sized from the request), which satisfies CodeQL `go/uncontrolled-allocation-size`. |
+| SSH host key probe | `ProbeSSHHostKeyFingerprint` accepts any host key to read the live fingerprint for the Settings UI (same role as `ssh-keyscan`). SFTP uploads use `hostKeyStore` TOFU plus HTTPS roster verification. CodeQL `go/insecure-hostkeycallback` is suppressed on the probe callback with an inline annotation. |

@@ -1,6 +1,7 @@
 package upload
 
 import (
+	"path/filepath"
 	"sync"
 	"testing"
 )
@@ -61,7 +62,11 @@ func TestNewSFTPClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewSFTPClient(tt.config)
+			cfg := tt.config
+			if !tt.wantErr && cfg.KnownHostsPath == "" {
+				cfg.KnownHostsPath = filepath.Join(t.TempDir(), "ssh_known_hosts")
+			}
+			client, err := NewSFTPClient(cfg)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewSFTPClient() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -69,8 +74,8 @@ func TestNewSFTPClient(t *testing.T) {
 			if !tt.wantErr && client == nil {
 				t.Error("NewSFTPClient() returned nil client without error")
 			}
-			if !tt.wantErr && client.config.Port != 22 && tt.config.Port == 0 {
-				t.Errorf("NewSFTPClient() port = %d, want 22 (default)", client.config.Port)
+			if !tt.wantErr && client.config.Port != 2222 && tt.config.Port == 0 {
+				t.Errorf("NewSFTPClient() port = %d, want 2222 (default)", client.config.Port)
 			}
 		})
 	}
@@ -118,7 +123,9 @@ func TestNewSFTPClient_WithBasePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewSFTPClient(tt.config)
+			cfg := tt.config
+			cfg.KnownHostsPath = filepath.Join(t.TempDir(), "ssh_known_hosts")
+			client, err := NewSFTPClient(cfg)
 			if err != nil {
 				t.Errorf("NewSFTPClient() error = %v", err)
 				return
@@ -142,6 +149,7 @@ func TestSFTPClient_ConcurrentUploads(t *testing.T) {
 		Username:              "test",
 		Password:              "test",
 		TimeoutConnectSeconds: 1,
+		KnownHostsPath:        filepath.Join(t.TempDir(), "ssh_known_hosts"),
 	})
 	if err != nil {
 		t.Fatalf("NewSFTPClient: %v", err)
@@ -160,10 +168,11 @@ func TestSFTPClient_ConcurrentUploads(t *testing.T) {
 
 func TestSFTPClient_Close(t *testing.T) {
 	client, err := NewSFTPClient(Config{
-		Host:     "sftp.example.com",
-		Port:     22,
-		Username: "testuser",
-		Password: "testpass",
+		Host:           "sftp.example.com",
+		Port:           22,
+		Username:       "testuser",
+		Password:       "testpass",
+		KnownHostsPath: filepath.Join(t.TempDir(), "ssh_known_hosts"),
 	})
 	if err != nil {
 		t.Fatalf("NewSFTPClient: %v", err)

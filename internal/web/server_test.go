@@ -14,6 +14,7 @@ import (
 
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/scheduler"
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/upload"
 )
 
 // TestTimezoneUpdate tests the PUT /api/time endpoint
@@ -1642,6 +1643,94 @@ func TestHandleTestUpload(t *testing.T) {
 
 		if w.Code != http.StatusInternalServerError {
 			t.Errorf("Expected 500, got %d", w.Code)
+		}
+	})
+}
+
+func TestUploadSSHHostKeys_endpoint(t *testing.T) {
+	var capturedTimeout time.Duration
+	upload.SetProbeSSHHostKeyFingerprintForTest(func(host string, port int, timeout time.Duration) (string, error) {
+		capturedTimeout = timeout
+		return "SHA256:probe-test-key", nil
+	})
+	t.Cleanup(func() { upload.SetProbeSSHHostKeyFingerprintForTest(nil) })
+
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	if err := svc.UpdateGlobal(func(g *config.GlobalSettings) error {
+		g.TimeoutConnectSeconds = 300
+		return nil
+	}); err != nil {
+		t.Fatalf("UpdateGlobal: %v", err)
+	}
+
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		GetStatus: func() interface{} {
+			return map[string]interface{}{"status": "ok"}
+		},
+	})
+
+	t.Run("requires auth", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/upload/ssh-host-keys", nil)
+		w := httptest.NewRecorder()
+		server.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("method not allowed", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/upload/ssh-host-keys", nil)
+		req.SetBasicAuth("admin", svc.GetWebPassword())
+		w := httptest.NewRecorder()
+		server.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+		}
+	})
+
+	t.Run("returns endpoint status", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/upload/ssh-host-keys", nil)
+		req.SetBasicAuth("admin", svc.GetWebPassword())
+		w := httptest.NewRecorder()
+		server.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+		}
+		if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+			t.Fatalf("content-type = %q", ct)
+		}
+
+		var resp struct {
+			Endpoints []struct {
+				Host            string `json:"host"`
+				Port            int    `json:"port"`
+				ServerKeySHA256 string `json:"server_key_sha256"`
+				Status          string `json:"status"`
+			} `json:"endpoints"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.Endpoints) != 1 {
+			t.Fatalf("endpoints = %d, want 1", len(resp.Endpoints))
+		}
+		ep := resp.Endpoints[0]
+		if ep.Host != "upload.aviationwx.org" || ep.Port != 2222 {
+			t.Fatalf("endpoint = %+v", ep)
+		}
+		if ep.ServerKeySHA256 != "SHA256:probe-test-key" {
+			t.Fatalf("server key = %q", ep.ServerKeySHA256)
+		}
+		if ep.Status != "roster_unavailable" {
+			t.Fatalf("status = %q, want roster_unavailable without cached roster", ep.Status)
+		}
+		if capturedTimeout != upload.SSHHostKeysProbeMaxTimeout {
+			t.Fatalf("probe timeout = %v, want %v", capturedTimeout, upload.SSHHostKeysProbeMaxTimeout)
 		}
 	})
 }

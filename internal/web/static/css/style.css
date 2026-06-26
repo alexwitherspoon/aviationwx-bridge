@@ -460,6 +460,35 @@ select.form-control {
     border-radius: var(--radius-sm);
 }
 
+.upload-ssh-keys-panel {
+    margin: var(--space-md) 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.upload-ssh-endpoint {
+    border: 1px solid var(--color-border-muted);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    background: var(--color-bg);
+}
+
+.upload-ssh-status.status-ok {
+    color: var(--color-success, #10b981);
+    font-weight: 600;
+}
+
+.upload-ssh-status.status-warn {
+    color: var(--color-warning, #f59e0b);
+    font-weight: 600;
+}
+
+.upload-ssh-status.status-error {
+    color: var(--color-danger, #ef4444);
+    font-weight: 600;
+}
+
 /* Banner */
 .banner {
     padding: var(--space-lg);

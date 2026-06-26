@@ -286,6 +286,16 @@
                             </p>
                         </div>
                         <p id="uploadSettingsUnsavedHint" class="form-help" style="display:none;color:var(--color-warning);">Unsaved changes — click Save settings to apply.</p>
+                        <div class="form-group" id="uploadSshKeysSection">
+                            <label>SFTP server identity</label>
+                            <p class="form-help">
+                                Live SSH host key fingerprints for each upload target. Pinned keys are stored in <code>ssh_known_hosts</code>; trusted rosters come from the HTTPS well-known endpoint and offline cache.
+                            </p>
+                            <div id="uploadSshKeysPanel" class="upload-ssh-keys-panel">
+                                <p class="form-help">Loading SSH host key status…</p>
+                            </div>
+                            <button type="button" class="btn btn-secondary" onclick="refreshUploadSshKeys()">Refresh SSH keys</button>
+                        </div>
                         <button type="button" class="btn btn-primary" onclick="saveGlobalSettings()">Save settings</button>
                     </div>
                 </div>

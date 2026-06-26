@@ -164,6 +164,9 @@ func main() {
 	}
 	log.Info("Config service initialized", "dir", configDir)
 
+	syncUploadSSHHostKeys(configService, configDir, log)
+	go syncUploadSSHHostKeysLoop(configService, configDir, log)
+
 	// Create update checker
 	updateChecker := update.NewChecker(Version, GitCommit)
 	updateChecker.Start()
@@ -680,7 +683,7 @@ func (b *Bridge) createUploader(uploadConfig *config.Upload) (upload.Client, err
 	if merged.TimeoutUploadSeconds <= 0 && glob.TimeoutUploadSeconds > 0 {
 		merged.TimeoutUploadSeconds = glob.TimeoutUploadSeconds
 	}
-	return upload.NewClientFromConfig(merged)
+	return upload.NewClientFromConfig(merged, b.configService.SSHKnownHostsPath())
 }
 
 // refreshUploadersFromGlobal rebuilds per-camera SFTP clients so global timeout defaults take effect without restart.
@@ -1026,4 +1029,18 @@ func getUpdateChannel(channel string) string {
 	}
 	// Default to latest for unknown values
 	return "latest"
+}
+
+func syncUploadSSHHostKeys(configService *config.Service, configDir string, log *logger.Logger) {
+	if err := update.SyncUploadSSHHostKeysForCameras(configDir, configService.ListCameras()); err != nil {
+		log.Warn("Could not sync upload SSH host keys from HTTPS roster", "error", err)
+	}
+}
+
+func syncUploadSSHHostKeysLoop(configService *config.Service, configDir string, log *logger.Logger) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		syncUploadSSHHostKeys(configService, configDir, log)
+	}
 }

@@ -73,20 +73,6 @@ For edge releases, the git commit hash that passed stability testing.
 - Allows edge failback logic to determine if an edge release is stable enough
 - If missing or mismatched, edge channel will failback to latest
 
-### `upload_ssh_host_keys_sha256` (optional)
-
-OpenSSH SHA256 fingerprints for `upload.aviationwx.org` SFTP host key rotation. Field bridges poll this from the latest GitHub release and accept matching new keys on appliances without manual `ssh_known_hosts` edits.
-
-**Example:**
-```json
-"upload_ssh_host_keys_sha256": ["SHA256:exampleFingerprintFromServer"]
-```
-
-**Usage:**
-- Set when the upload server SSH host key changes (or add the next key before cutover)
-- Fingerprints must match `ssh-keygen -lf` / `ssh.FingerprintSHA256` form (`SHA256:...`)
-- Bridges store the roster in `{config_dir}/upload_ssh_trusted_keys.json` and update `ssh_known_hosts` on mismatch when the new key is listed
-
 ## Release Checklist
 
 When creating a new release:

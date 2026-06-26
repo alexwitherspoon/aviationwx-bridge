@@ -23,15 +23,15 @@ var (
 )
 
 // hostKeyStore records SSH host keys on first connect (TOFU) and rejects unexpected changes.
-// Keys listed in upload_ssh_trusted_keys.json (from GitHub release metadata) rotate automatically.
+// Keys listed in upload_ssh_trusted_keys.json (HTTPS roster cache) rotate automatically.
 type hostKeyStore struct {
 	path      string
 	configDir string
 	mu        sync.Mutex
 
 	lastTrustedFetch time.Time
-	// syncTrusted overrides trusted-key sync (tests only; nil uses update.SyncTrustedUploadHostKeys).
-	syncTrusted func(configDir string) error
+	// syncHTTPS overrides HTTPS roster sync (tests only; nil uses update.SyncUploadSSHHostKeysHTTPS).
+	syncHTTPS func(configDir, uploadHost string, uploadPort int) error
 }
 
 func getSharedHostKeyStore(path, configDir string) (*hostKeyStore, error) {
@@ -66,8 +66,9 @@ func newHostKeyStore(path, configDir string) (*hostKeyStore, error) {
 func (s *hostKeyStore) callback(expectedHost string, expectedPort int) ssh.HostKeyCallback {
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 		_ = hostname
+		_ = remote
 		label := knownHostLabel(expectedHost, expectedPort)
-		return s.verify(label, key)
+		return s.verify(label, key, expectedHost, expectedPort)
 	}
 }
 
@@ -82,7 +83,7 @@ func knownHostLabel(host string, port int) string {
 	return fmt.Sprintf("[%s]:%d", host, port)
 }
 
-func (s *hostKeyStore) verify(label string, key ssh.PublicKey) error {
+func (s *hostKeyStore) verify(label string, key ssh.PublicKey, uploadHost string, uploadPort int) error {
 	if label == "" {
 		return fmt.Errorf("ssh host key verification: empty host label")
 	}
@@ -98,6 +99,26 @@ func (s *hostKeyStore) verify(label string, key ssh.PublicKey) error {
 		return err
 	}
 	if !found {
+		fp := ssh.FingerprintSHA256(key)
+		if !s.isTrustedFingerprint(fp) {
+			s.mu.Unlock()
+			s.syncTrustedRosterUnlocked(true, uploadHost, uploadPort)
+			s.mu.Lock()
+		}
+		if s.hasTrustedRoster() && !s.isTrustedFingerprint(fp) {
+			return fmt.Errorf("ssh host key %s not in trusted upload roster", fp)
+		}
+		stored, found, err := s.lookup(label)
+		if err != nil {
+			return err
+		}
+		if found {
+			if keysEqual(stored, key) {
+				return nil
+			}
+			return fmt.Errorf("ssh host key mismatch for %s (got %s, want %s)",
+				label, fp, ssh.FingerprintSHA256(stored))
+		}
 		return s.append(label, key)
 	}
 	if keysEqual(stored, key) {
@@ -108,12 +129,53 @@ func (s *hostKeyStore) verify(label string, key ssh.PublicKey) error {
 	if s.isTrustedFingerprint(fp) {
 		return s.replace(label, key)
 	}
-	if s.refreshTrustedFingerprints() && s.isTrustedFingerprint(fp) {
+	if s.tryRefreshTrustedWhileLocked(true, uploadHost, uploadPort) && s.isTrustedFingerprint(fp) {
 		return s.replace(label, key)
 	}
 
 	return fmt.Errorf("ssh host key mismatch for %s (got %s, want %s)",
 		label, fp, ssh.FingerprintSHA256(stored))
+}
+
+// syncTrustedRosterUnlocked fetches the HTTPS roster. The caller must not hold s.mu.
+func (s *hostKeyStore) syncTrustedRosterUnlocked(force bool, uploadHost string, uploadPort int) bool {
+	if strings.TrimSpace(uploadHost) == "" {
+		return false
+	}
+	s.mu.Lock()
+	if !force && time.Since(s.lastTrustedFetch) < trustedHostKeyFetchCooldown {
+		s.mu.Unlock()
+		return false
+	}
+	s.mu.Unlock()
+
+	httpsFn := s.syncHTTPS
+	if httpsFn == nil {
+		httpsFn = update.SyncUploadSSHHostKeysHTTPS
+	}
+	err := httpsFn(s.configDir, uploadHost, uploadPort)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		return false
+	}
+	s.lastTrustedFetch = time.Now()
+	return true
+}
+
+// tryRefreshTrustedWhileLocked fetches the HTTPS roster when allowed. The caller must hold
+// s.mu; the lock is released for network I/O and re-acquired before return.
+func (s *hostKeyStore) tryRefreshTrustedWhileLocked(force bool, uploadHost string, uploadPort int) bool {
+	s.mu.Unlock()
+	ok := s.syncTrustedRosterUnlocked(force, uploadHost, uploadPort)
+	s.mu.Lock()
+	return ok
+}
+
+func (s *hostKeyStore) hasTrustedRoster() bool {
+	trusted, err := update.LoadTrustedUploadHostKeys(s.configDir)
+	return err == nil && len(trusted) > 0
 }
 
 func (s *hostKeyStore) isTrustedFingerprint(fp string) bool {
@@ -123,26 +185,11 @@ func (s *hostKeyStore) isTrustedFingerprint(fp string) bool {
 	}
 	fp = strings.TrimSpace(fp)
 	for _, t := range trusted {
-		if strings.EqualFold(strings.TrimSpace(t), fp) {
+		if strings.TrimSpace(t) == fp {
 			return true
 		}
 	}
 	return false
-}
-
-func (s *hostKeyStore) refreshTrustedFingerprints() bool {
-	if time.Since(s.lastTrustedFetch) < trustedHostKeyFetchCooldown {
-		return false
-	}
-	syncFn := s.syncTrusted
-	if syncFn == nil {
-		syncFn = update.SyncTrustedUploadHostKeys
-	}
-	if err := syncFn(s.configDir); err != nil {
-		return false
-	}
-	s.lastTrustedFetch = time.Now()
-	return true
 }
 
 func (s *hostKeyStore) lookup(label string) (ssh.PublicKey, bool, error) {
@@ -281,4 +328,18 @@ func formatKnownHostsLine(label string, key ssh.PublicKey) string {
 
 func keysEqual(a, b ssh.PublicKey) bool {
 	return bytes.Equal(a.Marshal(), b.Marshal())
+}
+
+// PinnedHostKeyFingerprint returns the SHA256 fingerprint pinned in ssh_known_hosts for host:port.
+func PinnedHostKeyFingerprint(knownHostsPath, host string, port int) (string, bool, error) {
+	label := knownHostLabel(host, port)
+	if label == "" {
+		return "", false, fmt.Errorf("host is required")
+	}
+	store := &hostKeyStore{path: knownHostsPath}
+	pub, found, err := store.lookup(label)
+	if err != nil || !found {
+		return "", found, err
+	}
+	return ssh.FingerprintSHA256(pub), true, nil
 }

@@ -2,7 +2,9 @@ package upload
 
 import (
 	"fmt"
+	"net"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,10 +18,11 @@ import (
 // Each Upload uses its own SSH/SFTP session; Interrupt closes the active session on timeout.
 // uploadMu serializes Upload (one in-flight per client) so activeSSH is not shared across goroutines.
 type SFTPClient struct {
-	mu        sync.Mutex // serializes TestConnection
-	uploadMu  sync.Mutex // serializes Upload
-	config    Config
-	activeSSH atomic.Pointer[ssh.Client]
+	mu           sync.Mutex // serializes TestConnection
+	uploadMu     sync.Mutex // serializes Upload
+	config       Config
+	hostKeyStore *hostKeyStore
+	activeSSH    atomic.Pointer[ssh.Client]
 }
 
 // NewSFTPClient creates a new SFTP upload client
@@ -34,11 +37,20 @@ func NewSFTPClient(cfg Config) (*SFTPClient, error) {
 		return nil, fmt.Errorf("password is required")
 	}
 	if cfg.Port == 0 {
-		cfg.Port = 22 // Default SFTP port
+		cfg.Port = 2222 // aviationwx.org SFTP port
+	}
+	if strings.TrimSpace(cfg.KnownHostsPath) == "" {
+		return nil, fmt.Errorf("known hosts path is required")
+	}
+
+	store, err := getSharedHostKeyStore(cfg.KnownHostsPath, "")
+	if err != nil {
+		return nil, err
 	}
 
 	return &SFTPClient{
-		config: cfg,
+		config:       cfg,
+		hostKeyStore: store,
 	}, nil
 }
 
@@ -134,11 +146,11 @@ func (c *SFTPClient) dial() (*ssh.Client, *sftp.Client, error) {
 		Auth: []ssh.AuthMethod{
 			ssh.Password(c.config.Password),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: c.hostKeyStore.callback(c.config.Host, c.config.Port),
 		Timeout:         timeout,
 	}
 
-	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
+	addr := net.JoinHostPort(c.config.Host, strconv.Itoa(c.config.Port))
 	sshClient, err := ssh.Dial("tcp", addr, sshConfig)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ssh dial: %w", err)

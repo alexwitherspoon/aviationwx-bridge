@@ -537,7 +537,18 @@ curl -v http://192.168.1.100/snapshot.jpg
 
 # Test connection
 ssh -p 2222 your-username@upload.aviationwx.org
+
+# Compare live SSH host key with HTTPS roster (requires aviationwx.org roster endpoint deployed)
+UPLOAD_HOST=upload.aviationwx.org
+curl -fsS "https://${UPLOAD_HOST}/.well-known/aviationwx-upload-ssh-host-keys.json" | jq .
+ssh-keyscan -p 2222 -t rsa,ed25519 "${UPLOAD_HOST}" 2>/dev/null | ssh-keygen -lf -
+
+# On the bridge host: pinned and cached rosters
+cat /data/ssh_known_hosts
+cat /data/upload_ssh_trusted_keys.json
 ```
+
+Settings → Upload Configuration → **SFTP server identity** shows live server key, pinned key, and trusted roster status. A `Mismatch` status with a trusted roster usually clears after the bridge refreshes the roster and reconnects. Do not delete `ssh_known_hosts` unless support directs it; trusted rotations update the pin automatically when the new key is in the roster.
 
 ### Memory Issues
 

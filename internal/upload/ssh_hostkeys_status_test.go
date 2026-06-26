@@ -28,14 +28,16 @@ func TestComputeSSHHostKeysStatus(t *testing.T) {
 	trusted := []string{"SHA256:abc", "SHA256:def"}
 
 	tests := []struct {
-		name     string
-		server   string
-		pinned   string
-		pinnedOK bool
-		trusted  []string
-		want     string
+		name           string
+		server         string
+		pinned         string
+		pinnedOK       bool
+		pinnedKeyError string
+		trusted        []string
+		want           string
 	}{
 		{name: "probe failed", want: "probe_failed"},
+		{name: "pinned read error", server: "SHA256:abc", pinnedKeyError: "read known hosts: permission denied", want: "pinned_key_error"},
 		{name: "ok pinned match", server: "SHA256:abc", pinned: "SHA256:abc", pinnedOK: true, want: "ok"},
 		{name: "pending heal", server: "SHA256:abc", pinned: "SHA256:old", pinnedOK: true, trusted: trusted, want: "mismatch_pending_heal"},
 		{name: "mismatch", server: "SHA256:zzz", pinned: "SHA256:old", pinnedOK: true, trusted: trusted, want: "mismatch"},
@@ -46,7 +48,7 @@ func TestComputeSSHHostKeysStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := computeSSHHostKeysStatus(tt.server, tt.pinned, tt.pinnedOK, tt.trusted)
+			got := computeSSHHostKeysStatus(tt.server, tt.pinned, tt.pinnedOK, tt.pinnedKeyError, tt.trusted)
 			if got != tt.want {
 				t.Fatalf("got %q want %q", got, tt.want)
 			}

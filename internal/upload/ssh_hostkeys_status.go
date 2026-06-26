@@ -149,15 +149,18 @@ func CollectSSHHostKeysStatus(configDir, knownHostsPath string, cameras []config
 			status.PinnedKeySHA256 = pinnedFP
 		}
 
-		status.Status = computeSSHHostKeysStatus(status.ServerKeySHA256, status.PinnedKeySHA256, pinnedOK, trusted)
+		status.Status = computeSSHHostKeysStatus(status.ServerKeySHA256, status.PinnedKeySHA256, pinnedOK, status.PinnedKeyError, trusted)
 		out = append(out, status)
 	}
 	return out
 }
 
-func computeSSHHostKeysStatus(serverFP, pinnedFP string, pinnedOK bool, trusted []string) string {
+func computeSSHHostKeysStatus(serverFP, pinnedFP string, pinnedOK bool, pinnedKeyError string, trusted []string) string {
 	if serverFP == "" {
 		return "probe_failed"
+	}
+	if strings.TrimSpace(pinnedKeyError) != "" {
+		return "pinned_key_error"
 	}
 	inTrusted := fingerprintInList(serverFP, trusted)
 	if pinnedOK {

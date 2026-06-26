@@ -1393,6 +1393,8 @@ function uploadSshStatusLabel(status) {
             return 'Roster unavailable';
         case 'probe_failed':
             return 'Probe failed';
+        case 'pinned_key_error':
+            return 'Pinned key unreadable';
         default:
             return status || 'Unknown';
     }
@@ -1407,6 +1409,7 @@ function uploadSshStatusClass(status) {
             return 'status-warn';
         case 'roster_unavailable':
         case 'probe_failed':
+        case 'pinned_key_error':
             return 'status-error';
         default:
             return '';

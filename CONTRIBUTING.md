@@ -21,8 +21,10 @@ This project adheres to a Code of Conduct that all contributors are expected to 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Quick start:
 
 ```bash
-# Copy configuration template
-cp configs/config.json.example configs/config.json
+# Copy v2 config templates into docker/data
+mkdir -p docker/data/cameras
+cp configs/global.json.example docker/data/global.json
+cp configs/camera-http.json.example docker/data/cameras/camera-1.json
 
 # Edit with test credentials (never commit real credentials)
 # Then start Docker
@@ -114,7 +116,7 @@ docker compose -f docker/docker-compose.yml up -d
 ### Security Guidelines
 
 - **Never commit sensitive data** (API keys, passwords, credentials)
-- Use `configs/config.json.example` as a template
+- Use `configs/global.json.example` and `configs/camera-*.json.example` as templates
 - Validate and sanitize all input
 - Follow security best practices
 

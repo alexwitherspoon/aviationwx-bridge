@@ -260,7 +260,8 @@ func UploadImage(ctx context.Context, data []byte, path string) error {
 
 ### Config File Structure
 
-- **Single config file**: `config.json` (read-only, no database)
+- **Directory layout (v2)**: `global.json` plus `cameras/*.json` under `AVIATIONWX_CONFIG_DIR` (default `/data`)
+- **Legacy**: single `config.json` migrated automatically on first load (`AVIATIONWX_CONFIG`)
 - **Schema validation**: Validate schema on load, fail fast on bad config
 - **Default values**: Provide sensible defaults for optional fields
 - **Atomic writes**: Write to temp file, then rename (for web console edits)
@@ -424,7 +425,7 @@ Write commit messages, PR descriptions, and review replies in plain technical En
 - **Breaking changes are OK** - Project is young, large improvements are welcome
 - **Full PR process** - Always use PRs for breaking changes
 - **Document breaking changes** - Clearly document what changed and migration path
-- **Update examples** - Ensure `config.json.example` and docs are updated
+- **Update examples** - Ensure `configs/global.json.example`, camera examples, and docs are updated
 
 ---
 

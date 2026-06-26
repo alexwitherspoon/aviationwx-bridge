@@ -9,6 +9,7 @@ AviationWX.org Bridge is a **safety-critical** Go daemon that captures webcam sn
 - Web console on port 1229 (default password: aviationwx)
 - Queue in tmpfs at `/dev/shm/aviationwx`
 - EXIF: use `exiftool` only (no PHP, no Go libraries); timestamps in UTC with `OffsetTimeOriginal=+00:00`
+- SFTP host keys: HTTPS roster at `/.well-known/aviationwx-upload-ssh-host-keys.json`, TOFU pin in `ssh_known_hosts`, cached roster in `upload_ssh_trusted_keys.json`
 - Bridge clock (NTP-synced) is the time authority; camera EXIF only used if within tolerance
 
 ## Build & Validate
@@ -44,7 +45,7 @@ make check
 | `internal/camera/` | HTTP, RTSP, ONVIF camera implementations |
 | `internal/config/` | Config service, types, validation, migration |
 | `internal/scheduler/` | Orchestrator, upload worker, backoff, degraded mode |
-| `internal/upload/` | SFTP client |
+| `internal/upload/` | SFTP client, SSH host key verify, roster status API |
 | `internal/web/` | Web server, static assets (JS/CSS) |
 | `internal/time/` | EXIF, SNTP, time authority |
 | `internal/queue/` | File-based queue manager |

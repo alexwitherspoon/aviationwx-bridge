@@ -71,6 +71,9 @@ docker compose -f docker/docker-compose.yml up -d
    ```bash
    # Run tests
    go test ./...
+
+   # Optional: local upload/SFTP E2E harness (Docker + sibling aviationwx.org)
+   make e2e
    
    # Run linter
    go vet ./...

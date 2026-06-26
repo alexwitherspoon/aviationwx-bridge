@@ -63,6 +63,23 @@ mkdir -p docker/data && echo "local-test" > docker/data/last-known-good.txt
 AVIATIONWX_DATA_DIR="$(pwd)/docker/data" AVIATIONWX_SELF_UPDATE=0 ./scripts/aviationwx-container-start.sh local-test
 ```
 
+## E2E harness (local)
+
+Three-service Docker stack exercises bridge upload identity against a sibling [aviationwx.org](https://github.com/alexwitherspoon/aviationwx) checkout: upload (HTTPS roster + SFTP), bridge, and camera-simulator.
+
+**Prerequisites:** Docker, sibling repo at `../aviationwx.org` (override with `AVIATIONWX_ORG_ROOT`), `exiftool`, `ffmpeg` (tier 2 image fixtures), `jq`.
+
+```bash
+make e2e                    # full stack (tier all)
+./scripts/e2e-run.sh --tier 0   # upload roster + bridge identity only
+./scripts/e2e-run.sh --tier 1   # + SFTP auth
+./scripts/e2e-run.sh --tier 2   # + camera-simulator capture/upload
+```
+
+Published ports: upload HTTPS `127.0.0.1:18443`, SFTP `127.0.0.1:12223`, bridge web `127.0.0.1:1231`, simulator `127.0.0.1:18080`. Upload hostname in fixtures is `upload.e2e.test`; bridge trusts the harness CA via `AVIATIONWX_UPLOAD_ROSTER_CA_FILE` (see [CONFIG_SCHEMA.md](CONFIG_SCHEMA.md)).
+
+E2E Go tests live under `test/e2e/` with `//go:build e2e` and are excluded from `go test ./...`. Pin the aviationwx.org image with `AVIATIONWX_ORG_SHA=<ref>` when reproducing a specific server version.
+
 ## Config
 
 Create `docker/data/` with `global.json` and `cameras/*.json`. See CONFIG_SCHEMA.md.

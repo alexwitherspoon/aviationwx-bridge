@@ -47,7 +47,7 @@ func SSHHostKeysProbeTimeout(connectSeconds int) time.Duration {
 
 // probeSSHHostKeyFingerprintHook overrides ProbeSSHHostKeyFingerprint in tests (nil uses the default).
 var (
-	probeHookMu                      sync.RWMutex
+	probeHookMu                    sync.RWMutex
 	probeSSHHostKeyFingerprintHook func(host string, port int, timeout time.Duration) (string, error)
 )
 

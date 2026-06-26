@@ -120,7 +120,12 @@ func validateUploadSSHHostKeysDocument(doc *uploadSSHHostKeysDocument, expectHos
 }
 
 // SetUploadHostKeysHTTPClientForTest overrides the HTTP client used for HTTPS roster fetch.
+// Pass nil to restore http.DefaultClient.
 func SetUploadHostKeysHTTPClientForTest(client *http.Client) {
+	if client == nil {
+		uploadHostKeysHTTPClient = http.DefaultClient
+		return
+	}
 	uploadHostKeysHTTPClient = client
 }
 

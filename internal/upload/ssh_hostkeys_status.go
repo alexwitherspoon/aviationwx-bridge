@@ -57,6 +57,7 @@ func probeSSHHostKeyFingerprint(host string, port int, timeout time.Duration) (s
 }
 
 // ProbeSSHHostKeyFingerprint dials the SFTP host and returns the server SSH host key fingerprint.
+// The probe accepts any presented host key to read the fingerprint for the Settings UI; it does not authenticate or transfer files.
 func ProbeSSHHostKeyFingerprint(host string, port int, timeout time.Duration) (string, error) {
 	host = strings.TrimSpace(host)
 	if host == "" {
@@ -75,6 +76,7 @@ func ProbeSSHHostKeyFingerprint(host string, port int, timeout time.Duration) (s
 		Auth: []ssh.AuthMethod{
 			ssh.Password(""),
 		},
+		// codeql[go/insecure-hostkeycallback]: read-only fingerprint probe for Settings UI (same role as ssh-keyscan); uploads use hostKeyStore verification.
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			fingerprint = ssh.FingerprintSHA256(key)
 			return nil

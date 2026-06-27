@@ -150,6 +150,12 @@ func TestWriteTrustedHostKeysFile_emptyListNoWrite(t *testing.T) {
 	}
 }
 
+func TestLoadTrustedUploadHostKeys_emptyConfigDir(t *testing.T) {
+	if _, err := LoadTrustedUploadHostKeys(""); err == nil {
+		t.Fatal("expected error for empty config directory")
+	}
+}
+
 func TestLoadTrustedUploadHostKeys_missingFile(t *testing.T) {
 	got, err := LoadTrustedUploadHostKeys(t.TempDir())
 	if err != nil {

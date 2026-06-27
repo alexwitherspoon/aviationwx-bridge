@@ -180,6 +180,9 @@ func trustedFileDataFromStore(store *trustedHostKeysStore, host string, port int
 }
 
 func loadTrustedHostKeysStoreUnlocked(configDir string) (*trustedHostKeysStore, error) {
+	if strings.TrimSpace(configDir) == "" {
+		return nil, fmt.Errorf("config directory is required")
+	}
 	path := filepath.Join(configDir, trustedHostKeysFile)
 	f, err := os.Open(path)
 	if err != nil {

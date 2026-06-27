@@ -30,10 +30,14 @@ func TestUploadIdentity_RosterCachedAndAPIOk(t *testing.T) {
 		time.Sleep(harness.DefaultPoll)
 	}
 	if len(raw) == 0 {
-		raw, _ = os.ReadFile(trustedPath)
+		data, err := os.ReadFile(trustedPath)
+		if err != nil {
+			t.Fatalf("trusted roster file on host mount: %v", err)
+		}
+		raw = data
 	}
 	if len(raw) == 0 {
-		t.Fatalf("trusted roster file missing on host mount: %v", trustedPath)
+		t.Fatalf("trusted roster file empty on host mount: %s", trustedPath)
 	}
 	source, fps := trustedRosterForEndpoint(t, raw, harness.UploadHost, 2222)
 	if source != "https-roster" || len(fps) == 0 {

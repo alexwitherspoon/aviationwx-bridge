@@ -100,12 +100,14 @@ func (s *hostKeyStore) verify(label string, key ssh.PublicKey, uploadHost string
 	}
 	if !found {
 		fp := ssh.FingerprintSHA256(key)
-		if !s.isTrustedFingerprint(fp, uploadHost, uploadPort) {
+		trusted, _ := s.trustedFingerprints(uploadHost, uploadPort)
+		if !isFingerprintInTrustedList(fp, trusted) {
 			s.mu.Unlock()
 			s.syncTrustedRosterUnlocked(true, uploadHost, uploadPort)
 			s.mu.Lock()
+			trusted, _ = s.trustedFingerprints(uploadHost, uploadPort)
 		}
-		if s.hasTrustedRoster(uploadHost, uploadPort) && !s.isTrustedFingerprint(fp, uploadHost, uploadPort) {
+		if len(trusted) > 0 && !isFingerprintInTrustedList(fp, trusted) {
 			return fmt.Errorf("ssh host key %s not in trusted upload roster", fp)
 		}
 		stored, found, err := s.lookup(label)
@@ -126,11 +128,15 @@ func (s *hostKeyStore) verify(label string, key ssh.PublicKey, uploadHost string
 	}
 
 	fp := ssh.FingerprintSHA256(key)
-	if s.isTrustedFingerprint(fp, uploadHost, uploadPort) {
+	trusted, _ := s.trustedFingerprints(uploadHost, uploadPort)
+	if isFingerprintInTrustedList(fp, trusted) {
 		return s.replace(label, key)
 	}
-	if s.tryRefreshTrustedWhileLocked(true, uploadHost, uploadPort) && s.isTrustedFingerprint(fp, uploadHost, uploadPort) {
-		return s.replace(label, key)
+	if s.tryRefreshTrustedWhileLocked(true, uploadHost, uploadPort) {
+		trusted, _ = s.trustedFingerprints(uploadHost, uploadPort)
+		if isFingerprintInTrustedList(fp, trusted) {
+			return s.replace(label, key)
+		}
 	}
 
 	return fmt.Errorf("ssh host key mismatch for %s (got %s, want %s)",
@@ -173,14 +179,12 @@ func (s *hostKeyStore) tryRefreshTrustedWhileLocked(force bool, uploadHost strin
 	return ok
 }
 
-func (s *hostKeyStore) hasTrustedRoster(uploadHost string, uploadPort int) bool {
-	trusted, err := update.LoadTrustedUploadHostKeysForEndpoint(s.configDir, uploadHost, uploadPort)
-	return err == nil && len(trusted) > 0
+func (s *hostKeyStore) trustedFingerprints(uploadHost string, uploadPort int) ([]string, error) {
+	return update.LoadTrustedUploadHostKeysForEndpoint(s.configDir, uploadHost, uploadPort)
 }
 
-func (s *hostKeyStore) isTrustedFingerprint(fp string, uploadHost string, uploadPort int) bool {
-	trusted, err := update.LoadTrustedUploadHostKeysForEndpoint(s.configDir, uploadHost, uploadPort)
-	if err != nil || len(trusted) == 0 {
+func isFingerprintInTrustedList(fp string, trusted []string) bool {
+	if len(trusted) == 0 {
 		return false
 	}
 	fp = strings.TrimSpace(fp)

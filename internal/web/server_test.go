@@ -14,6 +14,7 @@ import (
 
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/scheduler"
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/update"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/upload"
 )
 
@@ -1739,12 +1740,7 @@ func TestUploadSSHHostKeys_endpoint(t *testing.T) {
 			if host != "upload.aviationwx.org" || port != 2222 {
 				t.Fatalf("sync host = %s:%d", host, port)
 			}
-			path := filepath.Join(configDir, "upload_ssh_trusted_keys.json")
-			return os.WriteFile(path, []byte(`{
-  "sha256": ["SHA256:probe-test-key"],
-  "updated_at": "2026-06-26T00:00:00Z",
-  "source": "https-roster"
-}`), 0600)
+			return update.WriteTrustedHostKeysForEndpointForTest(configDir, host, port, []string{"SHA256:probe-test-key"}, "https-roster")
 		})
 		t.Cleanup(func() { upload.SetRosterSyncHTTPSForTest(nil) })
 

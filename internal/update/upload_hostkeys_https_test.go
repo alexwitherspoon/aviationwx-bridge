@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 )
 
@@ -38,7 +37,7 @@ func TestSyncUploadSSHHostKeysHTTPS_productionRosterFixture(t *testing.T) {
 	if err := SyncUploadSSHHostKeysHTTPS(dir, host, 2222); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	got, err := LoadTrustedUploadHostKeys(dir)
+	got, err := LoadTrustedUploadHostKeysForEndpoint(dir, host, 2222)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,12 +66,11 @@ func TestValidateUploadSSHHostKeysDocument(t *testing.T) {
 
 func TestSyncUploadSSHHostKeysHTTPS_replacesStaleRoster(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, trustedHostKeysFile)
-	if err := writeTrustedHostKeysFile(path, []string{"SHA256:stale1", "SHA256:stale2"}, "test"); err != nil {
+	const host = "upload.test"
+	if err := writeTrustedHostKeysForEndpoint(dir, host, 2222, []string{"SHA256:stale1", "SHA256:stale2"}, "test"); err != nil {
 		t.Fatal(err)
 	}
 
-	const host = "upload.test"
 	body := `{"version":1,"hostname":"upload.test","port":2222,"sha256":["SHA256:current"],"updated_at":"2026-06-26T00:00:00Z"}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +87,7 @@ func TestSyncUploadSSHHostKeysHTTPS_replacesStaleRoster(t *testing.T) {
 	if err := SyncUploadSSHHostKeysHTTPS(dir, host, 2222); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	got, err := LoadTrustedUploadHostKeys(dir)
+	got, err := LoadTrustedUploadHostKeysForEndpoint(dir, host, 2222)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,14 +121,14 @@ func TestSyncUploadSSHHostKeysHTTPS_mockServer(t *testing.T) {
 	if err := SyncUploadSSHHostKeysHTTPS(dir, host, 2222); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	got, err := LoadTrustedUploadHostKeys(dir)
+	got, err := LoadTrustedUploadHostKeysForEndpoint(dir, host, 2222)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 || got[0] != "SHA256:fromhttps" {
 		t.Fatalf("got %v", got)
 	}
-	data, err := LoadTrustedUploadHostKeysFileData(dir)
+	data, err := LoadTrustedUploadHostKeysFileDataForEndpoint(dir, host, 2222)
 	if err != nil || data == nil || data.Source != "https-roster" {
 		t.Fatalf("metadata: %+v err=%v", data, err)
 	}
@@ -138,8 +136,8 @@ func TestSyncUploadSSHHostKeysHTTPS_mockServer(t *testing.T) {
 
 func TestSyncUploadSSHHostKeysHTTPS_non200KeepsFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, trustedHostKeysFile)
-	if err := writeTrustedHostKeysFile(path, []string{"SHA256:keep"}, "test"); err != nil {
+	const host = "upload.test"
+	if err := writeTrustedHostKeysForEndpoint(dir, host, 2222, []string{"SHA256:keep"}, "test"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -156,7 +154,7 @@ func TestSyncUploadSSHHostKeysHTTPS_non200KeepsFile(t *testing.T) {
 	if err := SyncUploadSSHHostKeysHTTPS(dir, "upload.test", 2222); err == nil {
 		t.Fatal("expected error")
 	}
-	got, _ := LoadTrustedUploadHostKeys(dir)
+	got, _ := LoadTrustedUploadHostKeysForEndpoint(dir, host, 2222)
 	if len(got) != 1 || got[0] != "SHA256:keep" {
 		t.Fatalf("file changed: %v", got)
 	}

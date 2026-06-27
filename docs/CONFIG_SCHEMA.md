@@ -234,12 +234,12 @@ The bridge stores SFTP host key state under the config directory (`AVIATIONWX_CO
 | File | Purpose |
 |------|---------|
 | `ssh_known_hosts` | TOFU pin for each `upload.host:port` the bridge has connected to |
-| `upload_ssh_trusted_keys.json` | Cached HTTPS roster SHA256 fingerprints (`source`: `https-roster`) |
+| `upload_ssh_trusted_keys.json` | Per upload target (`host:port` in `version` 2 `endpoints`): cached HTTPS roster SHA256 fingerprints (`source`: `https-roster`) |
 | `upload_ssh_roster_sync.json` | Per upload target (`host`, `port`): `last_error`, `last_attempt_at`, `last_success_at` when a prior sync succeeded |
 
-Primary trust is the HTTPS roster at `https://{upload.host}/.well-known/aviationwx-upload-ssh-host-keys.json`. The bridge fetches it on startup and hourly, and forces a refresh when the live server key does not match the pin or roster. When HTTPS is unreachable, the last cached roster is used until it can be refreshed.
+Primary trust is the HTTPS roster at `https://{upload.host}/.well-known/aviationwx-upload-ssh-host-keys.json`. The bridge fetches it on startup and hourly, and forces a refresh when the live server key does not match the pin or roster. When HTTPS is unreachable, the last cached roster for that upload target is used until it can be refreshed.
 
-Fleet deployments target a single SaaS upload host (`upload.aviationwx.org`). The trusted roster cache is one file per bridge config directory, not keyed per `upload.host`.
+**Migration:** Bridges with a v1 `upload_ssh_trusted_keys.json` (top-level `sha256` only) migrate on read to `version` 2 under `upload.aviationwx.org:2222`. Multi-host bridges should use **Refresh SSH keys** for each upload target after upgrade so every host has its own cache entry.
 
 ### Web console and network exposure
 

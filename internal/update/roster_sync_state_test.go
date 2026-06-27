@@ -46,6 +46,21 @@ func TestRecordRosterSyncEndpoint_failureThenSuccess(t *testing.T) {
 	if got.LastSuccessAt == nil {
 		t.Fatal("expected last_success_at after success")
 	}
+
+	if err := RecordRosterSyncEndpoint(dir, host, port, errors.New("fetch upload ssh host keys: connection refused")); err != nil {
+		t.Fatalf("record failure after success: %v", err)
+	}
+	state, err = LoadRosterSyncState(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = state[key]
+	if got.LastError == "" {
+		t.Fatal("expected last_error after failure")
+	}
+	if got.LastSuccessAt == nil {
+		t.Fatal("expected last_success_at preserved after failure")
+	}
 }
 
 func TestLoadRosterSyncState_missingFile(t *testing.T) {

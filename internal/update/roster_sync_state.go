@@ -69,6 +69,10 @@ func RecordRosterSyncEndpoint(configDir, host string, port int, syncErr error) e
 		Port:          port,
 		LastAttemptAt: now,
 	}
+	if prior, ok := data.Endpoints[key]; ok && prior.LastSuccessAt != nil {
+		t := *prior.LastSuccessAt
+		state.LastSuccessAt = &t
+	}
 	if syncErr != nil {
 		state.LastError = syncErr.Error()
 	} else {

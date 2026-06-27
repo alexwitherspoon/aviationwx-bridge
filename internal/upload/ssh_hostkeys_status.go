@@ -175,12 +175,17 @@ func lastRosterSyncError(host string, port int, rosterSyncErrors map[string]stri
 
 func collectSSHHostKeysStatus(configDir, knownHostsPath string, endpoints []update.UploadEndpoint, probeTimeout time.Duration, rosterSyncErrors map[string]string) []SSHHostKeysEndpointStatus {
 	syncState, syncStateErr := update.LoadRosterSyncState(configDir)
+	trustedByEndpoint, trustedLoadErr := update.LoadTrustedUploadHostKeysFileDataMap(configDir)
 
 	out := make([]SSHHostKeysEndpointStatus, 0, len(endpoints))
 	for _, ep := range endpoints {
-		trustedMeta, trustedLoadErr := update.LoadTrustedUploadHostKeysFileDataForEndpoint(configDir, ep.Host, ep.Port)
-		if trustedLoadErr != nil {
-			trustedMeta = nil
+		var trustedMeta *update.TrustedUploadHostKeysFileData
+		if trustedLoadErr == nil {
+			key := sshHostKeysEndpointKey(ep.Host, ep.Port)
+			if meta, ok := trustedByEndpoint[key]; ok {
+				copy := meta
+				trustedMeta = &copy
+			}
 		}
 		trusted := []string(nil)
 		var trustedSource string

@@ -116,6 +116,29 @@ func TestParseTrustedHostKeysFile_migratesV1ToDefaultEndpoint(t *testing.T) {
 	}
 }
 
+func TestLoadTrustedUploadHostKeysFileDataMap_returnsAllEndpoints(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeTrustedHostKeysForEndpoint(dir, "upload.a.test", 2222, []string{"SHA256:aaa"}, "https-roster"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeTrustedHostKeysForEndpoint(dir, "upload.b.test", 2222, []string{"SHA256:bbb"}, "https-roster"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadTrustedUploadHostKeysFileDataMap(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d endpoints, want 2", len(got))
+	}
+	if got[RosterSyncEndpointKey("upload.a.test", 2222)].SHA256[0] != "SHA256:aaa" {
+		t.Fatalf("host A: %+v", got[RosterSyncEndpointKey("upload.a.test", 2222)])
+	}
+	if got[RosterSyncEndpointKey("upload.b.test", 2222)].SHA256[0] != "SHA256:bbb" {
+		t.Fatalf("host B: %+v", got[RosterSyncEndpointKey("upload.b.test", 2222)])
+	}
+}
+
 func TestWriteTrustedHostKeysFile_emptyListNoWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, trustedHostKeysFile)

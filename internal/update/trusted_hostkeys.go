@@ -18,8 +18,8 @@ const (
 
 var trustedHostKeysSyncMu sync.Mutex
 
-// trustedHostKeysFileData is trusted roster metadata for one upload target.
-type trustedHostKeysFileData struct {
+// TrustedUploadHostKeysFileData is trusted roster metadata for one upload target.
+type TrustedUploadHostKeysFileData struct {
 	Host      string    `json:"host,omitempty"`
 	Port      int       `json:"port,omitempty"`
 	SHA256    []string  `json:"sha256"`
@@ -28,8 +28,8 @@ type trustedHostKeysFileData struct {
 }
 
 type trustedHostKeysStore struct {
-	Version   int                                `json:"version"`
-	Endpoints map[string]trustedHostKeysFileData `json:"endpoints"`
+	Version   int                                      `json:"version"`
+	Endpoints map[string]TrustedUploadHostKeysFileData `json:"endpoints"`
 }
 
 func writeTrustedHostKeysForEndpoint(configDir, host string, port int, fps []string, source string) error {
@@ -57,9 +57,9 @@ func writeTrustedHostKeysForEndpointLocked(configDir, host string, port int, fps
 	}
 	key := RosterSyncEndpointKey(host, port)
 	if store.Endpoints == nil {
-		store.Endpoints = make(map[string]trustedHostKeysFileData)
+		store.Endpoints = make(map[string]TrustedUploadHostKeysFileData)
 	}
-	store.Endpoints[key] = trustedHostKeysFileData{
+	store.Endpoints[key] = TrustedUploadHostKeysFileData{
 		Host:      host,
 		Port:      port,
 		SHA256:    fps,
@@ -132,7 +132,7 @@ func LoadTrustedUploadHostKeys(configDir string) ([]string, error) {
 }
 
 // LoadTrustedUploadHostKeysFileDataForEndpoint reads trusted roster metadata for one upload target.
-func LoadTrustedUploadHostKeysFileDataForEndpoint(configDir, host string, port int) (*trustedHostKeysFileData, error) {
+func LoadTrustedUploadHostKeysFileDataForEndpoint(configDir, host string, port int) (*TrustedUploadHostKeysFileData, error) {
 	trustedHostKeysSyncMu.Lock()
 	defer trustedHostKeysSyncMu.Unlock()
 
@@ -140,19 +140,43 @@ func LoadTrustedUploadHostKeysFileDataForEndpoint(configDir, host string, port i
 	if err != nil {
 		return nil, err
 	}
-	key := RosterSyncEndpointKey(host, port)
-	if ep, ok := store.Endpoints[key]; ok {
-		copy := ep
-		copy.SHA256 = normalizeFingerprintList(copy.SHA256)
-		return &copy, nil
+	return trustedFileDataFromStore(store, host, port), nil
+}
+
+// LoadTrustedUploadHostKeysFileDataMap reads trusted roster metadata for all upload targets.
+func LoadTrustedUploadHostKeysFileDataMap(configDir string) (map[string]TrustedUploadHostKeysFileData, error) {
+	trustedHostKeysSyncMu.Lock()
+	defer trustedHostKeysSyncMu.Unlock()
+
+	store, err := loadTrustedHostKeysStoreUnlocked(configDir)
+	if err != nil {
+		return nil, err
 	}
-	return nil, nil
+	out := make(map[string]TrustedUploadHostKeysFileData, len(store.Endpoints))
+	for k, v := range store.Endpoints {
+		v.SHA256 = normalizeFingerprintList(v.SHA256)
+		out[k] = v
+	}
+	return out, nil
 }
 
 // LoadTrustedUploadHostKeysFileData reads trusted roster metadata for the default upload endpoint.
-func LoadTrustedUploadHostKeysFileData(configDir string) (*trustedHostKeysFileData, error) {
+func LoadTrustedUploadHostKeysFileData(configDir string) (*TrustedUploadHostKeysFileData, error) {
 	def := DefaultUploadEndpoint()
 	return LoadTrustedUploadHostKeysFileDataForEndpoint(configDir, def.Host, def.Port)
+}
+
+func trustedFileDataFromStore(store *trustedHostKeysStore, host string, port int) *TrustedUploadHostKeysFileData {
+	if store == nil || store.Endpoints == nil {
+		return nil
+	}
+	key := RosterSyncEndpointKey(host, port)
+	ep, ok := store.Endpoints[key]
+	if !ok {
+		return nil
+	}
+	ep.SHA256 = normalizeFingerprintList(ep.SHA256)
+	return &ep
 }
 
 func loadTrustedHostKeysStoreUnlocked(configDir string) (*trustedHostKeysStore, error) {
@@ -162,7 +186,7 @@ func loadTrustedHostKeysStoreUnlocked(configDir string) (*trustedHostKeysStore, 
 		if os.IsNotExist(err) {
 			return &trustedHostKeysStore{
 				Version:   trustedHostKeysFileVersion,
-				Endpoints: map[string]trustedHostKeysFileData{},
+				Endpoints: map[string]TrustedUploadHostKeysFileData{},
 			}, nil
 		}
 		return nil, err
@@ -187,9 +211,9 @@ func loadTrustedHostKeysStoreUnlocked(configDir string) (*trustedHostKeysStore, 
 
 func parseTrustedHostKeysFile(raw []byte) (*trustedHostKeysStore, bool, error) {
 	var probe struct {
-		Version   int                                `json:"version"`
-		Endpoints map[string]trustedHostKeysFileData `json:"endpoints"`
-		SHA256    []string                           `json:"sha256"`
+		Version   int                                      `json:"version"`
+		Endpoints map[string]TrustedUploadHostKeysFileData `json:"endpoints"`
+		SHA256    []string                                 `json:"sha256"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return nil, false, err
@@ -197,7 +221,7 @@ func parseTrustedHostKeysFile(raw []byte) (*trustedHostKeysStore, bool, error) {
 	if probe.Version >= trustedHostKeysFileVersion && probe.Endpoints != nil {
 		store := &trustedHostKeysStore{
 			Version:   trustedHostKeysFileVersion,
-			Endpoints: make(map[string]trustedHostKeysFileData, len(probe.Endpoints)),
+			Endpoints: make(map[string]TrustedUploadHostKeysFileData, len(probe.Endpoints)),
 		}
 		for k, v := range probe.Endpoints {
 			v.SHA256 = normalizeFingerprintList(v.SHA256)
@@ -208,11 +232,11 @@ func parseTrustedHostKeysFile(raw []byte) (*trustedHostKeysStore, bool, error) {
 	if len(probe.SHA256) == 0 {
 		return &trustedHostKeysStore{
 			Version:   trustedHostKeysFileVersion,
-			Endpoints: map[string]trustedHostKeysFileData{},
+			Endpoints: map[string]TrustedUploadHostKeysFileData{},
 		}, false, nil
 	}
 
-	var v1 trustedHostKeysFileData
+	var v1 TrustedUploadHostKeysFileData
 	if err := json.Unmarshal(raw, &v1); err != nil {
 		return nil, false, err
 	}
@@ -220,7 +244,7 @@ func parseTrustedHostKeysFile(raw []byte) (*trustedHostKeysStore, bool, error) {
 	if len(v1.SHA256) == 0 {
 		return &trustedHostKeysStore{
 			Version:   trustedHostKeysFileVersion,
-			Endpoints: map[string]trustedHostKeysFileData{},
+			Endpoints: map[string]TrustedUploadHostKeysFileData{},
 		}, false, nil
 	}
 
@@ -228,7 +252,7 @@ func parseTrustedHostKeysFile(raw []byte) (*trustedHostKeysStore, bool, error) {
 	key := RosterSyncEndpointKey(def.Host, def.Port)
 	return &trustedHostKeysStore{
 		Version: trustedHostKeysFileVersion,
-		Endpoints: map[string]trustedHostKeysFileData{
+		Endpoints: map[string]TrustedUploadHostKeysFileData{
 			key: {
 				Host:      def.Host,
 				Port:      def.Port,
@@ -244,11 +268,11 @@ func writeTrustedHostKeysStoreUnlocked(configDir string, store *trustedHostKeysS
 	if store == nil {
 		store = &trustedHostKeysStore{
 			Version:   trustedHostKeysFileVersion,
-			Endpoints: map[string]trustedHostKeysFileData{},
+			Endpoints: map[string]TrustedUploadHostKeysFileData{},
 		}
 	}
 	if store.Endpoints == nil {
-		store.Endpoints = map[string]trustedHostKeysFileData{}
+		store.Endpoints = map[string]TrustedUploadHostKeysFileData{}
 	}
 	store.Version = trustedHostKeysFileVersion
 

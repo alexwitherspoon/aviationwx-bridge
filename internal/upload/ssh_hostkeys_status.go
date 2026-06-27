@@ -26,6 +26,7 @@ type SSHHostKeysEndpointStatus struct {
 	TrustedSource       string     `json:"trusted_source,omitempty"`
 	TrustedUpdatedAt    *time.Time `json:"trusted_updated_at,omitempty"`
 	HttpsRosterURL      string     `json:"https_roster_url,omitempty"`
+	RosterSyncError     string     `json:"roster_sync_error,omitempty"`
 	Status              string     `json:"status"`
 }
 
@@ -114,7 +115,50 @@ func ProbeSSHHostKeyFingerprint(host string, port int, timeout time.Duration) (s
 // CollectSSHHostKeysStatus reports host key state for each roster upload endpoint.
 func CollectSSHHostKeysStatus(configDir, knownHostsPath string, cameras []config.Camera, probeTimeout time.Duration) []SSHHostKeysEndpointStatus {
 	endpoints := update.UploadEndpointsForRoster(cameras)
+	return collectSSHHostKeysStatus(configDir, knownHostsPath, endpoints, probeTimeout, nil)
+}
 
+// RefreshSSHHostKeysStatus fetches the HTTPS roster for each endpoint, then probes and reports status.
+// RosterSyncError is set per endpoint when the HTTPS fetch fails.
+func RefreshSSHHostKeysStatus(configDir, knownHostsPath string, cameras []config.Camera, probeTimeout time.Duration) []SSHHostKeysEndpointStatus {
+	endpoints := update.UploadEndpointsForRoster(cameras)
+	syncErrors := make(map[string]string, len(endpoints))
+	for _, ep := range endpoints {
+		if err := syncRosterHTTPS(configDir, ep.Host, ep.Port); err != nil {
+			syncErrors[sshHostKeysEndpointKey(ep.Host, ep.Port)] = err.Error()
+		}
+	}
+	return collectSSHHostKeysStatus(configDir, knownHostsPath, endpoints, probeTimeout, syncErrors)
+}
+
+// rosterSyncHTTPSHook overrides HTTPS roster sync during RefreshSSHHostKeysStatus (tests only).
+var (
+	rosterSyncHookMu    sync.RWMutex
+	rosterSyncHTTPSHook func(configDir, host string, port int) error
+)
+
+// SetRosterSyncHTTPSForTest overrides HTTPS roster sync during RefreshSSHHostKeysStatus (tests only).
+func SetRosterSyncHTTPSForTest(fn func(configDir, host string, port int) error) {
+	rosterSyncHookMu.Lock()
+	rosterSyncHTTPSHook = fn
+	rosterSyncHookMu.Unlock()
+}
+
+func syncRosterHTTPS(configDir, host string, port int) error {
+	rosterSyncHookMu.RLock()
+	hook := rosterSyncHTTPSHook
+	rosterSyncHookMu.RUnlock()
+	if hook != nil {
+		return hook(configDir, host, port)
+	}
+	return update.SyncUploadSSHHostKeysHTTPS(configDir, host, port)
+}
+
+func sshHostKeysEndpointKey(host string, port int) string {
+	return strings.TrimSpace(strings.ToLower(host)) + ":" + strconv.Itoa(port)
+}
+
+func collectSSHHostKeysStatus(configDir, knownHostsPath string, endpoints []update.UploadEndpoint, probeTimeout time.Duration, rosterSyncErrors map[string]string) []SSHHostKeysEndpointStatus {
 	trustedMeta, trustedLoadErr := update.LoadTrustedUploadHostKeysFileData(configDir)
 	if trustedLoadErr != nil {
 		trustedMeta = nil
@@ -157,6 +201,11 @@ func CollectSSHHostKeysStatus(configDir, knownHostsPath string, cameras []config
 		}
 
 		status.Status = computeSSHHostKeysStatus(status.ServerKeySHA256, status.PinnedKeySHA256, pinnedOK, status.PinnedKeyError, trusted)
+		if rosterSyncErrors != nil {
+			if errMsg, ok := rosterSyncErrors[sshHostKeysEndpointKey(ep.Host, ep.Port)]; ok {
+				status.RosterSyncError = errMsg
+			}
+		}
 		out = append(out, status)
 	}
 	return out

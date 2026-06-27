@@ -1,6 +1,9 @@
 package upload
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -53,5 +56,59 @@ func TestComputeSSHHostKeysStatus(t *testing.T) {
 				t.Fatalf("got %q want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRefreshSSHHostKeysStatus_recordsSyncError(t *testing.T) {
+	SetProbeSSHHostKeyFingerprintForTest(func(string, int, time.Duration) (string, error) {
+		return "SHA256:probe-test-key", nil
+	})
+	t.Cleanup(func() { SetProbeSSHHostKeyFingerprintForTest(nil) })
+
+	SetRosterSyncHTTPSForTest(func(string, string, int) error {
+		return errors.New("fetch upload ssh host keys: connection refused")
+	})
+	t.Cleanup(func() { SetRosterSyncHTTPSForTest(nil) })
+
+	dir := t.TempDir()
+	status := RefreshSSHHostKeysStatus(dir, filepath.Join(dir, "ssh_known_hosts"), nil, SSHHostKeysProbeMaxTimeout)
+	if len(status) != 1 {
+		t.Fatalf("len = %d, want 1", len(status))
+	}
+	if status[0].RosterSyncError == "" {
+		t.Fatal("expected roster_sync_error")
+	}
+	if status[0].Status != "roster_unavailable" {
+		t.Fatalf("status = %q, want roster_unavailable", status[0].Status)
+	}
+}
+
+func TestRefreshSSHHostKeysStatus_updatesTrustedRoster(t *testing.T) {
+	const probeFP = "SHA256:probe-test-key"
+	SetProbeSSHHostKeyFingerprintForTest(func(string, int, time.Duration) (string, error) {
+		return probeFP, nil
+	})
+	t.Cleanup(func() { SetProbeSSHHostKeyFingerprintForTest(nil) })
+
+	dir := t.TempDir()
+	SetRosterSyncHTTPSForTest(func(configDir, host string, port int) error {
+		path := filepath.Join(configDir, "upload_ssh_trusted_keys.json")
+		return os.WriteFile(path, []byte(`{
+  "sha256": ["`+probeFP+`"],
+  "updated_at": "2026-06-26T00:00:00Z",
+  "source": "https-roster"
+}`), 0600)
+	})
+	t.Cleanup(func() { SetRosterSyncHTTPSForTest(nil) })
+
+	status := RefreshSSHHostKeysStatus(dir, filepath.Join(dir, "ssh_known_hosts"), nil, SSHHostKeysProbeMaxTimeout)
+	if len(status) != 1 {
+		t.Fatalf("len = %d, want 1", len(status))
+	}
+	if status[0].RosterSyncError != "" {
+		t.Fatalf("roster_sync_error = %q", status[0].RosterSyncError)
+	}
+	if status[0].Status != "ok" {
+		t.Fatalf("status = %q, want ok", status[0].Status)
 	}
 }

@@ -1450,6 +1450,12 @@ function renderUploadSshKeys(endpoints) {
             ? escapeHtml(`${ep.trusted_source} (${formatTrustedUpdatedAt(ep.trusted_updated_at)})`)
             : '—';
         const rosterURL = ep.https_roster_url ? escapeHtml(ep.https_roster_url) : '—';
+        const rosterSyncError = ep.roster_sync_error
+            ? `<div class="info-row">
+                    <span>Roster sync</span>
+                    <span style="color:var(--color-danger);">${escapeHtml(ep.roster_sync_error)}</span>
+                </div>`
+            : '';
         return `
             <div class="upload-ssh-endpoint">
                 <div class="info-row">
@@ -1480,6 +1486,7 @@ function renderUploadSshKeys(endpoints) {
                     <span>HTTPS roster URL</span>
                     <code>${rosterURL}</code>
                 </div>
+                ${rosterSyncError}
             </div>
         `;
     }).join('');
@@ -1499,7 +1506,16 @@ async function loadUploadSshKeys() {
 }
 
 async function refreshUploadSshKeys() {
-    await loadUploadSshKeys();
+    const panel = document.getElementById('uploadSshKeysPanel');
+    if (!panel) return;
+    panel.innerHTML = '<p class="form-help">Refreshing SSH host keys…</p>';
+    try {
+        const data = await api('/upload/ssh-host-keys', { method: 'POST' });
+        renderUploadSshKeys(data.endpoints || []);
+    } catch (err) {
+        console.error('Failed to refresh SSH host keys:', err);
+        panel.innerHTML = `<p class="form-help" style="color:var(--color-danger);">Could not refresh SSH host keys: ${escapeHtml(err.message)}</p>`;
+    }
 }
 
 async function saveGlobalSettings() {

@@ -235,6 +235,7 @@ The bridge stores SFTP host key state under the config directory (`AVIATIONWX_CO
 |------|---------|
 | `ssh_known_hosts` | TOFU pin for each `upload.host:port` the bridge has connected to |
 | `upload_ssh_trusted_keys.json` | Cached HTTPS roster SHA256 fingerprints (`source`: `https-roster`) |
+| `upload_ssh_roster_sync.json` | Last HTTPS roster sync attempt per upload target (`last_error`, `last_attempt_at`) |
 
 Primary trust is the HTTPS roster at `https://{upload.host}/.well-known/aviationwx-upload-ssh-host-keys.json`. The bridge fetches it on startup and hourly, and forces a refresh when the live server key does not match the pin or roster. When HTTPS is unreachable, the last cached roster is used until it can be refreshed.
 

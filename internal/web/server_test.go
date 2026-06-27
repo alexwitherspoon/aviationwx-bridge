@@ -1726,8 +1726,8 @@ func TestUploadSSHHostKeys_endpoint(t *testing.T) {
 		if ep.ServerKeySHA256 != "SHA256:probe-test-key" {
 			t.Fatalf("server key = %q", ep.ServerKeySHA256)
 		}
-		if ep.Status != "roster_unavailable" {
-			t.Fatalf("status = %q, want roster_unavailable without cached roster", ep.Status)
+		if ep.Status != "roster_not_synced" {
+			t.Fatalf("status = %q, want roster_not_synced without cached roster", ep.Status)
 		}
 		if capturedTimeout != upload.SSHHostKeysProbeMaxTimeout {
 			t.Fatalf("probe timeout = %v, want %v", capturedTimeout, upload.SSHHostKeysProbeMaxTimeout)
@@ -1809,8 +1809,8 @@ func TestUploadSSHHostKeys_endpoint(t *testing.T) {
 		if ep.RosterSyncError == "" {
 			t.Fatal("expected roster_sync_error")
 		}
-		if ep.Status != "roster_unavailable" {
-			t.Fatalf("status = %q, want roster_unavailable", ep.Status)
+		if ep.Status != "roster_sync_failed" {
+			t.Fatalf("status = %q, want roster_sync_failed", ep.Status)
 		}
 	})
 }

@@ -1389,8 +1389,10 @@ function uploadSshStatusLabel(status) {
             return 'Mismatch';
         case 'mismatch_pending_heal':
             return 'Mismatch (trusted roster)';
-        case 'roster_unavailable':
-            return 'Roster unavailable';
+        case 'roster_not_synced':
+            return 'Roster not synced';
+        case 'roster_sync_failed':
+            return 'Roster sync failed';
         case 'probe_failed':
             return 'Probe failed';
         case 'pinned_key_error':
@@ -1407,7 +1409,8 @@ function uploadSshStatusClass(status) {
         case 'mismatch':
         case 'mismatch_pending_heal':
             return 'status-warn';
-        case 'roster_unavailable':
+        case 'roster_not_synced':
+        case 'roster_sync_failed':
         case 'probe_failed':
         case 'pinned_key_error':
             return 'status-error';

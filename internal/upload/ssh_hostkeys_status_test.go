@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/update"
 )
 
 func TestSSHHostKeysProbeTimeout(t *testing.T) {
@@ -37,6 +39,7 @@ func TestComputeSSHHostKeysStatus(t *testing.T) {
 		pinnedOK       bool
 		pinnedKeyError string
 		trusted        []string
+		lastSyncError  string
 		want           string
 	}{
 		{name: "probe failed", want: "probe_failed"},
@@ -45,13 +48,14 @@ func TestComputeSSHHostKeysStatus(t *testing.T) {
 		{name: "pending heal", server: "SHA256:abc", pinned: "SHA256:old", pinnedOK: true, trusted: trusted, want: "mismatch_pending_heal"},
 		{name: "mismatch", server: "SHA256:zzz", pinned: "SHA256:old", pinnedOK: true, trusted: trusted, want: "mismatch"},
 		{name: "no pin trusted", server: "SHA256:abc", trusted: trusted, want: "ok"},
-		{name: "no pin no roster", server: "SHA256:abc", want: "roster_unavailable"},
+		{name: "no pin no roster", server: "SHA256:abc", want: "roster_not_synced"},
+		{name: "no pin roster sync failed", server: "SHA256:abc", lastSyncError: "fetch upload ssh host keys: connection refused", want: "roster_sync_failed"},
 		{name: "no pin untrusted", server: "SHA256:zzz", trusted: trusted, want: "mismatch"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := computeSSHHostKeysStatus(tt.server, tt.pinned, tt.pinnedOK, tt.pinnedKeyError, tt.trusted)
+			got := computeSSHHostKeysStatus(tt.server, tt.pinned, tt.pinnedOK, tt.pinnedKeyError, tt.trusted, tt.lastSyncError)
 			if got != tt.want {
 				t.Fatalf("got %q want %q", got, tt.want)
 			}
@@ -78,8 +82,31 @@ func TestRefreshSSHHostKeysStatus_recordsSyncError(t *testing.T) {
 	if status[0].RosterSyncError == "" {
 		t.Fatal("expected roster_sync_error")
 	}
-	if status[0].Status != "roster_unavailable" {
-		t.Fatalf("status = %q, want roster_unavailable", status[0].Status)
+	if status[0].Status != "roster_sync_failed" {
+		t.Fatalf("status = %q, want roster_sync_failed", status[0].Status)
+	}
+}
+
+func TestCollectSSHHostKeysStatus_surfacesPersistedSyncError(t *testing.T) {
+	SetProbeSSHHostKeyFingerprintForTest(func(string, int, time.Duration) (string, error) {
+		return "SHA256:probe-test-key", nil
+	})
+	t.Cleanup(func() { SetProbeSSHHostKeyFingerprintForTest(nil) })
+
+	dir := t.TempDir()
+	if err := update.RecordRosterSyncEndpoint(dir, "upload.aviationwx.org", 2222, errors.New("fetch upload ssh host keys: tls: handshake failure")); err != nil {
+		t.Fatalf("record sync state: %v", err)
+	}
+
+	status := CollectSSHHostKeysStatus(dir, filepath.Join(dir, "ssh_known_hosts"), nil, SSHHostKeysProbeMaxTimeout)
+	if len(status) != 1 {
+		t.Fatalf("len = %d, want 1", len(status))
+	}
+	if status[0].Status != "roster_sync_failed" {
+		t.Fatalf("status = %q, want roster_sync_failed", status[0].Status)
+	}
+	if status[0].RosterSyncError == "" {
+		t.Fatal("expected persisted roster_sync_error")
 	}
 }
 

@@ -754,6 +754,11 @@ func (s *Server) handleTestUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUploadSSHHostKeys(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	glob := s.configService.GetGlobal()
 	probeTimeout := upload.SSHHostKeysProbeTimeout(glob.TimeoutConnectSeconds)
 	configDir := s.configService.ConfigDir()
@@ -761,14 +766,10 @@ func (s *Server) handleUploadSSHHostKeys(w http.ResponseWriter, r *http.Request)
 	cameras := s.configService.ListCameras()
 
 	var status []upload.SSHHostKeysEndpointStatus
-	switch r.Method {
-	case http.MethodGet:
+	if r.Method == http.MethodGet {
 		status = upload.CollectSSHHostKeysStatus(configDir, knownHostsPath, cameras, probeTimeout)
-	case http.MethodPost:
+	} else {
 		status = upload.RefreshSSHHostKeysStatus(configDir, knownHostsPath, cameras, probeTimeout)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")

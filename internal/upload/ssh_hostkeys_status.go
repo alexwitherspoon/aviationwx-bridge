@@ -174,25 +174,26 @@ func lastRosterSyncError(host string, port int, rosterSyncErrors map[string]stri
 }
 
 func collectSSHHostKeysStatus(configDir, knownHostsPath string, endpoints []update.UploadEndpoint, probeTimeout time.Duration, rosterSyncErrors map[string]string) []SSHHostKeysEndpointStatus {
-	trustedMeta, trustedLoadErr := update.LoadTrustedUploadHostKeysFileData(configDir)
-	if trustedLoadErr != nil {
-		trustedMeta = nil
-	}
 	syncState, syncStateErr := update.LoadRosterSyncState(configDir)
-	trusted := []string(nil)
-	var trustedSource string
-	var trustedUpdatedAt *time.Time
-	if trustedMeta != nil {
-		trusted = trustedMeta.SHA256
-		trustedSource = trustedMeta.Source
-		if !trustedMeta.UpdatedAt.IsZero() {
-			t := trustedMeta.UpdatedAt.UTC()
-			trustedUpdatedAt = &t
-		}
-	}
 
 	out := make([]SSHHostKeysEndpointStatus, 0, len(endpoints))
 	for _, ep := range endpoints {
+		trustedMeta, trustedLoadErr := update.LoadTrustedUploadHostKeysFileDataForEndpoint(configDir, ep.Host, ep.Port)
+		if trustedLoadErr != nil {
+			trustedMeta = nil
+		}
+		trusted := []string(nil)
+		var trustedSource string
+		var trustedUpdatedAt *time.Time
+		if trustedMeta != nil {
+			trusted = trustedMeta.SHA256
+			trustedSource = trustedMeta.Source
+			if !trustedMeta.UpdatedAt.IsZero() {
+				t := trustedMeta.UpdatedAt.UTC()
+				trustedUpdatedAt = &t
+			}
+		}
+
 		status := SSHHostKeysEndpointStatus{
 			Host:                ep.Host,
 			Port:                ep.Port,

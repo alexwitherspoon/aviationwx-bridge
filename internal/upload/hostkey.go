@@ -100,12 +100,12 @@ func (s *hostKeyStore) verify(label string, key ssh.PublicKey, uploadHost string
 	}
 	if !found {
 		fp := ssh.FingerprintSHA256(key)
-		if !s.isTrustedFingerprint(fp) {
+		if !s.isTrustedFingerprint(fp, uploadHost, uploadPort) {
 			s.mu.Unlock()
 			s.syncTrustedRosterUnlocked(true, uploadHost, uploadPort)
 			s.mu.Lock()
 		}
-		if s.hasTrustedRoster() && !s.isTrustedFingerprint(fp) {
+		if s.hasTrustedRoster(uploadHost, uploadPort) && !s.isTrustedFingerprint(fp, uploadHost, uploadPort) {
 			return fmt.Errorf("ssh host key %s not in trusted upload roster", fp)
 		}
 		stored, found, err := s.lookup(label)
@@ -126,10 +126,10 @@ func (s *hostKeyStore) verify(label string, key ssh.PublicKey, uploadHost string
 	}
 
 	fp := ssh.FingerprintSHA256(key)
-	if s.isTrustedFingerprint(fp) {
+	if s.isTrustedFingerprint(fp, uploadHost, uploadPort) {
 		return s.replace(label, key)
 	}
-	if s.tryRefreshTrustedWhileLocked(true, uploadHost, uploadPort) && s.isTrustedFingerprint(fp) {
+	if s.tryRefreshTrustedWhileLocked(true, uploadHost, uploadPort) && s.isTrustedFingerprint(fp, uploadHost, uploadPort) {
 		return s.replace(label, key)
 	}
 
@@ -173,13 +173,13 @@ func (s *hostKeyStore) tryRefreshTrustedWhileLocked(force bool, uploadHost strin
 	return ok
 }
 
-func (s *hostKeyStore) hasTrustedRoster() bool {
-	trusted, err := update.LoadTrustedUploadHostKeys(s.configDir)
+func (s *hostKeyStore) hasTrustedRoster(uploadHost string, uploadPort int) bool {
+	trusted, err := update.LoadTrustedUploadHostKeysForEndpoint(s.configDir, uploadHost, uploadPort)
 	return err == nil && len(trusted) > 0
 }
 
-func (s *hostKeyStore) isTrustedFingerprint(fp string) bool {
-	trusted, err := update.LoadTrustedUploadHostKeys(s.configDir)
+func (s *hostKeyStore) isTrustedFingerprint(fp string, uploadHost string, uploadPort int) bool {
+	trusted, err := update.LoadTrustedUploadHostKeysForEndpoint(s.configDir, uploadHost, uploadPort)
 	if err != nil || len(trusted) == 0 {
 		return false
 	}

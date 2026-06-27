@@ -27,7 +27,7 @@ func TestHostKeyRotation_endToEnd(t *testing.T) {
 	}
 
 	store.syncHTTPS = func(configDir, host string, port int) error {
-		writeTrustedJSON(t, configDir, ssh.FingerprintSHA256(key2))
+		writeTrustedJSONForHost(t, configDir, host, port, ssh.FingerprintSHA256(key2))
 		return nil
 	}
 	store.lastTrustedFetch = time.Time{}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/update"
 )
 
@@ -111,6 +112,44 @@ func TestCollectSSHHostKeysStatus_surfacesPersistedSyncError(t *testing.T) {
 	}
 }
 
+func TestCollectSSHHostKeysStatus_perEndpointTrustedRoster(t *testing.T) {
+	SetProbeSSHHostKeyFingerprintForTest(func(host string, port int, _ time.Duration) (string, error) {
+		switch host {
+		case "upload.a.test":
+			return "SHA256:key-a", nil
+		case "upload.b.test":
+			return "SHA256:key-b", nil
+		default:
+			t.Fatalf("unexpected host %s:%d", host, port)
+			return "", nil
+		}
+	})
+	t.Cleanup(func() { SetProbeSSHHostKeyFingerprintForTest(nil) })
+
+	dir := t.TempDir()
+	if err := update.WriteTrustedHostKeysForEndpointForTest(dir, "upload.a.test", 2222, []string{"SHA256:key-a"}, "https-roster"); err != nil {
+		t.Fatal(err)
+	}
+	if err := update.WriteTrustedHostKeysForEndpointForTest(dir, "upload.b.test", 2222, []string{"SHA256:key-b"}, "https-roster"); err != nil {
+		t.Fatal(err)
+	}
+
+	cameras := []config.Camera{
+		{ID: "a", Enabled: true, Upload: &config.Upload{Host: "upload.a.test", Port: 2222}},
+		{ID: "b", Enabled: true, Upload: &config.Upload{Host: "upload.b.test", Port: 2222}},
+	}
+	status := CollectSSHHostKeysStatus(dir, filepath.Join(dir, "ssh_known_hosts"), cameras, SSHHostKeysProbeMaxTimeout)
+	if len(status) != 2 {
+		t.Fatalf("len = %d, want 2", len(status))
+	}
+	if status[0].Status != "ok" || status[0].TrustedRosterSHA256[0] != "SHA256:key-a" {
+		t.Fatalf("endpoint A = %+v", status[0])
+	}
+	if status[1].Status != "ok" || status[1].TrustedRosterSHA256[0] != "SHA256:key-b" {
+		t.Fatalf("endpoint B = %+v", status[1])
+	}
+}
+
 func TestCollectSSHHostKeysStatus_surfacesSyncStateLoadError(t *testing.T) {
 	SetProbeSSHHostKeyFingerprintForTest(func(string, int, time.Duration) (string, error) {
 		return "SHA256:probe-test-key", nil
@@ -143,12 +182,7 @@ func TestRefreshSSHHostKeysStatus_updatesTrustedRoster(t *testing.T) {
 
 	dir := t.TempDir()
 	SetRosterSyncHTTPSForTest(func(configDir, host string, port int) error {
-		path := filepath.Join(configDir, "upload_ssh_trusted_keys.json")
-		return os.WriteFile(path, []byte(`{
-  "sha256": ["`+probeFP+`"],
-  "updated_at": "2026-06-26T00:00:00Z",
-  "source": "https-roster"
-}`), 0600)
+		return update.WriteTrustedHostKeysForEndpointForTest(configDir, host, port, []string{probeFP}, "https-roster")
 	})
 	t.Cleanup(func() { SetRosterSyncHTTPSForTest(nil) })
 

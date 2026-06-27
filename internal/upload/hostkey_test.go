@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/update"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -41,17 +42,12 @@ func testHostKey(t *testing.T) ssh.PublicKey {
 
 func writeTrustedJSON(t *testing.T, dir string, fps ...string) {
 	t.Helper()
-	var b strings.Builder
-	b.WriteString(`{"sha256":[`)
-	for i, fp := range fps {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		fmt.Fprintf(&b, "%q", fp)
-	}
-	b.WriteString(`]}`)
-	path := filepath.Join(dir, "upload_ssh_trusted_keys.json")
-	if err := os.WriteFile(path, []byte(b.String()), 0600); err != nil {
+	writeTrustedJSONForHost(t, dir, "upload.example.com", 2222, fps...)
+}
+
+func writeTrustedJSONForHost(t *testing.T, dir, host string, port int, fps ...string) {
+	t.Helper()
+	if err := update.WriteTrustedHostKeysForEndpointForTest(dir, host, port, fps, "test"); err != nil {
 		t.Fatal(err)
 	}
 }

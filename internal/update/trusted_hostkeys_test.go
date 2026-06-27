@@ -3,6 +3,7 @@ package update
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,23 +35,84 @@ func TestNormalizeFingerprintList_dedupes(t *testing.T) {
 
 func TestWriteTrustedHostKeysFile_roundTrip(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, trustedHostKeysFile)
-	if err := writeTrustedHostKeysFile(path, []string{"SHA256:abc", "sha256:def"}, "https-roster"); err != nil {
+	if err := writeTrustedHostKeysForEndpoint(dir, "upload.aviationwx.org", 2222, []string{"SHA256:abc", "sha256:def"}, "https-roster"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := LoadTrustedUploadHostKeys(dir)
+	got, err := LoadTrustedUploadHostKeysForEndpoint(dir, "upload.aviationwx.org", 2222)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0] != "SHA256:abc" || got[1] != "SHA256:def" {
 		t.Fatalf("got %v", got)
 	}
+	path := filepath.Join(dir, trustedHostKeysFile)
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info.Mode().Perm()&077 != 0 {
 		t.Fatalf("file mode %o, want 0600", info.Mode().Perm())
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"version": 2`) {
+		t.Fatalf("expected v2 file: %s", raw)
+	}
+}
+
+func TestWriteTrustedHostKeysForEndpoint_doesNotOverwriteOtherHost(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeTrustedHostKeysForEndpoint(dir, "upload.a.test", 2222, []string{"SHA256:aaa"}, "https-roster"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeTrustedHostKeysForEndpoint(dir, "upload.b.test", 2222, []string{"SHA256:bbb"}, "https-roster"); err != nil {
+		t.Fatal(err)
+	}
+	gotA, err := LoadTrustedUploadHostKeysForEndpoint(dir, "upload.a.test", 2222)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotB, err := LoadTrustedUploadHostKeysForEndpoint(dir, "upload.b.test", 2222)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotA) != 1 || gotA[0] != "SHA256:aaa" {
+		t.Fatalf("host A = %v", gotA)
+	}
+	if len(gotB) != 1 || gotB[0] != "SHA256:bbb" {
+		t.Fatalf("host B = %v", gotB)
+	}
+}
+
+func TestParseTrustedHostKeysFile_migratesV1ToDefaultEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, trustedHostKeysFile)
+	v1 := `{"sha256":["SHA256:legacy"],"updated_at":"2026-06-26T00:00:00Z","source":"https-roster"}`
+	if err := os.WriteFile(path, []byte(v1), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadTrustedUploadHostKeys(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "SHA256:legacy" {
+		t.Fatalf("got %v", got)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"version": 2`) {
+		t.Fatal("expected on-disk migration to v2")
+	}
+	other, err := LoadTrustedUploadHostKeysForEndpoint(dir, "upload.other.test", 2222)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(other) != 0 {
+		t.Fatalf("other host should be empty until synced: %v", other)
 	}
 }
 

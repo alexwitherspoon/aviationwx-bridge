@@ -52,9 +52,6 @@ func SyncUploadSSHHostKeysHTTPS(configDir, uploadHost string, uploadPort int) (e
 		return err
 	}
 
-	trustedHostKeysSyncMu.Lock()
-	defer trustedHostKeysSyncMu.Unlock()
-
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
 
@@ -69,6 +66,8 @@ func SyncUploadSSHHostKeysHTTPS(configDir, uploadHost string, uploadPort int) (e
 		return fmt.Errorf("upload ssh host keys roster is empty")
 	}
 
+	trustedHostKeysSyncMu.Lock()
+	defer trustedHostKeysSyncMu.Unlock()
 	return writeTrustedHostKeysForEndpointLocked(configDir, uploadHost, uploadPort, doc.SHA256, "https-roster")
 }
 

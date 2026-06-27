@@ -1684,7 +1684,7 @@ func TestUploadSSHHostKeys_endpoint(t *testing.T) {
 	})
 
 	t.Run("method not allowed", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/upload/ssh-host-keys", nil)
+		req := httptest.NewRequest(http.MethodPut, "/api/upload/ssh-host-keys", nil)
 		req.SetBasicAuth("admin", svc.GetWebPassword())
 		w := httptest.NewRecorder()
 		server.GetMux().ServeHTTP(w, req)
@@ -1731,6 +1731,86 @@ func TestUploadSSHHostKeys_endpoint(t *testing.T) {
 		}
 		if capturedTimeout != upload.SSHHostKeysProbeMaxTimeout {
 			t.Fatalf("probe timeout = %v, want %v", capturedTimeout, upload.SSHHostKeysProbeMaxTimeout)
+		}
+	})
+
+	t.Run("post refresh syncs roster then probes", func(t *testing.T) {
+		upload.SetRosterSyncHTTPSForTest(func(configDir, host string, port int) error {
+			if host != "upload.aviationwx.org" || port != 2222 {
+				t.Fatalf("sync host = %s:%d", host, port)
+			}
+			path := filepath.Join(configDir, "upload_ssh_trusted_keys.json")
+			return os.WriteFile(path, []byte(`{
+  "sha256": ["SHA256:probe-test-key"],
+  "updated_at": "2026-06-26T00:00:00Z",
+  "source": "https-roster"
+}`), 0600)
+		})
+		t.Cleanup(func() { upload.SetRosterSyncHTTPSForTest(nil) })
+
+		req := httptest.NewRequest(http.MethodPost, "/api/upload/ssh-host-keys", nil)
+		req.SetBasicAuth("admin", svc.GetWebPassword())
+		w := httptest.NewRecorder()
+		server.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+		}
+
+		var resp struct {
+			Endpoints []struct {
+				Status          string `json:"status"`
+				RosterSyncError string `json:"roster_sync_error"`
+			} `json:"endpoints"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.Endpoints) != 1 {
+			t.Fatalf("endpoints = %d, want 1", len(resp.Endpoints))
+		}
+		ep := resp.Endpoints[0]
+		if ep.RosterSyncError != "" {
+			t.Fatalf("roster_sync_error = %q, want empty", ep.RosterSyncError)
+		}
+		if ep.Status != "ok" {
+			t.Fatalf("status = %q, want ok after roster refresh", ep.Status)
+		}
+	})
+
+	t.Run("post refresh surfaces roster sync error", func(t *testing.T) {
+		_ = os.Remove(filepath.Join(tmpDir, "upload_ssh_trusted_keys.json"))
+
+		upload.SetRosterSyncHTTPSForTest(func(string, string, int) error {
+			return fmt.Errorf("fetch upload ssh host keys: connection refused")
+		})
+		t.Cleanup(func() { upload.SetRosterSyncHTTPSForTest(nil) })
+
+		req := httptest.NewRequest(http.MethodPost, "/api/upload/ssh-host-keys", nil)
+		req.SetBasicAuth("admin", svc.GetWebPassword())
+		w := httptest.NewRecorder()
+		server.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+		}
+
+		var resp struct {
+			Endpoints []struct {
+				RosterSyncError string `json:"roster_sync_error"`
+				Status          string `json:"status"`
+			} `json:"endpoints"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.Endpoints) != 1 {
+			t.Fatalf("endpoints = %d, want 1", len(resp.Endpoints))
+		}
+		ep := resp.Endpoints[0]
+		if ep.RosterSyncError == "" {
+			t.Fatal("expected roster_sync_error")
+		}
+		if ep.Status != "roster_unavailable" {
+			t.Fatalf("status = %q, want roster_unavailable", ep.Status)
 		}
 	})
 }

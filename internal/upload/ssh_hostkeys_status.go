@@ -183,8 +183,8 @@ func collectSSHHostKeysStatus(configDir, knownHostsPath string, endpoints []upda
 		if trustedLoadErr == nil {
 			key := sshHostKeysEndpointKey(ep.Host, ep.Port)
 			if meta, ok := trustedByEndpoint[key]; ok {
-				copy := meta
-				trustedMeta = &copy
+				metaCopy := meta
+				trustedMeta = &metaCopy
 			}
 		}
 		trusted := []string(nil)

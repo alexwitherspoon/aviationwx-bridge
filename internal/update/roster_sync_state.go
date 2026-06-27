@@ -82,7 +82,7 @@ func RecordRosterSyncEndpoint(configDir, host string, port int, syncErr error) e
 	return writeRosterSyncStateFile(configDir, data)
 }
 
-// LoadRosterSyncState reads persisted roster sync attempts (nil map when missing).
+// LoadRosterSyncState reads persisted roster sync attempts (empty map when missing).
 func LoadRosterSyncState(configDir string) (map[string]RosterSyncEndpointState, error) {
 	rosterSyncStateMu.Lock()
 	defer rosterSyncStateMu.Unlock()

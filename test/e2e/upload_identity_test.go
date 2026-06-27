@@ -4,9 +4,11 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,26 +20,24 @@ func TestUploadIdentity_RosterCachedAndAPIOk(t *testing.T) {
 
 	trustedPath := harness.E2EPath("testdata", "e2e", "bridge", "upload_ssh_trusted_keys.json")
 	deadline := time.Now().Add(harness.DefaultWaitTimeout)
+	var raw []byte
 	for time.Now().Before(deadline) {
-		raw, err := os.ReadFile(trustedPath)
-		if err == nil && len(raw) > 10 {
+		data, err := os.ReadFile(trustedPath)
+		if err == nil && len(data) > 10 {
+			raw = data
 			break
 		}
 		time.Sleep(harness.DefaultPoll)
 	}
-	raw, err := os.ReadFile(trustedPath)
-	if err != nil {
-		t.Fatalf("trusted roster file missing on host mount: %v", err)
+	if len(raw) == 0 {
+		raw, _ = os.ReadFile(trustedPath)
 	}
-	var trusted struct {
-		Source string   `json:"source"`
-		SHA256 []string `json:"sha256"`
+	if len(raw) == 0 {
+		t.Fatalf("trusted roster file missing on host mount: %v", trustedPath)
 	}
-	if err := json.Unmarshal(raw, &trusted); err != nil {
-		t.Fatalf("trusted json: %v", err)
-	}
-	if trusted.Source != "https-roster" || len(trusted.SHA256) == 0 {
-		t.Fatalf("trusted roster: %+v", trusted)
+	source, fps := trustedRosterForEndpoint(t, raw, harness.UploadHost, 2222)
+	if source != "https-roster" || len(fps) == 0 {
+		t.Fatalf("trusted roster for %s:2222 source=%q sha256=%v", harness.UploadHost, source, fps)
 	}
 
 	client := &http.Client{Timeout: 20 * time.Second}
@@ -57,18 +57,73 @@ func TestUploadIdentity_RosterCachedAndAPIOk(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		lastBody = string(body)
-		if resp.StatusCode == http.StatusOK {
-			var out struct {
-				Endpoints []struct {
-					Status string `json:"status"`
-					Host   string `json:"host"`
-				} `json:"endpoints"`
+		if resp.StatusCode != http.StatusOK {
+			time.Sleep(harness.DefaultPoll)
+			continue
+		}
+		var out struct {
+			Endpoints []struct {
+				Status              string   `json:"status"`
+				Host                string   `json:"host"`
+				Port                int      `json:"port"`
+				TrustedSource       string   `json:"trusted_source"`
+				TrustedRosterSHA256 []string `json:"trusted_roster_sha256"`
+			} `json:"endpoints"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil || len(out.Endpoints) == 0 {
+			time.Sleep(harness.DefaultPoll)
+			continue
+		}
+		for _, ep := range out.Endpoints {
+			if ep.Host != harness.UploadHost || ep.Port != 2222 {
+				continue
 			}
-			if json.Unmarshal(body, &out) == nil && len(out.Endpoints) > 0 && out.Endpoints[0].Status == "ok" {
-				return
+			if ep.Status != "ok" {
+				break
 			}
+			if ep.TrustedSource != "https-roster" || len(ep.TrustedRosterSHA256) == 0 {
+				t.Fatalf("ssh-host-keys API trusted roster for %s: source=%q sha256=%v",
+					harness.UploadHost, ep.TrustedSource, ep.TrustedRosterSHA256)
+			}
+			return
 		}
 		time.Sleep(harness.DefaultPoll)
 	}
-	t.Fatalf("ssh-host-keys API did not reach ok; last body=%s", lastBody)
+	t.Fatalf("ssh-host-keys API did not reach ok for %s:2222; last body=%s", harness.UploadHost, lastBody)
+}
+
+func trustedRosterForEndpoint(t *testing.T, raw []byte, host string, port int) (source string, sha256 []string) {
+	t.Helper()
+	key := fmt.Sprintf("%s:%d", strings.ToLower(strings.TrimSpace(host)), port)
+
+	var v2 struct {
+		Version   int `json:"version"`
+		Endpoints map[string]struct {
+			Source string   `json:"source"`
+			SHA256 []string `json:"sha256"`
+		} `json:"endpoints"`
+	}
+	if err := json.Unmarshal(raw, &v2); err != nil {
+		t.Fatalf("trusted json: %v", err)
+	}
+	if v2.Version >= 2 && v2.Endpoints != nil {
+		ep, ok := v2.Endpoints[key]
+		if !ok {
+			keys := make([]string, 0, len(v2.Endpoints))
+			for k := range v2.Endpoints {
+				keys = append(keys, k)
+			}
+			t.Fatalf("trusted roster missing endpoint %q (have %v)", key, keys)
+		}
+		return ep.Source, ep.SHA256
+	}
+
+	var v1 struct {
+		Source string   `json:"source"`
+		SHA256 []string `json:"sha256"`
+	}
+	if err := json.Unmarshal(raw, &v1); err != nil {
+		t.Fatalf("trusted json: %v", err)
+	}
+	return v1.Source, v1.SHA256
 }

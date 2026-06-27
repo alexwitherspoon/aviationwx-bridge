@@ -111,12 +111,9 @@ func ProbeSSHHostKeyFingerprint(host string, port int, timeout time.Duration) (s
 	return "", fmt.Errorf("ssh host key probe failed")
 }
 
-// CollectSSHHostKeysStatus reports host key state for each distinct enabled camera upload endpoint.
+// CollectSSHHostKeysStatus reports host key state for each roster upload endpoint.
 func CollectSSHHostKeysStatus(configDir, knownHostsPath string, cameras []config.Camera, probeTimeout time.Duration) []SSHHostKeysEndpointStatus {
-	endpoints := update.DistinctUploadEndpointsFromCameras(cameras)
-	if len(endpoints) == 0 {
-		endpoints = []update.UploadEndpoint{update.NormalizeUploadEndpoint("upload.aviationwx.org", 2222)}
-	}
+	endpoints := update.UploadEndpointsForRoster(cameras)
 
 	trustedMeta, trustedLoadErr := update.LoadTrustedUploadHostKeysFileData(configDir)
 	if trustedLoadErr != nil {

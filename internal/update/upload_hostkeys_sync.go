@@ -44,13 +44,25 @@ func DistinctUploadEndpointsFromCameras(cameras []config.Camera) []UploadEndpoin
 	return out
 }
 
-// SyncUploadSSHHostKeysForCameras fetches HTTPS rosters for each distinct enabled camera upload host.
-// Returns nil when at least one endpoint sync succeeds. Returns the last error when all fail.
-func SyncUploadSSHHostKeysForCameras(configDir string, cameras []config.Camera) error {
+// DefaultUploadEndpoint is the production upload target used when no enabled camera defines one.
+func DefaultUploadEndpoint() UploadEndpoint {
+	return NormalizeUploadEndpoint("", 0)
+}
+
+// UploadEndpointsForRoster returns upload targets for HTTPS roster sync and SSH host key status.
+// When no enabled cameras have upload config, the default production upload host is included.
+func UploadEndpointsForRoster(cameras []config.Camera) []UploadEndpoint {
 	endpoints := DistinctUploadEndpointsFromCameras(cameras)
 	if len(endpoints) == 0 {
-		return nil
+		return []UploadEndpoint{DefaultUploadEndpoint()}
 	}
+	return endpoints
+}
+
+// SyncUploadSSHHostKeysForCameras fetches HTTPS rosters for each roster upload endpoint.
+// Returns nil when at least one endpoint sync succeeds. Returns the last error when all fail.
+func SyncUploadSSHHostKeysForCameras(configDir string, cameras []config.Camera) error {
+	endpoints := UploadEndpointsForRoster(cameras)
 	var lastErr error
 	var anyOK bool
 	for _, ep := range endpoints {

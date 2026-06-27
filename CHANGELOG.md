@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-06-27
+
+Upload roster and SSH host-key handling for multi-target bridges, plus operator fixes for roster sync and the Settings SSH keys panel. Supervised installs on `latest` pick this up on the next daily update; `sudo aviationwx update` applies immediately on a reachable host.
+
+### Added
+- **Upload**: Per-endpoint trusted SSH roster cache (`upload_ssh_trusted_keys.json` version 2 `endpoints` map keyed by `host:port`). Legacy v1 files migrate on read to `upload.aviationwx.org:2222`.
+- **E2E**: Local Docker harness (`make e2e`) for upload identity, SFTP, capture, and camera-simulator tiers (`AVIATIONWX_UPLOAD_ROSTER_CA_FILE` for harness TLS).
+
+### Changed
+- **Upload**: HTTPS roster sync writes trusted fingerprints for the synced endpoint only; host-key verify and `GET /api/upload/ssh-host-keys` load per target.
+- **Web console**: `POST /api/upload/ssh-host-keys/refresh` fetches the HTTPS roster before live SSH probe so trusted keys match the server.
+- **Upload**: Roster sync runs for the default upload host when no cameras are configured yet.
+
+### Fixed
+- **Upload**: SSH host-keys status distinguishes `roster_not_synced` vs `roster_sync_failed`; surfaces unreadable `upload_ssh_roster_sync.json`.
+- **Upload**: Roster sync preserves `last_success_at` when a later HTTPS fetch fails.
+- **Upload**: Trusted roster mutex no longer held across HTTPS fetch (status reads not blocked for `requestTimeout`).
+
 ## [2.11.0] - 2026-06-26
 
 Restores SFTP SSH host key verification using a TLS-verified HTTPS roster at the upload host. Supersedes the 2.10.1 emergency bypass (`InsecureIgnoreHostKey`). Supervised installs on `latest` pick this up on the next daily update; `sudo aviationwx update` applies immediately on a reachable host.

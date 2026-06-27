@@ -8,8 +8,9 @@ Security fixes are released for the **current minor release line** (latest patch
 
 | Version | Supported |
 | ------- | --------- |
+| 2.12.x  | Yes       |
 | 2.11.x  | Yes       |
-| 2.10.x  | Yes (upgrade to 2.11.x for SFTP host key verification) |
+| 2.10.x  | Yes (upgrade to 2.11.x or newer for SFTP host key verification) |
 | 2.9.x   | No        |
 | 2.8.x and older | No |
 

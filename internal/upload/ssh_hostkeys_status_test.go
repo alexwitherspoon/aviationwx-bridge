@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,6 +108,29 @@ func TestCollectSSHHostKeysStatus_surfacesPersistedSyncError(t *testing.T) {
 	}
 	if status[0].RosterSyncError == "" {
 		t.Fatal("expected persisted roster_sync_error")
+	}
+}
+
+func TestCollectSSHHostKeysStatus_surfacesSyncStateLoadError(t *testing.T) {
+	SetProbeSSHHostKeyFingerprintForTest(func(string, int, time.Duration) (string, error) {
+		return "SHA256:probe-test-key", nil
+	})
+	t.Cleanup(func() { SetProbeSSHHostKeyFingerprintForTest(nil) })
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "upload_ssh_roster_sync.json"), []byte("{not-json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	status := CollectSSHHostKeysStatus(dir, filepath.Join(dir, "ssh_known_hosts"), nil, SSHHostKeysProbeMaxTimeout)
+	if len(status) != 1 {
+		t.Fatalf("len = %d, want 1", len(status))
+	}
+	if status[0].Status != "roster_sync_failed" {
+		t.Fatalf("status = %q, want roster_sync_failed", status[0].Status)
+	}
+	if !strings.Contains(status[0].RosterSyncError, "read roster sync state:") {
+		t.Fatalf("roster_sync_error = %q", status[0].RosterSyncError)
 	}
 }
 

@@ -178,7 +178,7 @@ func collectSSHHostKeysStatus(configDir, knownHostsPath string, endpoints []upda
 	if trustedLoadErr != nil {
 		trustedMeta = nil
 	}
-	syncState, _ := update.LoadRosterSyncState(configDir)
+	syncState, syncStateErr := update.LoadRosterSyncState(configDir)
 	trusted := []string(nil)
 	var trustedSource string
 	var trustedUpdatedAt *time.Time
@@ -217,6 +217,9 @@ func collectSSHHostKeysStatus(configDir, knownHostsPath string, endpoints []upda
 		}
 
 		rosterErr := lastRosterSyncError(ep.Host, ep.Port, rosterSyncErrors, syncState)
+		if rosterErr == "" && syncStateErr != nil {
+			rosterErr = fmt.Errorf("read roster sync state: %w", syncStateErr).Error()
+		}
 		status.Status = computeSSHHostKeysStatus(status.ServerKeySHA256, status.PinnedKeySHA256, pinnedOK, status.PinnedKeyError, trusted, rosterErr)
 		if rosterErr != "" {
 			status.RosterSyncError = rosterErr

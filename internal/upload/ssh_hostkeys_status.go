@@ -229,7 +229,7 @@ func collectSSHHostKeysStatus(configDir, knownHostsPath string, endpoints []upda
 	return out
 }
 
-func computeSSHHostKeysStatus(serverFP, pinnedFP string, pinnedOK bool, pinnedKeyError string, trusted []string, lastRosterSyncError string) string {
+func computeSSHHostKeysStatus(serverFP, pinnedFP string, pinnedOK bool, pinnedKeyError string, trusted []string, rosterSyncErr string) string {
 	if serverFP == "" {
 		return "probe_failed"
 	}
@@ -250,7 +250,7 @@ func computeSSHHostKeysStatus(serverFP, pinnedFP string, pinnedOK bool, pinnedKe
 		return "ok"
 	}
 	if len(trusted) == 0 {
-		if strings.TrimSpace(lastRosterSyncError) != "" {
+		if strings.TrimSpace(rosterSyncErr) != "" {
 			return "roster_sync_failed"
 		}
 		return "roster_not_synced"

@@ -132,16 +132,24 @@ func RefreshSSHHostKeysStatus(configDir, knownHostsPath string, cameras []config
 }
 
 // rosterSyncHTTPSHook overrides HTTPS roster sync during RefreshSSHHostKeysStatus (tests only).
-var rosterSyncHTTPSHook func(configDir, host string, port int) error
+var (
+	rosterSyncHookMu    sync.RWMutex
+	rosterSyncHTTPSHook func(configDir, host string, port int) error
+)
 
 // SetRosterSyncHTTPSForTest overrides HTTPS roster sync during RefreshSSHHostKeysStatus (tests only).
 func SetRosterSyncHTTPSForTest(fn func(configDir, host string, port int) error) {
+	rosterSyncHookMu.Lock()
 	rosterSyncHTTPSHook = fn
+	rosterSyncHookMu.Unlock()
 }
 
 func syncRosterHTTPS(configDir, host string, port int) error {
-	if rosterSyncHTTPSHook != nil {
-		return rosterSyncHTTPSHook(configDir, host, port)
+	rosterSyncHookMu.RLock()
+	hook := rosterSyncHTTPSHook
+	rosterSyncHookMu.RUnlock()
+	if hook != nil {
+		return hook(configDir, host, port)
 	}
 	return update.SyncUploadSSHHostKeysHTTPS(configDir, host, port)
 }

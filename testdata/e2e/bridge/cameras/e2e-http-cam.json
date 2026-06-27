@@ -1,0 +1,15 @@
+{
+  "id": "e2e-http-cam",
+  "name": "E2E HTTP Camera",
+  "type": "http",
+  "enabled": true,
+  "snapshot_url": "http://camera-simulator:8080/http/cam-a/snapshot.jpg",
+  "capture_interval_seconds": 5,
+  "upload": {
+    "host": "upload.e2e.test",
+    "port": 2222,
+    "username": "e2eCam01Push01",
+    "password": "E2ePass1234567",
+    "protocol": "sftp"
+  }
+}

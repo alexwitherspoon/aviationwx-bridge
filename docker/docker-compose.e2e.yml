@@ -1,0 +1,108 @@
+# E2E integration harness: upload (aviationwx.org) + bridge + camera-simulator.
+# Usage: scripts/e2e-run.sh (see docs/DEVELOPMENT.md).
+
+name: aviationwx-e2e
+
+networks:
+  e2e:
+    name: aviationwx-e2e
+
+volumes:
+  e2e-cache:
+
+services:
+  upload:
+    image: aviationwx-e2e-upload
+    build:
+      context: ..
+      dockerfile: docker/e2e/Dockerfile.upload
+      args:
+        AVIATIONWX_E2E_BASE: aviationwx-e2e-upload-base
+    networks:
+      e2e:
+        aliases:
+          - upload.e2e.test
+    volumes:
+      - ../testdata/e2e/tls:/etc/nginx/ssl:ro
+      - ../testdata/e2e/airports.json:/var/www/html/secrets/airports.json:ro
+      - e2e-cache:/var/www/html/cache
+      - ../testdata/e2e/sftp:/var/sftp
+    environment:
+      - CONFIG_PATH=/var/www/html/secrets/airports.json
+      - DOMAIN=e2e.test
+      - APP_ENV=testing
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-fsSk",
+          "https://127.0.0.1/.well-known/aviationwx-upload-ssh-host-keys.json"
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 90s
+    ports:
+      - "18443:443"
+      - "12223:2222"
+
+  bridge:
+    image: aviationwx-e2e-bridge
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        GIT_COMMIT: e2e
+    networks:
+      - e2e
+    ports:
+      - "1231:1229"
+    tmpfs:
+      - /dev/shm:size=100m
+    volumes:
+      - ../testdata/e2e/bridge:/data
+      - ../testdata/e2e/tls/ca.pem:/etc/aviationwx/e2e-roster-ca.pem:ro
+    environment:
+      - AVIATIONWX_CONFIG_DIR=/data
+      - AVIATIONWX_QUEUE_PATH=/dev/shm/aviationwx
+      - AVIATIONWX_UPLOAD_ROSTER_CA_FILE=/etc/aviationwx/e2e-roster-ca.pem
+      - AVIATIONWX_LOG_LEVEL=info
+    depends_on:
+      upload:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:1229/readyz"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+  camera-simulator:
+    profiles: ["tier2"]
+    image: aviationwx-e2e-simulator
+    build:
+      context: ..
+      dockerfile: docker/camera-simulator/Dockerfile
+    networks:
+      e2e:
+        aliases:
+          - camera-simulator
+    volumes:
+      - ../testdata/e2e/images:/images:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    ports:
+      - "18080:8080"

@@ -1,0 +1,19 @@
+{
+  "id": "e2e-rtsp-cam",
+  "name": "E2E RTSP Camera",
+  "type": "rtsp",
+  "enabled": false,
+  "capture_interval_seconds": 5,
+  "rtsp": {
+    "url": "rtsp://camera-simulator:8554/cam-b",
+    "username": "",
+    "password": ""
+  },
+  "upload": {
+    "host": "upload.e2e.test",
+    "port": 2222,
+    "username": "e2eCam02Push02",
+    "password": "E2ePass7654321",
+    "protocol": "sftp"
+  }
+}

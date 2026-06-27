@@ -1,0 +1,17 @@
+# Extends the aviationwx.org image with nginx for HTTPS roster on upload.e2e.test:443.
+ARG AVIATIONWX_E2E_BASE=aviationwx-e2e-upload-base
+FROM ${AVIATIONWX_E2E_BASE}
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nginx \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/nginx/sites-enabled/default
+
+COPY docker/e2e/upload-nginx.conf /etc/nginx/conf.d/upload-e2e.conf
+COPY docker/e2e/upload-e2e-entrypoint.sh /usr/local/bin/upload-e2e-entrypoint.sh
+RUN chmod +x /usr/local/bin/upload-e2e-entrypoint.sh
+
+EXPOSE 80 443 2222
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/upload-e2e-entrypoint.sh"]

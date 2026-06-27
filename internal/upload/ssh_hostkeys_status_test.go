@@ -142,10 +142,10 @@ func TestCollectSSHHostKeysStatus_perEndpointTrustedRoster(t *testing.T) {
 	if len(status) != 2 {
 		t.Fatalf("len = %d, want 2", len(status))
 	}
-	if status[0].Status != "ok" || status[0].TrustedRosterSHA256[0] != "SHA256:key-a" {
+	if status[0].Status != "ok" || len(status[0].TrustedRosterSHA256) != 1 || status[0].TrustedRosterSHA256[0] != "SHA256:key-a" {
 		t.Fatalf("endpoint A = %+v", status[0])
 	}
-	if status[1].Status != "ok" || status[1].TrustedRosterSHA256[0] != "SHA256:key-b" {
+	if status[1].Status != "ok" || len(status[1].TrustedRosterSHA256) != 1 || status[1].TrustedRosterSHA256[0] != "SHA256:key-b" {
 		t.Fatalf("endpoint B = %+v", status[1])
 	}
 }

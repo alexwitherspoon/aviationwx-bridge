@@ -70,7 +70,7 @@ func writeTrustedHostKeysForEndpointLocked(configDir, host string, port int, fps
 	return writeTrustedHostKeysStoreUnlocked(configDir, store)
 }
 
-// writeTrustedHostKeysFile writes a v1-shaped roster to the default upload endpoint (tests).
+// writeTrustedHostKeysFile seeds the default upload endpoint in the v2 store (tests).
 func writeTrustedHostKeysFile(path string, fps []string, source string) error {
 	configDir := filepath.Dir(path)
 	def := DefaultUploadEndpoint()

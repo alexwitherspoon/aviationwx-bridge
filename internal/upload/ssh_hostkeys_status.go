@@ -155,7 +155,22 @@ func syncRosterHTTPS(configDir, host string, port int) error {
 }
 
 func sshHostKeysEndpointKey(host string, port int) string {
-	return strings.TrimSpace(strings.ToLower(host)) + ":" + strconv.Itoa(port)
+	return update.RosterSyncEndpointKey(host, port)
+}
+
+func lastRosterSyncError(host string, port int, rosterSyncErrors map[string]string, syncState map[string]update.RosterSyncEndpointState) string {
+	key := sshHostKeysEndpointKey(host, port)
+	if rosterSyncErrors != nil {
+		if errMsg, ok := rosterSyncErrors[key]; ok && strings.TrimSpace(errMsg) != "" {
+			return errMsg
+		}
+	}
+	if syncState != nil {
+		if state, ok := syncState[key]; ok && strings.TrimSpace(state.LastError) != "" {
+			return state.LastError
+		}
+	}
+	return ""
 }
 
 func collectSSHHostKeysStatus(configDir, knownHostsPath string, endpoints []update.UploadEndpoint, probeTimeout time.Duration, rosterSyncErrors map[string]string) []SSHHostKeysEndpointStatus {
@@ -163,6 +178,7 @@ func collectSSHHostKeysStatus(configDir, knownHostsPath string, endpoints []upda
 	if trustedLoadErr != nil {
 		trustedMeta = nil
 	}
+	syncState, syncStateErr := update.LoadRosterSyncState(configDir)
 	trusted := []string(nil)
 	var trustedSource string
 	var trustedUpdatedAt *time.Time
@@ -200,18 +216,20 @@ func collectSSHHostKeysStatus(configDir, knownHostsPath string, endpoints []upda
 			status.PinnedKeySHA256 = pinnedFP
 		}
 
-		status.Status = computeSSHHostKeysStatus(status.ServerKeySHA256, status.PinnedKeySHA256, pinnedOK, status.PinnedKeyError, trusted)
-		if rosterSyncErrors != nil {
-			if errMsg, ok := rosterSyncErrors[sshHostKeysEndpointKey(ep.Host, ep.Port)]; ok {
-				status.RosterSyncError = errMsg
-			}
+		rosterErr := lastRosterSyncError(ep.Host, ep.Port, rosterSyncErrors, syncState)
+		if rosterErr == "" && syncStateErr != nil {
+			rosterErr = fmt.Errorf("read roster sync state: %w", syncStateErr).Error()
+		}
+		status.Status = computeSSHHostKeysStatus(status.ServerKeySHA256, status.PinnedKeySHA256, pinnedOK, status.PinnedKeyError, trusted, rosterErr)
+		if rosterErr != "" {
+			status.RosterSyncError = rosterErr
 		}
 		out = append(out, status)
 	}
 	return out
 }
 
-func computeSSHHostKeysStatus(serverFP, pinnedFP string, pinnedOK bool, pinnedKeyError string, trusted []string) string {
+func computeSSHHostKeysStatus(serverFP, pinnedFP string, pinnedOK bool, pinnedKeyError string, trusted []string, rosterSyncErr string) string {
 	if serverFP == "" {
 		return "probe_failed"
 	}
@@ -232,7 +250,10 @@ func computeSSHHostKeysStatus(serverFP, pinnedFP string, pinnedOK bool, pinnedKe
 		return "ok"
 	}
 	if len(trusted) == 0 {
-		return "roster_unavailable"
+		if strings.TrimSpace(rosterSyncErr) != "" {
+			return "roster_sync_failed"
+		}
+		return "roster_not_synced"
 	}
 	return "mismatch"
 }

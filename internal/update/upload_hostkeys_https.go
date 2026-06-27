@@ -34,7 +34,7 @@ var uploadHostKeysHTTPClient *http.Client
 // SyncUploadSSHHostKeysHTTPS fetches the live roster from the upload host and replaces
 // the on-disk trusted fingerprint list when the response is valid. On fetch or validation
 // failure the prior trusted file is left unchanged.
-func SyncUploadSSHHostKeysHTTPS(configDir, uploadHost string, uploadPort int) error {
+func SyncUploadSSHHostKeysHTTPS(configDir, uploadHost string, uploadPort int) (err error) {
 	if strings.TrimSpace(configDir) == "" {
 		return fmt.Errorf("config directory is required")
 	}
@@ -45,7 +45,11 @@ func SyncUploadSSHHostKeysHTTPS(configDir, uploadHost string, uploadPort int) er
 	if uploadPort <= 0 {
 		uploadPort = 2222
 	}
-	if _, err := loadUploadRosterRootCAs(); err != nil {
+	defer func() {
+		_ = RecordRosterSyncEndpoint(configDir, uploadHost, uploadPort, err)
+	}()
+
+	if _, err = loadUploadRosterRootCAs(); err != nil {
 		return err
 	}
 

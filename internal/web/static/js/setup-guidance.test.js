@@ -53,7 +53,7 @@ test('pending enable when station not in bootstrap enabled_sources', () => {
     assert.equal(banners.some((b) => b.id === 'pending_enable'), true);
 });
 
-test('firstIncompleteWizardStep prefers api then cameras then weather', () => {
+test('firstIncompleteWizardStep prefers api then cameras; done when any source exists', () => {
     assert.equal(firstIncompleteWizardStep({ config: {}, cameras: [], stations: [] }), 'api');
     assert.equal(
         firstIncompleteWizardStep({
@@ -69,12 +69,12 @@ test('firstIncompleteWizardStep prefers api then cameras then weather', () => {
             cameras: [{ id: 'c1' }],
             stations: [],
         }),
-        'weather'
+        'done'
     );
     assert.equal(
         firstIncompleteWizardStep({
             config: { api: { enabled: true, key_set: true } },
-            cameras: [{ id: 'c1' }],
+            cameras: [],
             stations: [{ id: 's1' }],
         }),
         'done'

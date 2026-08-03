@@ -39,7 +39,7 @@ export function selectConfigBanners({ config = {}, status = {}, cameras = [], st
             id: 'weather_no_key',
             tone: 'strong',
             title: 'Weather stations need an AviationWX API key',
-            body: 'LAN poll can run without a key, but observations will not reach aviationwx.org until you paste a key under Settings → AviationWX Link. You may be waiting on ops for a key.',
+            body: 'The bridge can still read your station on the local network, but observations will not reach aviationwx.org until you paste a key under Settings → AviationWX Link. Contact aviationwx.org if you need a key.',
         });
     }
 
@@ -50,10 +50,10 @@ export function selectConfigBanners({ config = {}, status = {}, cameras = [], st
             banners.push({
                 id: 'api_link_failed',
                 tone: 'strong',
-                title: 'AviationWX API link is not healthy',
+                title: 'AviationWX Link is not connected',
                 body: apiLink.last_error
-                    ? `Fix or re-enter the API key. Last error: ${apiLink.last_error}`
-                    : 'Fix or re-enter the API key, then use Test bootstrap / Test link.',
+                    ? `Check or re-enter the API key. Last error: ${apiLink.last_error}`
+                    : 'Check or re-enter the API key, then use Test connection or Test link under Settings → AviationWX Link.',
             });
         }
     }
@@ -76,13 +76,12 @@ export function selectConfigBanners({ config = {}, status = {}, cameras = [], st
                 .filter(Boolean)
         );
         const pending = enabledStations.filter((s) => s.id && !enabledIDs.has(s.id));
-        if (pending.length > 0 && enabledIDs.size >= 0) {
-            // Only show when bootstrap returned a sources list (empty list still means pending).
+        if (pending.length > 0) {
             banners.push({
                 id: 'pending_enable',
                 tone: 'info',
-                title: 'Weather received locally - pending platform enable',
-                body: 'The bridge can POST weather when the API link is up. Public display requires ops to enable each station source_id on aviationwx.org.',
+                title: 'Weather is uploading - waiting for site display',
+                body: 'This bridge is sending observations to aviationwx.org. Public display on the airport page still needs aviationwx.org to enable this station.',
             });
         }
     }
@@ -91,7 +90,12 @@ export function selectConfigBanners({ config = {}, status = {}, cameras = [], st
 }
 
 /**
- * firstIncompleteWizardStep picks where Resume should jump after timezone is already set.
+ * firstIncompleteWizardStep picks where Resume should jump.
+ * Timezone is always offered on Start Setup; Resume skips past a configured API key.
+ * Cameras and weather are independently optional - done when API is set and at least
+ * one camera or station exists (or when API is set and both inventories are empty,
+ * Resume lands on cameras so the operator can add or skip).
+ *
  * @param {object} input
  * @returns {WizardStep}
  */
@@ -100,13 +104,12 @@ export function firstIncompleteWizardStep({ config = {}, cameras = [], stations 
     if (!(api.enabled && api.key_set)) {
         return 'api';
     }
-    if (!cameras || cameras.length === 0) {
-        return 'cameras';
+    const hasCameras = Array.isArray(cameras) && cameras.length > 0;
+    const hasStations = Array.isArray(stations) && stations.length > 0;
+    if (hasCameras || hasStations) {
+        return 'done';
     }
-    if (!stations || stations.length === 0) {
-        return 'weather';
-    }
-    return 'done';
+    return 'cameras';
 }
 
 /**

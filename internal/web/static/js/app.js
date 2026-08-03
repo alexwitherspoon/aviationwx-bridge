@@ -445,16 +445,16 @@ function updateStationsDisplay() {
         listEl.innerHTML = stations.map((cfg) => {
             const rt = runtimeById[cfg.id] || {};
             const lanOk = Boolean(rt.lan_ok);
-            let lanLabel = 'LAN down';
+            let lanLabel = 'Offline';
             let lanClass = 'error';
             if (cfg.txid == null || cfg.txid === '') {
-                lanLabel = 'Waiting for txid';
+                lanLabel = 'Needs transmitter';
                 lanClass = 'degraded';
             } else if (rt.degraded) {
                 lanLabel = 'Degraded';
                 lanClass = 'degraded';
             } else if (lanOk) {
-                lanLabel = 'LAN OK';
+                lanLabel = 'Online';
                 lanClass = 'active';
             } else if (!rt.last_poll_at) {
                 lanLabel = 'Starting';
@@ -464,17 +464,20 @@ function updateStationsDisplay() {
             const age = ageFn(observed);
             const err = rt.last_poll_error ? `<div class="station-error">${escapeHtml(rt.last_poll_error)}</div>` : '';
             const host = cfg.host ? escapeHtml(cfg.host) : '—';
-            const txidLabel = cfg.txid != null ? `txid ${escapeHtml(String(cfg.txid))}` : 'txid unset';
+            const typeLabel = cfg.type === 'davis_weatherlink_live'
+                ? 'Davis WeatherLink Live'
+                : escapeHtml(cfg.type || 'Station');
+            const txidLabel = cfg.txid != null ? `Transmitter ${escapeHtml(String(cfg.txid))}` : 'No transmitter';
             return `
             <div class="station-card" data-station-id="${escapeHtml(cfg.id)}">
                 <div class="station-card-header">
                     <div>
                         <h3>${escapeHtml(cfg.name || cfg.id)}</h3>
                         <div class="station-card-meta" style="margin-top:0.35rem">
-                            <span>${escapeHtml(cfg.type || '')}</span>
+                            <span>${typeLabel}</span>
                             <span>${host}</span>
                             <span>${txidLabel}</span>
-                            <span>Sample age: ${escapeHtml(age)}</span>
+                            <span>Last reading: ${escapeHtml(age)}</span>
                             ${cfg.enabled === false ? '<span class="status-badge">Paused</span>' : ''}
                         </div>
                     </div>
@@ -491,25 +494,25 @@ function updateStationsDisplay() {
 
     const payloads = status?.weather?.recent_payloads || [];
     if (payloads.length === 0) {
-        logEl.innerHTML = `<div class="empty-state"><p>No payloads yet</p></div>`;
+        logEl.innerHTML = `<div class="empty-state"><p>No observations yet</p></div>`;
         return;
     }
 
     logEl.innerHTML = payloads.map((entry) => {
-        const lan = entry.lan_ok ? 'LAN OK' : 'LAN fail';
+        const lan = entry.lan_ok ? 'Online' : 'Unreachable';
         const lanClass = entry.lan_ok ? 'active' : 'error';
         const age = ageFn(entry.observed_at);
-        const posted = entry.posted === true ? ' · posted' : (entry.posted === false ? ' · post failed' : '');
+        const posted = entry.posted === true ? ' · sent to aviationwx.org' : (entry.posted === false ? ' · send failed' : '');
         const msg = entry.message ? `<div class="station-error">${escapeHtml(entry.message)}</div>` : '';
         const raw = entry.raw != null
             ? `<pre class="station-raw-payload">${escapeHtml(rawFn(entry.raw))}</pre>`
-            : `<div class="form-help">No raw payload</div>`;
+            : `<div class="form-help">No observation data</div>`;
         return `
         <div class="station-payload-entry">
             <div class="station-payload-meta">
                 <span class="status-badge ${lanClass}">${lan}</span>
                 <span class="station-payload-id">${escapeHtml(entry.station_id || '')}</span>
-                <span>age ${escapeHtml(age)}</span>
+                <span>${escapeHtml(age)}</span>
                 <span>${escapeHtml(posted)}</span>
             </div>
             ${msg}
@@ -543,8 +546,8 @@ function getStationFormHtml(st = null) {
                            placeholder="e.g., Scappoose Davis">
                     <p class="form-help">
                         ${isEdit
-        ? `Internal id <code>${escapeHtml(st.id)}</code> is fixed (core enable binds to this id).`
-        : 'A unique station id is generated from this name.'}
+        ? `Station id <code>${escapeHtml(st.id)}</code> is fixed after creation. Share this id with aviationwx.org if they need to enable the station on your airport page.`
+        : 'A unique station id is created from this name.'}
                     </p>
                 </div>
                 <div class="form-group">
@@ -557,8 +560,8 @@ function getStationFormHtml(st = null) {
                     <label for="stHost">Host (IP or hostname)</label>
                     <input type="text" id="stHost" class="form-control" required
                            value="${escapeHtml(st?.host || '')}"
-                           placeholder="192.168.1.50 or [2001:db8::1]">
-                    <p class="form-help">We recommend using a static IP or hostname whenever possible. Enter manually (IPv4, IPv6 with brackets optional, or hostname), or use Discover below after scanning your LAN. Discover scans IPv4 only. Wind direction assumes a true-north vane install.</p>
+                           placeholder="192.168.1.50 or weatherlink.local">
+                    <p class="form-help">Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.</p>
                 </div>
                 <div class="form-group">
                     <label for="stDiscoverSubnet">Discover network (CIDR)</label>
@@ -570,13 +573,13 @@ function getStationFormHtml(st = null) {
                         </div>
                         <button type="button" class="btn" onclick="discoverStations()">Discover</button>
                     </div>
-                    <p class="form-help">Required for HTTP scan (IPv4 /24–/30). The bridge runs in Docker and cannot see your LAN prefix automatically. mDNS is best-effort.</p>
+                    <p class="form-help">Enter your LAN subnet for Discover (IPv4 /24 to /30), for example 192.168.1.0/24. Hostname discovery is best-effort.</p>
                     <div id="stationDiscoverResult" class="camera-test-result" style="margin-top:var(--space-sm)"></div>
                 </div>
                 <div class="form-group">
                     <label for="stPoll">Poll interval (seconds)</label>
                     <input type="number" id="stPoll" class="form-control" min="10" max="3600" required value="${poll}">
-                    <p class="form-help">Davis Local API floor is 10 seconds.</p>
+                    <p class="form-help">How often to read the station. Minimum 10 seconds.</p>
                 </div>
                 <div class="form-group">
                     <label>
@@ -586,13 +589,13 @@ function getStationFormHtml(st = null) {
                 </div>
             </div>
             <div class="form-section">
-                <div class="form-section-title">Transmitter (ISS)</div>
-                <p class="form-help">Run Test poll, then pick the transmitter id. Required for continuous LAN poll and weather POST.</p>
+                <div class="form-section-title">Transmitter</div>
+                <p class="form-help">Run Test poll, then choose which sensor transmitter to use. Required for ongoing readings.</p>
                 <div class="form-group">
-                    <label for="stTxid">Transmitter id (txid)</label>
+                    <label for="stTxid">Transmitter</label>
                     <select id="stTxid" class="form-control">
                         <option value="">— Select after Test poll —</option>
-                        ${txid !== '' ? `<option value="${escapeHtml(txid)}" selected>txid ${escapeHtml(txid)}</option>` : ''}
+                        ${txid !== '' ? `<option value="${escapeHtml(txid)}" selected>Transmitter ${escapeHtml(txid)}</option>` : ''}
                     </select>
                 </div>
                 <div id="stationTestResult" class="camera-test-result"></div>
@@ -859,9 +862,9 @@ async function testStationPoll() {
             iss.forEach((t) => {
                 if (seen.has(t.txid)) return;
                 seen.add(t.txid);
-                const label = `txid ${t.txid}` +
+                const label = `Transmitter ${t.txid}` +
                     (t.temp_f != null ? ` · ${t.temp_f}°F` : '') +
-                    (t.rx_state != null ? ` · rx ${t.rx_state}` : '');
+                    (t.rx_state != null ? ` · signal ${t.rx_state}` : '');
                 options.push(`<option value="${t.txid}">${escapeHtml(label)}</option>`);
             });
             select.innerHTML = options.join('');
@@ -873,10 +876,10 @@ async function testStationPoll() {
         }
         const ageFn = window.formatObservationAge || (() => '');
         const obsNote = result.observed_at
-            ? `observed_at ${result.observed_at} (${ageFn(result.observed_at)})`
-            : 'no station timestamp (POST would be skipped)';
+            ? `station time ${result.observed_at} (${ageFn(result.observed_at)})`
+            : 'no station timestamp (readings will not upload until the station reports time)';
         resultDiv.innerHTML = `
-            <div class="test-result success">✓ Poll OK · ${transmitters.length} transmitter record(s) · ${escapeHtml(obsNote)}</div>
+            <div class="test-result success">✓ Station reachable · ${transmitters.length} transmitter record(s) · ${escapeHtml(obsNote)}</div>
             ${result.provider_meta?.raw
         ? `<pre class="station-raw-payload">${escapeHtml((window.formatRawPayload || ((r) => JSON.stringify(r, null, 2)))(result.provider_meta.raw))}</pre>`
         : ''}`;
@@ -893,7 +896,7 @@ async function saveStation(event, existingId) {
         return;
     }
     if (body.txid == null) {
-        if (!confirm('No transmitter (txid) selected. Save anyway? Continuous poll will wait until you pick one.')) {
+        if (!confirm('No transmitter selected. Save anyway? Ongoing readings will wait until you pick one.')) {
             return;
         }
     }
@@ -2020,8 +2023,8 @@ function loadAPILinkSettings() {
     }
     if (hintEl) {
         hintEl.textContent = api.key_set
-            ? `Key on disk: ${api.key_hint}. Leave the field blank when saving to keep it.`
-            : 'Paste a key from aviationwx.org ops. Leave blank when saving to keep the current key.';
+            ? `Current key: ${api.key_hint}. Leave blank when saving to keep it.`
+            : 'Paste a key from aviationwx.org. Leave blank when saving to keep the current key.';
     }
     if (api.base_url && api.base_url !== 'https://api.aviationwx.org') {
         const details = document.getElementById('apiAdvancedDetails');
@@ -2034,27 +2037,24 @@ function updateAPILinkStatusPanel(apiLink) {
     const panel = document.getElementById('apiLinkStatusPanel');
     if (!panel) return;
     if (!apiLink) {
-        panel.innerHTML = '<p class="form-help">No API link status yet (enable and save a key to start heartbeats).</p>';
+        panel.innerHTML = '<p class="form-help">Enable the link and save an API key to connect.</p>';
         return;
     }
+    const connected = Boolean(apiLink.configured) && String(apiLink.status || '').toLowerCase() === 'operational';
+    const statusLabel = connected ? 'Connected' : (apiLink.status || 'Not connected');
     const rows = [];
-    rows.push(`<div class="info-row"><span>Configured</span><code>${apiLink.configured ? 'yes' : 'no'}</code></div>`);
-    rows.push(`<div class="info-row"><span>Link status</span><code>${apiLink.status || '--'}</code></div>`);
+    rows.push(`<div class="info-row"><span>Status</span><code>${escapeHtml(statusLabel)}</code></div>`);
     if (apiLink.airport_id) {
-        rows.push(`<div class="info-row"><span>Airport</span><code>${apiLink.airport_id}${apiLink.airport_name ? ' - ' + apiLink.airport_name : ''}</code></div>`);
-    }
-    if (apiLink.bridge_id) {
-        rows.push(`<div class="info-row"><span>Bridge ID</span><code>${apiLink.bridge_id}</code></div>`);
-    }
-    if (typeof apiLink.declination_deg === 'number') {
-        const dir = apiLink.declination_deg >= 0 ? 'E' : 'W';
-        rows.push(`<div class="info-row"><span>Declination</span><code>${Math.abs(apiLink.declination_deg).toFixed(1)}°${dir} (east-positive ${apiLink.declination_deg})</code></div>`);
+        const airport = apiLink.airport_name
+            ? `${apiLink.airport_id} - ${apiLink.airport_name}`
+            : String(apiLink.airport_id);
+        rows.push(`<div class="info-row"><span>Airport</span><code>${escapeHtml(airport)}</code></div>`);
     }
     if (apiLink.last_health_ok) {
-        rows.push(`<div class="info-row"><span>Last health OK</span><code>${apiLink.last_health_ok}</code></div>`);
+        rows.push(`<div class="info-row"><span>Last successful check</span><code>${escapeHtml(String(apiLink.last_health_ok))}</code></div>`);
     }
     if (apiLink.last_error) {
-        rows.push(`<div class="info-row"><span>Last error</span><code>${apiLink.last_error}</code></div>`);
+        rows.push(`<div class="info-row"><span>Last error</span><code>${escapeHtml(String(apiLink.last_error))}</code></div>`);
     }
     panel.innerHTML = rows.join('');
 }
@@ -2100,7 +2100,7 @@ async function saveAPILinkSettings() {
 
 async function testAPIBootstrap() {
     const resultDiv = document.getElementById('apiLinkTestResult');
-    if (resultDiv) resultDiv.innerHTML = '<div class="test-result">Testing bootstrap...</div>';
+    if (resultDiv) resultDiv.innerHTML = '<div class="test-result">Testing connection...</div>';
     const key = document.getElementById('apiKey')?.value?.trim() || '';
     const baseUrl = document.getElementById('apiBaseUrl')?.value?.trim() || '';
     try {
@@ -2110,20 +2110,17 @@ async function testAPIBootstrap() {
         });
         if (result.status === 'ok' && result.bootstrap) {
             const b = result.bootstrap;
-            const decl = typeof b.declination_deg === 'number'
-                ? `${b.declination_deg}° (${b.declination_source || 'n/a'})`
-                : '--';
             if (resultDiv) {
-                resultDiv.innerHTML = `<div class="test-result success">Bootstrap OK: ${b.airport_id || '?'} / ${b.bridge_id || '?'} - declination ${decl}</div>`;
+                resultDiv.innerHTML = `<div class="test-result success">Connected: ${escapeHtml(b.airport_id || '?')}${b.airport_name ? ' (' + escapeHtml(b.airport_name) + ')' : ''}</div>`;
             }
         } else {
             if (resultDiv) {
-                resultDiv.innerHTML = `<div class="test-result error">${result.error || 'Bootstrap failed'}</div>`;
+                resultDiv.innerHTML = `<div class="test-result error">${escapeHtml(result.error || 'Connection failed')}</div>`;
             }
         }
     } catch (err) {
         if (resultDiv) {
-            resultDiv.innerHTML = `<div class="test-result error">${err.message}</div>`;
+            resultDiv.innerHTML = `<div class="test-result error">${escapeHtml(err.message || String(err))}</div>`;
         }
     }
 }
@@ -2138,17 +2135,19 @@ async function testAPIHealth() {
         });
         if (result.status === 'ok' && result.result) {
             const r = result.result;
+            const st = escapeHtml(r.link_status || 'operational');
+            const airport = escapeHtml(r.airport_id || '?');
             if (resultDiv) {
-                resultDiv.innerHTML = `<div class="test-result success">Link OK: ${r.airport_id || '?'} / ${r.bridge_id || '?'} (${r.link_status || 'operational'})</div>`;
+                resultDiv.innerHTML = `<div class="test-result success">Health check OK: ${airport} (${st})</div>`;
             }
         } else {
             if (resultDiv) {
-                resultDiv.innerHTML = `<div class="test-result error">${result.error || 'Link test failed'}</div>`;
+                resultDiv.innerHTML = `<div class="test-result error">${escapeHtml(result.error || 'Link test failed')}</div>`;
             }
         }
     } catch (err) {
         if (resultDiv) {
-            resultDiv.innerHTML = `<div class="test-result error">${err.message}</div>`;
+            resultDiv.innerHTML = `<div class="test-result error">${escapeHtml(err.message || String(err))}</div>`;
         }
     }
 }
@@ -2352,7 +2351,6 @@ async function saveGlobalSettings() {
 // Setup Wizard + incomplete-config banners
 const SETUP_DISMISSED_KEY = 'aviationwx_setup_dismissed';
 let wizardStep = 'timezone';
-let wizardResume = false;
 
 function setupDismissed() {
     try {
@@ -2436,10 +2434,9 @@ function wizardGoCameras() {
 }
 
 function showSetupWizard(resume = false) {
-    wizardResume = Boolean(resume);
     setSetupDismissed(false);
     updateSetupBanner();
-    if (wizardResume && typeof window.firstIncompleteWizardStep === 'function') {
+    if (resume && typeof window.firstIncompleteWizardStep === 'function') {
         const next = window.firstIncompleteWizardStep({ config, cameras, stations });
         wizardStep = (next === 'api' || next === 'cameras' || next === 'weather' || next === 'done')
             ? next
@@ -2475,7 +2472,7 @@ function renderWizardTimezone() {
     const current = document.getElementById('timezone')?.value || status?.timezone || 'America/Los_Angeles';
     showModal('Setup - Timezone', `
         <div class="form-section">
-            <p class="form-help" style="margin-bottom:var(--space-md)">Step 1 of 4. Timezone is required for camera timestamps. Later steps are optional.</p>
+            <p class="form-help" style="margin-bottom:var(--space-md)">Step 1 of 4. Set the timezone for your cameras and stations. Later steps are optional.</p>
             <div class="form-group">
                 <label for="wizardTimezone">Where are your cameras / stations located?</label>
                 <select id="wizardTimezone" class="form-control">
@@ -2510,15 +2507,15 @@ async function wizardSaveTimezone() {
 
 function renderWizardAPI() {
     const hint = config?.api?.key_set
-        ? `Key on disk: ${config.api.key_hint || 'awxb_...'}. Leave blank to keep it.`
-        : 'Paste a key from aviationwx.org ops (awxb_ + 48 characters). Skip if waiting on ops.';
+        ? `Current key: ${config.api.key_hint || 'awxb_...'}. Leave blank to keep it.`
+        : 'Paste a key from aviationwx.org (awxb_ + 48 characters). Skip if you do not have a key yet.';
     showModal('Setup - AviationWX Link', `
         <div class="form-section">
-            <p class="form-help" style="margin-bottom:var(--space-md)">Step 2 of 4 (skippable). Optional HTTPS link for fleet health and weather push. Cameras and SFTP work without a key.</p>
+            <p class="form-help" style="margin-bottom:var(--space-md)">Step 2 of 4 (optional). Connect this bridge to aviationwx.org for health checks and weather uploads. Cameras and image uploads work without a key.</p>
             <div class="form-group">
                 <label>
                     <input type="checkbox" id="wizardApiEnabled" ${config?.api?.enabled ? 'checked' : ''}>
-                    Enable AviationWX API link
+                    Enable AviationWX Link
                 </label>
             </div>
             <div class="form-group">
@@ -2566,16 +2563,25 @@ async function wizardConfirmAPI() {
         apiLinkDirty = false;
         await loadConfig();
         await refreshStatus();
+        if (!enabled) {
+            wizardStep = 'cameras';
+            renderWizardStep();
+            return;
+        }
         const boot = await api('/test/api-bootstrap', {
             method: 'POST',
             body: JSON.stringify({ key: key || undefined, base_url: config?.api?.base_url || '' }),
         });
-        const b = boot.result || boot;
+        const b = boot.bootstrap;
+        if (!b) {
+            if (resultDiv) {
+                resultDiv.innerHTML = `<div class="test-result error">${escapeHtml(boot.error || 'Connection failed')}</div>`;
+            }
+            return;
+        }
         if (resultDiv) {
-            const decl = typeof b.declination_deg === 'number'
-                ? `${b.declination_deg}° (${b.declination_source || 'n/a'})`
-                : 'n/a';
-            resultDiv.innerHTML = `<div class="test-result success">Bootstrap OK: ${escapeHtml(b.airport_id || '?')} / ${escapeHtml(b.bridge_id || '?')} - declination ${escapeHtml(String(decl))} (display only; wind is true north)</div>`;
+            const name = b.airport_name ? ` (${escapeHtml(b.airport_name)})` : '';
+            resultDiv.innerHTML = `<div class="test-result success">Connected: ${escapeHtml(b.airport_id || '?')}${name}</div>`;
         }
         setTimeout(() => {
             wizardStep = 'cameras';
@@ -2591,7 +2597,7 @@ async function wizardConfirmAPI() {
 function renderWizardCameras() {
     showModal('Setup - Cameras', `
         <div class="form-section">
-            <p class="form-help" style="margin-bottom:var(--space-md)">Step 3 of 4 (skippable). Add an HTTP/RTSP/ONVIF camera with its own SFTP credentials, or skip for a weather-only site.</p>
+            <p class="form-help" style="margin-bottom:var(--space-md)">Step 3 of 4 (optional). Add a camera with its aviationwx.org upload credentials, or skip for a weather-only site.</p>
             <p class="form-help">Configured cameras: <strong>${cameras.length}</strong></p>
         </div>
         ${wizardFooter('Add camera', 'wizardAddCamera()', {
@@ -2618,7 +2624,7 @@ function wizardAddCamera() {
 function renderWizardWeather() {
     showModal('Setup - Weather', `
         <div class="form-section">
-            <p class="form-help" style="margin-bottom:var(--space-md)">Step 4 of 4 (skippable). Add a Davis WeatherLink Live station (true-north vane install), or skip.</p>
+            <p class="form-help" style="margin-bottom:var(--space-md)">Step 4 of 4 (optional). Add a Davis WeatherLink Live station on your local network, or skip. Point the wind vane true north.</p>
             <p class="form-help">Configured stations: <strong>${stations.length}</strong></p>
         </div>
         ${wizardFooter('Add station', 'wizardAddStation()', {
@@ -2642,8 +2648,8 @@ function wizardFinish() {
     renderConfigBanners();
     showModal('Setup complete', `
         <div class="form-section">
-            <p style="margin-bottom:var(--space-md)">You can resume this flow anytime from Settings → AviationWX Link → Resume setup.</p>
-            <p class="form-help">Wind direction assumes a true-north vane. Dashboard banners will nudge if weather is enabled without an API key.</p>
+            <p style="margin-bottom:var(--space-md)">You can run this setup again anytime from Settings → AviationWX Link → Resume setup.</p>
+            <p class="form-help">Point the wind vane true north. If you add weather without an API key, the dashboard will remind you to connect AviationWX Link.</p>
         </div>
         <div style="display:flex;justify-content:flex-end;margin-top:var(--space-lg);">
             <button type="button" class="btn btn-primary" onclick="closeModal()">Done</button>

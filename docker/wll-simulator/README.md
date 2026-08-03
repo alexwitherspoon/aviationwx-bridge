@@ -28,7 +28,9 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.weather-dev
    - Confirm (bootstrap). The mock uses a self-signed cert; the compose overlay sets `AVIATIONWX_API_TLS_INSECURE=1` (local only).
 2. **Weather → Add Station**
    - Host: `wll-simulator:8080` (reachable from the bridge container)
-   - Test poll → pick txid → Save / enable
+   - Test poll → pick transmitter → Save / enable
+   - Discover probes **port 80 only** (real WeatherLink Live). The simulator listens on
+     **8080**, so Discover will not find it - enter the host manually as above.
 
 Watch:
 

@@ -11,31 +11,7 @@ const maxCameraIDSlugLen = 64
 // SlugCameraIDFromName derives a filesystem-safe camera id from a display name (lowercase,
 // letters, digits, hyphens only). Empty or invalid input yields "".
 func SlugCameraIDFromName(name string) string {
-	s := strings.TrimSpace(strings.ToLower(name))
-	if s == "" {
-		return ""
-	}
-	var parts []string
-	var cur strings.Builder
-	flush := func() {
-		if cur.Len() > 0 {
-			parts = append(parts, cur.String())
-			cur.Reset()
-		}
-	}
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			cur.WriteRune(r)
-		} else {
-			flush()
-		}
-	}
-	flush()
-	out := strings.Join(parts, "-")
-	if len(out) > maxCameraIDSlugLen {
-		out = strings.TrimRight(out[:maxCameraIDSlugLen], "-")
-	}
-	return out
+	return slugIDFromName(name, maxCameraIDSlugLen)
 }
 
 // ValidateCameraID reports whether id is safe for use in camera config filenames.

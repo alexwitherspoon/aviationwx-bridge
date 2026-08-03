@@ -19,10 +19,11 @@ import (
 // Storage layout:
 //
 //	baseDir/
-//	  global.json       - Bridge-wide settings (timezone, web console, etc.)
+//	  global.json       - Bridge-wide settings (timezone, web console, api, etc.)
 //	  cameras/
 //	    cam1.json       - Individual camera configs
-//	    cam2.json
+//	  stations/
+//	    station1.json   - Individual weather station configs
 //
 // Design principles:
 //   - Single source of truth (Service owns all config)
@@ -34,8 +35,9 @@ type Service struct {
 	mu      sync.RWMutex
 
 	// In-memory cache (immutable snapshots)
-	global  *GlobalSettings
-	cameras map[string]*Camera // Key: camera ID
+	global   *GlobalSettings
+	cameras  map[string]*Camera  // Key: camera ID
+	stations map[string]*Station // Key: station ID
 
 	// Event listeners (called asynchronously)
 	listeners []func(event ConfigEvent)
@@ -54,12 +56,14 @@ type GlobalSettings struct {
 	Queue                 *QueueGlobal `json:"queue,omitempty"`                   // Queue settings
 	SNTP                  *SNTP        `json:"sntp,omitempty"`                    // Time sync settings
 	WebConsole            *WebConsole  `json:"web_console,omitempty"`             // Web console settings
+	API                   *APISettings `json:"api,omitempty"`                     // Optional HTTPS link to api.aviationwx.org
 }
 
 // ConfigEvent represents a configuration change
 type ConfigEvent struct {
-	Type     string // "camera_added", "camera_updated", "camera_deleted", "global_updated"
-	CameraID string // Empty for global events
+	Type      string // "camera_*", "station_*", "global_updated"
+	CameraID  string // Set for camera events
+	StationID string // Set for station events
 }
 
 // NewService creates a config service
@@ -67,12 +71,16 @@ func NewService(baseDir string) (*Service, error) {
 	s := &Service{
 		baseDir:   baseDir,
 		cameras:   make(map[string]*Camera),
+		stations:  make(map[string]*Station),
 		listeners: []func(ConfigEvent){},
 	}
 
 	// Ensure directories exist
 	if err := os.MkdirAll(filepath.Join(baseDir, "cameras"), 0755); err != nil {
 		return nil, fmt.Errorf("create config directories: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(baseDir, "stations"), 0755); err != nil {
+		return nil, fmt.Errorf("create stations directory: %w", err)
 	}
 
 	// Load existing config
@@ -158,6 +166,9 @@ func (s *Service) UpdateGlobal(fn func(*GlobalSettings) error) error {
 
 	// Let caller modify the copy
 	if err := fn(&updated); err != nil {
+		return err
+	}
+	if err := ValidateAPISettings(updated.API); err != nil {
 		return err
 	}
 
@@ -428,6 +439,10 @@ func (s *Service) reload() error {
 		}
 
 		s.cameras[cam.ID] = &cam
+	}
+
+	if err := s.loadStationsLocked(); err != nil {
+		return err
 	}
 
 	return nil

@@ -54,12 +54,25 @@ test('shouldWarnBeforePageLeave is true when camera form is dirty', () => {
     );
 });
 
-test('shouldWarnBeforePageLeave is true when any settings flag is dirty', () => {
+test('shouldSkipSettingsHydrate is true when api link is dirty', () => {
     assert.equal(
-        shouldWarnBeforePageLeave({
-            timezoneDirty: true,
+        shouldSkipSettingsHydrate({
+            timezoneDirty: false,
             webConsoleDirty: false,
             uploadSettingsDirty: false,
+            apiLinkDirty: true,
+        }),
+        true
+    );
+});
+
+test('shouldWarnBeforePageLeave is true when api link is dirty', () => {
+    assert.equal(
+        shouldWarnBeforePageLeave({
+            timezoneDirty: false,
+            webConsoleDirty: false,
+            uploadSettingsDirty: false,
+            apiLinkDirty: true,
             cameraFormDirty: false,
         }),
         true

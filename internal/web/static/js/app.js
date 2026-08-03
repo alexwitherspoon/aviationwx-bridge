@@ -8,28 +8,32 @@ let config = null;
 let status = null;
 let previousCameraIds = null;
 let cameras = [];
+let stations = [];
 let timeUpdateInterval = null;
 /** Unsaved local edits — skip syncing those form sections from the server until Save. */
 let timezoneDirty = false;
 let webConsoleDirty = false;
 let uploadSettingsDirty = false;
+let apiLinkDirty = false;
 /** Camera add/edit modal: user changed a field since the form was shown. */
 let cameraFormDirty = false;
+/** Aborts an in-flight Discover SSE when Discover is clicked again. */
+let discoverAbort = null;
 
 function shouldSkipHydratingSettingsForms() {
     const fn = window.shouldSkipSettingsHydrate;
     if (typeof fn === 'function') {
-        return fn({ timezoneDirty, webConsoleDirty, uploadSettingsDirty });
+        return fn({ timezoneDirty, webConsoleDirty, uploadSettingsDirty, apiLinkDirty });
     }
-    return timezoneDirty || webConsoleDirty || uploadSettingsDirty;
+    return timezoneDirty || webConsoleDirty || uploadSettingsDirty || apiLinkDirty;
 }
 
 function shouldWarnBeforeUnload() {
     const fn = window.shouldWarnBeforePageLeave;
     if (typeof fn === 'function') {
-        return fn({ timezoneDirty, webConsoleDirty, uploadSettingsDirty, cameraFormDirty });
+        return fn({ timezoneDirty, webConsoleDirty, uploadSettingsDirty, apiLinkDirty, cameraFormDirty });
     }
-    return timezoneDirty || webConsoleDirty || uploadSettingsDirty || cameraFormDirty;
+    return timezoneDirty || webConsoleDirty || uploadSettingsDirty || apiLinkDirty || cameraFormDirty;
 }
 
 // Timezone list (IANA timezones for US and common international)
@@ -114,6 +118,68 @@ async function fetchWithAuth(url, options = {}, retried = false) {
     return response;
 }
 
+/** Object URLs for camera preview <img> tags (Authorization cannot be sent on img src). */
+const previewBlobURLs = new Map();
+
+function revokePreviewBlob(cameraId) {
+    const old = previewBlobURLs.get(cameraId);
+    if (old) {
+        URL.revokeObjectURL(old);
+        previewBlobURLs.delete(cameraId);
+    }
+}
+
+function applyPreviewBlob(cameraId, objectURL) {
+    revokePreviewBlob(cameraId);
+    previewBlobURLs.set(cameraId, objectURL);
+    document.querySelectorAll(`.camera-preview-img[data-camera-id="${cameraId}"]`).forEach((img) => {
+        img.src = objectURL;
+        img.style.display = '';
+        const placeholder = img.nextElementSibling;
+        if (placeholder) {
+            placeholder.style.display = 'none';
+        }
+    });
+}
+
+function showPreviewUnavailable(cameraId) {
+    document.querySelectorAll(`.camera-preview-img[data-camera-id="${cameraId}"]`).forEach((img) => {
+        img.removeAttribute('src');
+        img.style.display = 'none';
+        const placeholder = img.nextElementSibling;
+        if (placeholder) {
+            placeholder.style.display = 'flex';
+        }
+    });
+}
+
+/** Load preview via authenticated fetch so the browser never prompts Basic Auth for <img>. */
+async function loadAuthenticatedPreview(cameraId) {
+    try {
+        const response = await fetchWithAuth(`/api/cameras/${cameraId}/preview?t=${Date.now()}`);
+        if (!response.ok) {
+            showPreviewUnavailable(cameraId);
+            return;
+        }
+        const blob = await response.blob();
+        applyPreviewBlob(cameraId, URL.createObjectURL(blob));
+    } catch (err) {
+        console.log(`Failed to load preview for ${cameraId}:`, err);
+        showPreviewUnavailable(cameraId);
+    }
+}
+
+function hydratePreviewImages() {
+    const cameraIds = new Set();
+    document.querySelectorAll('.camera-preview-img[data-camera-id]').forEach((img) => {
+        const id = img.dataset.cameraId;
+        if (id) cameraIds.add(id);
+    });
+    cameraIds.forEach((cameraId) => {
+        loadAuthenticatedPreview(cameraId);
+    });
+}
+
 // Initialize application
 document.addEventListener('DOMContentLoaded', async () => {
     setupNavigation();
@@ -122,6 +188,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await refreshStatus();
     await loadConfig();
     await loadCameras();
+    await loadStations();
     startTimeUpdates();
     startAutoRefresh(); // Auto-refresh dashboard every second
     startLiveLogs();    // Start live log streaming
@@ -174,7 +241,12 @@ function showSection(sectionId) {
     // Load section-specific data
     if (sectionId === 'settings') {
         loadGlobalSettings();
+        loadAPILinkSettings();
         loadUploadSshKeys();
+    }
+    if (sectionId === 'weather') {
+        loadStations();
+        updateStationsDisplay();
     }
     
     // Update URL
@@ -194,6 +266,16 @@ async function api(endpoint, options = {}) {
 
     if (!response.ok) {
         const error = await response.text();
+        try {
+            const parsed = JSON.parse(error);
+            if (parsed && parsed.error) {
+                throw new Error(parsed.error);
+            }
+        } catch (e) {
+            if (e instanceof Error && e.message && !e.message.startsWith('{') && e.message !== error) {
+                throw e;
+            }
+        }
         throw new Error(error || `HTTP ${response.status}`);
     }
 
@@ -224,11 +306,13 @@ async function refreshStatus() {
 async function loadConfig() {
     try {
         config = await api('/config');
-        if (shouldSkipHydratingSettingsForms()) {
+        // Hydrate sections independently so one dirty form does not block others.
+        if (!timezoneDirty && !webConsoleDirty && !uploadSettingsDirty) {
+            loadGlobalSettings();
+        } else {
             updateSettingsUnsavedHints();
-            return;
         }
-        loadGlobalSettings();
+        loadAPILinkSettings();
     } catch (err) {
         console.error('Failed to load config:', err);
     }
@@ -250,6 +334,15 @@ async function loadCameras() {
         }
     } catch (err) {
         console.error('Failed to load cameras:', err);
+    }
+}
+
+async function loadStations() {
+    try {
+        stations = await api('/stations');
+        updateStationsDisplay();
+    } catch (err) {
+        console.error('Failed to load stations:', err);
     }
 }
 
@@ -319,6 +412,529 @@ function updateStatusDisplay() {
     
     // Update system resources display
     updateSystemResourcesDisplay(status.system, status.queued_images);
+
+    updateAPILinkStatusPanel(status.api_link);
+    updateStationsDisplay();
+}
+
+function updateStationsDisplay() {
+    const listEl = document.getElementById('stationList');
+    const logEl = document.getElementById('stationPayloadLog');
+    if (!listEl || !logEl) {
+        return;
+    }
+
+    const runtimeById = {};
+    (status?.weather?.stations || []).forEach((st) => {
+        runtimeById[st.id] = st;
+    });
+    const ageFn = window.formatObservationAge || ((iso) => iso || 'never');
+    const rawFn = window.formatRawPayload || ((raw) => (raw == null ? '' : JSON.stringify(raw, null, 2)));
+
+    if (!stations || stations.length === 0) {
+        listEl.innerHTML = `
+            <div class="empty-state">
+                <p>No weather stations configured yet</p>
+                <button class="btn btn-primary" onclick="showAddStation()">Add Station</button>
+            </div>`;
+    } else {
+        listEl.innerHTML = stations.map((cfg) => {
+            const rt = runtimeById[cfg.id] || {};
+            const lanOk = Boolean(rt.lan_ok);
+            let lanLabel = 'LAN down';
+            let lanClass = 'error';
+            if (cfg.txid == null || cfg.txid === '') {
+                lanLabel = 'Waiting for txid';
+                lanClass = 'degraded';
+            } else if (rt.degraded) {
+                lanLabel = 'Degraded';
+                lanClass = 'degraded';
+            } else if (lanOk) {
+                lanLabel = 'LAN OK';
+                lanClass = 'active';
+            } else if (!rt.last_poll_at) {
+                lanLabel = 'Starting';
+                lanClass = 'degraded';
+            }
+            const observed = rt.last_observed_at || '';
+            const age = ageFn(observed);
+            const err = rt.last_poll_error ? `<div class="station-error">${escapeHtml(rt.last_poll_error)}</div>` : '';
+            const host = cfg.host ? escapeHtml(cfg.host) : '—';
+            const txidLabel = cfg.txid != null ? `txid ${escapeHtml(String(cfg.txid))}` : 'txid unset';
+            return `
+            <div class="station-card" data-station-id="${escapeHtml(cfg.id)}">
+                <div class="station-card-header">
+                    <div>
+                        <h3>${escapeHtml(cfg.name || cfg.id)}</h3>
+                        <div class="station-card-meta" style="margin-top:0.35rem">
+                            <span>${escapeHtml(cfg.type || '')}</span>
+                            <span>${host}</span>
+                            <span>${txidLabel}</span>
+                            <span>Sample age: ${escapeHtml(age)}</span>
+                            ${cfg.enabled === false ? '<span class="status-badge">Paused</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="station-card-actions">
+                        <span class="status-badge ${lanClass}">${lanLabel}</span>
+                        <button class="btn btn-sm" onclick="editStation('${escapeHtml(cfg.id)}')">Edit</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteStation('${escapeHtml(cfg.id)}')">Delete</button>
+                    </div>
+                </div>
+                ${err}
+            </div>`;
+        }).join('');
+    }
+
+    const payloads = status?.weather?.recent_payloads || [];
+    if (payloads.length === 0) {
+        logEl.innerHTML = `<div class="empty-state"><p>No payloads yet</p></div>`;
+        return;
+    }
+
+    logEl.innerHTML = payloads.map((entry) => {
+        const lan = entry.lan_ok ? 'LAN OK' : 'LAN fail';
+        const lanClass = entry.lan_ok ? 'active' : 'error';
+        const age = ageFn(entry.observed_at);
+        const posted = entry.posted === true ? ' · posted' : (entry.posted === false ? ' · post failed' : '');
+        const msg = entry.message ? `<div class="station-error">${escapeHtml(entry.message)}</div>` : '';
+        const raw = entry.raw != null
+            ? `<pre class="station-raw-payload">${escapeHtml(rawFn(entry.raw))}</pre>`
+            : `<div class="form-help">No raw payload</div>`;
+        return `
+        <div class="station-payload-entry">
+            <div class="station-payload-meta">
+                <span class="status-badge ${lanClass}">${lan}</span>
+                <span class="station-payload-id">${escapeHtml(entry.station_id || '')}</span>
+                <span>age ${escapeHtml(age)}</span>
+                <span>${escapeHtml(posted)}</span>
+            </div>
+            ${msg}
+            ${raw}
+        </div>`;
+    }).join('');
+}
+
+function showAddStation() {
+    showModal('Add Weather Station', getStationFormHtml());
+}
+
+function editStation(id) {
+    const st = stations.find((s) => s.id === id);
+    if (!st) return;
+    showModal('Edit Weather Station', getStationFormHtml(st));
+}
+
+function getStationFormHtml(st = null) {
+    const isEdit = st !== null;
+    const windRef = st?.wind_reference || 'true';
+    const poll = st?.poll_interval_seconds || 10;
+    const txid = st?.txid != null ? String(st.txid) : '';
+    return `
+        <form id="stationForm" onsubmit="saveStation(event, ${isEdit ? `'${st.id}'` : 'null'})">
+            <div class="form-section">
+                <div class="form-section-title">Station</div>
+                <div class="form-group">
+                    <label for="stName">Display Name</label>
+                    <input type="text" id="stName" class="form-control" required
+                           value="${escapeHtml(st?.name || '')}"
+                           placeholder="e.g., Scappoose Davis">
+                    <p class="form-help">
+                        ${isEdit
+        ? `Internal id <code>${escapeHtml(st.id)}</code> is fixed (core enable binds to this id).`
+        : 'A unique station id is generated from this name.'}
+                    </p>
+                </div>
+                <div class="form-group">
+                    <label for="stType">Type</label>
+                    <select id="stType" class="form-control" required>
+                        <option value="davis_weatherlink_live" selected>Davis WeatherLink Live (LAN)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="stHost">Host (IP or hostname)</label>
+                    <input type="text" id="stHost" class="form-control" required
+                           value="${escapeHtml(st?.host || '')}"
+                           placeholder="192.168.1.50 or [2001:db8::1]">
+                    <p class="form-help">We recommend using a static IP or hostname whenever possible. Enter manually (IPv4, IPv6 with brackets optional, or hostname), or use Discover below after scanning your LAN. Discover scans IPv4 only.</p>
+                </div>
+                <div class="form-group">
+                    <label for="stDiscoverSubnet">Discover network (CIDR)</label>
+                    <div class="form-row" style="align-items:flex-end;gap:var(--space-sm)">
+                        <div style="flex:1">
+                            <input type="text" id="stDiscoverSubnet" class="form-control"
+                                   placeholder="192.168.1.0/24"
+                                   value="${escapeHtml(loadDiscoverSubnet())}">
+                        </div>
+                        <button type="button" class="btn" onclick="discoverStations()">Discover</button>
+                    </div>
+                    <p class="form-help">Required for HTTP scan (IPv4 /24–/30). The bridge runs in Docker and cannot see your LAN prefix automatically. mDNS is best-effort.</p>
+                    <div id="stationDiscoverResult" class="camera-test-result" style="margin-top:var(--space-sm)"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="stPoll">Poll interval (seconds)</label>
+                        <input type="number" id="stPoll" class="form-control" min="10" max="3600" required value="${poll}">
+                        <p class="form-help">Davis Local API floor is 10 seconds.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="stWindRef">Wind reference</label>
+                        <select id="stWindRef" class="form-control">
+                            <option value="true" ${windRef === 'true' ? 'selected' : ''}>True north (default)</option>
+                            <option value="magnetic" ${windRef === 'magnetic' ? 'selected' : ''}>Magnetic</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="stEnabled" ${st?.enabled !== false ? 'checked' : ''}>
+                        Enabled
+                    </label>
+                </div>
+            </div>
+            <div class="form-section">
+                <div class="form-section-title">Transmitter (ISS)</div>
+                <p class="form-help">Run Test poll, then pick the transmitter id. Required for continuous LAN poll and weather POST.</p>
+                <div class="form-group">
+                    <label for="stTxid">Transmitter id (txid)</label>
+                    <select id="stTxid" class="form-control">
+                        <option value="">— Select after Test poll —</option>
+                        ${txid !== '' ? `<option value="${escapeHtml(txid)}" selected>txid ${escapeHtml(txid)}</option>` : ''}
+                    </select>
+                </div>
+                <div id="stationTestResult" class="camera-test-result"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn" onclick="testStationPoll()">Test poll</button>
+                <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    `;
+}
+
+function buildStationConfigFromForm() {
+    const name = document.getElementById('stName')?.value?.trim();
+    const host = document.getElementById('stHost')?.value?.trim();
+    const type = document.getElementById('stType')?.value || 'davis_weatherlink_live';
+    if (!name || !host) return null;
+    const poll = parseInt(document.getElementById('stPoll')?.value, 10) || 10;
+    const txidRaw = document.getElementById('stTxid')?.value;
+    const body = {
+        name,
+        type,
+        host,
+        enabled: document.getElementById('stEnabled')?.checked === true,
+        poll_interval_seconds: poll,
+        wind_reference: document.getElementById('stWindRef')?.value || 'true',
+    };
+    if (txidRaw !== '' && txidRaw != null) {
+        body.txid = parseInt(txidRaw, 10);
+    }
+    return body;
+}
+
+/** Last Discover CIDR for the station form (session only). */
+const DISCOVER_SUBNET_KEY = 'aviationwx_discover_subnet';
+
+function loadDiscoverSubnet() {
+    try {
+        return sessionStorage.getItem(DISCOVER_SUBNET_KEY) || '';
+    } catch {
+        return '';
+    }
+}
+
+function saveDiscoverSubnet(subnet) {
+    try {
+        const v = String(subnet || '').trim();
+        if (v) {
+            sessionStorage.setItem(DISCOVER_SUBNET_KEY, v);
+        }
+    } catch {
+        // ignore quota / private mode
+    }
+}
+
+async function discoverStations() {
+    const resultDiv = document.getElementById('stationDiscoverResult');
+    const hostInput = document.getElementById('stHost');
+    const subnetInput = document.getElementById('stDiscoverSubnet');
+    const type = document.getElementById('stType')?.value || 'davis_weatherlink_live';
+    const subnet = (subnetInput?.value || '').trim();
+    if (!resultDiv) return;
+
+    saveDiscoverSubnet(subnet);
+
+    if (discoverAbort) {
+        discoverAbort.abort();
+    }
+    discoverAbort = new AbortController();
+    const signal = discoverAbort.signal;
+
+    resultDiv.innerHTML = `
+        <div id="stationDiscoverStatus" class="test-result" style="background: var(--color-bg)">Starting discovery...</div>
+        <div id="stationDiscoverProgress" class="discover-progress" hidden>
+            <div class="discover-progress-track">
+                <div id="stationDiscoverProgressFill" class="discover-progress-fill"></div>
+            </div>
+            <span id="stationDiscoverProgressLabel" class="discover-progress-label"></span>
+        </div>
+        <div id="stationDiscoverCandidates"></div>
+        <ul id="stationDiscoverNotes" class="form-help" style="margin-top:var(--space-sm)"></ul>`;
+
+    const statusEl = document.getElementById('stationDiscoverStatus');
+    const progressEl = document.getElementById('stationDiscoverProgress');
+    const progressFill = document.getElementById('stationDiscoverProgressFill');
+    const progressLabel = document.getElementById('stationDiscoverProgressLabel');
+    const candEl = document.getElementById('stationDiscoverCandidates');
+    const notesEl = document.getElementById('stationDiscoverNotes');
+    const consume = window.consumeSSEBuffer || ((buf) => ({ events: [], rest: buf }));
+    const hostValue = window.discoverHostValue || ((c) => (c?.port && c.port !== 80 ? `${c.host}:${c.port}` : (c?.host || '')));
+
+    let candidateCount = 0;
+    let autoFilled = false;
+    let probeTotal = 0;
+
+    const updateProgress = (done, total) => {
+        if (!progressEl || !progressFill || !progressLabel || !total || total < 1) {
+            return;
+        }
+        probeTotal = total;
+        const safeDone = Math.max(0, Math.min(done, total));
+        const pct = Math.round((safeDone / total) * 100);
+        progressEl.hidden = false;
+        progressFill.style.width = `${pct}%`;
+        progressLabel.textContent = `${safeDone} / ${total} hosts (${pct}%)`;
+    };
+
+    const appendCandidate = (c) => {
+        if (!c || !candEl) return;
+        candidateCount += 1;
+        const hostVal = hostValue(c);
+        const ipNote = c.ip && c.ip !== c.host ? ` · ${c.ip}` : '';
+        const label =
+            (c.name ? c.name + ' · ' : '') + hostVal + ipNote +
+            (c.did ? ' · ' + c.did : '') + ' (' + (c.method || '?') + ')';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-sm';
+        btn.style.margin = '0.25rem 0.25rem 0 0';
+        btn.textContent = `Use ${label}`;
+        btn.addEventListener('click', () => {
+            if (hostInput) {
+                hostInput.value = hostVal;
+            }
+            btn.classList.add('btn-primary');
+        });
+        candEl.appendChild(btn);
+
+        if (!autoFilled && candidateCount === 1 && hostInput && !hostInput.value.trim()) {
+            hostInput.value = hostVal;
+            autoFilled = true;
+        }
+    };
+
+    const handleEvent = (ev) => {
+        if (!ev || !ev.type) return;
+        switch (ev.type) {
+            case 'phase':
+                if (statusEl) {
+                    statusEl.className = 'test-result';
+                    statusEl.style.background = 'var(--color-bg)';
+                    statusEl.textContent = ev.message || ev.phase || 'Searching...';
+                }
+                if (ev.phase !== 'http_probe' && progressEl && !probeTotal) {
+                    progressEl.hidden = true;
+                }
+                break;
+            case 'progress':
+                updateProgress(ev.done || 0, ev.total || 0);
+                break;
+            case 'note':
+                if (notesEl && ev.message) {
+                    const li = document.createElement('li');
+                    li.textContent = ev.message;
+                    notesEl.appendChild(li);
+                }
+                break;
+            case 'candidate':
+                appendCandidate(ev.candidate);
+                if (statusEl && probeTotal === 0) {
+                    statusEl.className = 'test-result success';
+                    statusEl.textContent = `Found ${candidateCount} candidate(s) so far...`;
+                }
+                break;
+            case 'done':
+                if (probeTotal > 0) {
+                    updateProgress(probeTotal, probeTotal);
+                }
+                if (statusEl) {
+                    if (candidateCount === 0) {
+                        statusEl.className = 'test-result error';
+                        statusEl.textContent = 'No stations found';
+                    } else {
+                        statusEl.className = 'test-result success';
+                        statusEl.textContent = `Found ${candidateCount} candidate(s)`;
+                    }
+                }
+                break;
+            case 'error':
+                if (statusEl) {
+                    statusEl.className = 'test-result error';
+                    statusEl.textContent = ev.message || 'Discover failed';
+                }
+                break;
+            default:
+                break;
+        }
+    };
+
+    try {
+        const response = await fetchWithAuth('/api/test/station-discover', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'text/event-stream',
+            },
+            body: JSON.stringify({ type, subnet }),
+            signal,
+        });
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error || `HTTP ${response.status}`);
+        }
+        if (!response.body || !response.body.getReader) {
+            throw new Error('Streaming response unsupported');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+                break;
+            }
+            buffer += decoder.decode(value, { stream: true });
+            const parsed = consume(buffer);
+            buffer = parsed.rest;
+            for (const ev of parsed.events || []) {
+                handleEvent(ev);
+            }
+        }
+        if (buffer.trim()) {
+            const parsed = consume(buffer + '\n\n');
+            for (const ev of parsed.events || []) {
+                handleEvent(ev);
+            }
+        }
+    } catch (err) {
+        if (err && err.name === 'AbortError') {
+            return;
+        }
+        if (statusEl) {
+            statusEl.className = 'test-result error';
+            statusEl.textContent = err.message || String(err);
+        } else {
+            resultDiv.innerHTML = `<div class="test-result error">${escapeHtml(err.message || String(err))}</div>`;
+        }
+    }
+}
+
+async function testStationPoll() {
+    const resultDiv = document.getElementById('stationTestResult');
+    if (!resultDiv) return;
+    const body = buildStationConfigFromForm();
+    if (!body) {
+        resultDiv.innerHTML = '<div class="test-result error">✗ Name and host are required</div>';
+        return;
+    }
+    resultDiv.innerHTML = '<div class="test-result" style="background: var(--color-bg)">Polling LAN station...</div>';
+    try {
+        const resp = await api('/test/station-poll', {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+        const result = resp.result || resp;
+        const transmitters = result.transmitters || [];
+        const select = document.getElementById('stTxid');
+        const prev = select?.value || '';
+        if (select) {
+            const iss = transmitters.filter((t) => t.data_structure_type === 1 || t.txid);
+            const seen = new Set();
+            const options = ['<option value="">— Select transmitter —</option>'];
+            iss.forEach((t) => {
+                if (seen.has(t.txid)) return;
+                seen.add(t.txid);
+                const label = `txid ${t.txid}` +
+                    (t.temp_f != null ? ` · ${t.temp_f}°F` : '') +
+                    (t.rx_state != null ? ` · rx ${t.rx_state}` : '');
+                options.push(`<option value="${t.txid}">${escapeHtml(label)}</option>`);
+            });
+            select.innerHTML = options.join('');
+            if (prev && seen.has(Number(prev))) {
+                select.value = prev;
+            } else if (seen.size === 1) {
+                select.value = String([...seen][0]);
+            }
+        }
+        const ageFn = window.formatObservationAge || (() => '');
+        const obsNote = result.observed_at
+            ? `observed_at ${result.observed_at} (${ageFn(result.observed_at)})`
+            : 'no station timestamp (POST would be skipped)';
+        resultDiv.innerHTML = `
+            <div class="test-result success">✓ Poll OK · ${transmitters.length} transmitter record(s) · ${escapeHtml(obsNote)}</div>
+            ${result.provider_meta?.raw
+        ? `<pre class="station-raw-payload">${escapeHtml((window.formatRawPayload || ((r) => JSON.stringify(r, null, 2)))(result.provider_meta.raw))}</pre>`
+        : ''}`;
+    } catch (err) {
+        resultDiv.innerHTML = `<div class="test-result error">✗ ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+async function saveStation(event, existingId) {
+    event.preventDefault();
+    const body = buildStationConfigFromForm();
+    if (!body) {
+        alert('Name and host are required');
+        return;
+    }
+    if (body.txid == null) {
+        if (!confirm('No transmitter (txid) selected. Save anyway? Continuous poll will wait until you pick one.')) {
+            return;
+        }
+    }
+    try {
+        if (existingId && existingId !== 'null') {
+            await api(`/stations/${existingId}`, {
+                method: 'PUT',
+                body: JSON.stringify(body),
+            });
+        } else {
+            await api('/stations', {
+                method: 'POST',
+                body: JSON.stringify(body),
+            });
+        }
+        closeModal();
+        await loadStations();
+        await refreshStatus();
+    } catch (err) {
+        alert('Failed to save station: ' + err.message);
+    }
+}
+
+async function deleteStation(id) {
+    if (!confirm('Delete this weather station?')) {
+        return;
+    }
+    try {
+        await api(`/stations/${id}`, { method: 'DELETE' });
+        await loadStations();
+        await refreshStatus();
+    } catch (err) {
+        alert('Failed to delete station: ' + err.message);
+    }
 }
 
 // System resources display
@@ -415,12 +1031,11 @@ function updateCameraOverview() {
         return `
         <div class="camera-overview-item" data-camera-id="${cam.id}">
             <div class="camera-preview">
-                <img src="/api/cameras/${cam.id}/preview" 
-                     alt="${escapeHtml(cam.name)}"
+                <img alt="${escapeHtml(cam.name)}"
                      class="camera-preview-img"
                      data-camera-id="${cam.id}"
-                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
-                <span style="display:none">No Preview</span>
+                     style="display:none">
+                <span style="display:flex">No Preview</span>
             </div>
             <div class="camera-info">
                 <div class="camera-name">${escapeHtml(cam.name)}</div>
@@ -435,6 +1050,7 @@ function updateCameraOverview() {
         </div>
     `}).join('');
     
+    hydratePreviewImages();
     startSmoothImageRefresh();
     initLastDisplayedCaptureTimes();
 }
@@ -520,17 +1136,18 @@ function updateCameraList() {
             </div>
             <div class="camera-card-body">
                 <div class="camera-card-preview">
-                    <img src="/api/cameras/${cam.id}/preview" 
-                         alt="${escapeHtml(cam.name)}"
+                    <img alt="${escapeHtml(cam.name)}"
                          class="camera-preview-img"
                          data-camera-id="${cam.id}"
-                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
-                    <span style="display:none">Preview not available</span>
+                         style="display:none">
+                    <span style="display:flex">Preview not available</span>
                 </div>
                 <div class="camera-card-details" data-camera-id="${cam.id}">${detailsHtml}</div>
             </div>
         </div>
     `}).join('');
+    hydratePreviewImages();
+    startSmoothImageRefresh();
 }
 
 function buildCameraCardDetails(cam) {
@@ -743,6 +1360,7 @@ function updateSettingsUnsavedHints() {
     set('timezoneUnsavedHint', timezoneDirty);
     set('webConsoleUnsavedHint', webConsoleDirty);
     set('uploadSettingsUnsavedHint', uploadSettingsDirty);
+    set('apiLinkUnsavedHint', apiLinkDirty);
 }
 
 function markTimezoneDirty() {
@@ -757,6 +1375,11 @@ function markWebConsoleDirty() {
 
 function markUploadSettingsDirty() {
     uploadSettingsDirty = true;
+    updateSettingsUnsavedHints();
+}
+
+function markAPILinkDirty() {
+    apiLinkDirty = true;
     updateSettingsUnsavedHints();
 }
 
@@ -1335,7 +1958,7 @@ async function saveWebSettings() {
 // Global Settings (concurrent uploads, update channel, timeouts)
 async function loadGlobalSettings() {
     if (!config) return;
-    if (shouldSkipHydratingSettingsForms()) {
+    if (timezoneDirty || webConsoleDirty || uploadSettingsDirty) {
         updateSettingsUnsavedHints();
         return;
     }
@@ -1379,6 +2002,162 @@ async function loadGlobalSettings() {
     }
 
     updateSettingsUnsavedHints();
+}
+
+function loadAPILinkSettings() {
+    if (!config) return;
+    if (apiLinkDirty) {
+        updateSettingsUnsavedHints();
+        return;
+    }
+    const api = config.api || {};
+    const enabledEl = document.getElementById('apiEnabled');
+    const keyEl = document.getElementById('apiKey');
+    const baseEl = document.getElementById('apiBaseUrl');
+    const hintEl = document.getElementById('apiKeyHint');
+    if (enabledEl) enabledEl.checked = Boolean(api.enabled);
+    if (keyEl) {
+        keyEl.value = '';
+        keyEl.placeholder = api.key_set
+            ? `Current: ${api.key_hint || 'awxb_...'} (leave blank to keep)`
+            : 'Paste awxb_... key';
+    }
+    if (baseEl) {
+        baseEl.value = api.base_url || '';
+    }
+    if (hintEl) {
+        hintEl.textContent = api.key_set
+            ? `Key on disk: ${api.key_hint}. Leave the field blank when saving to keep it.`
+            : 'Paste a key from aviationwx.org ops. Leave blank when saving to keep the current key.';
+    }
+    if (api.base_url && api.base_url !== 'https://api.aviationwx.org') {
+        const details = document.getElementById('apiAdvancedDetails');
+        if (details) details.open = true;
+    }
+    updateSettingsUnsavedHints();
+}
+
+function updateAPILinkStatusPanel(apiLink) {
+    const panel = document.getElementById('apiLinkStatusPanel');
+    if (!panel) return;
+    if (!apiLink) {
+        panel.innerHTML = '<p class="form-help">No API link status yet (enable and save a key to start heartbeats).</p>';
+        return;
+    }
+    const rows = [];
+    rows.push(`<div class="info-row"><span>Configured</span><code>${apiLink.configured ? 'yes' : 'no'}</code></div>`);
+    rows.push(`<div class="info-row"><span>Link status</span><code>${apiLink.status || '--'}</code></div>`);
+    if (apiLink.airport_id) {
+        rows.push(`<div class="info-row"><span>Airport</span><code>${apiLink.airport_id}${apiLink.airport_name ? ' - ' + apiLink.airport_name : ''}</code></div>`);
+    }
+    if (apiLink.bridge_id) {
+        rows.push(`<div class="info-row"><span>Bridge ID</span><code>${apiLink.bridge_id}</code></div>`);
+    }
+    if (typeof apiLink.declination_deg === 'number') {
+        const dir = apiLink.declination_deg >= 0 ? 'E' : 'W';
+        rows.push(`<div class="info-row"><span>Declination</span><code>${Math.abs(apiLink.declination_deg).toFixed(1)}°${dir} (east-positive ${apiLink.declination_deg})</code></div>`);
+    }
+    if (apiLink.last_health_ok) {
+        rows.push(`<div class="info-row"><span>Last health OK</span><code>${apiLink.last_health_ok}</code></div>`);
+    }
+    if (apiLink.last_error) {
+        rows.push(`<div class="info-row"><span>Last error</span><code>${apiLink.last_error}</code></div>`);
+    }
+    panel.innerHTML = rows.join('');
+}
+
+async function saveAPILinkSettings() {
+    const enabled = document.getElementById('apiEnabled')?.checked === true;
+    const key = document.getElementById('apiKey')?.value?.trim() || '';
+    const baseUrl = document.getElementById('apiBaseUrl')?.value?.trim() || '';
+    if (enabled && key && key.length > 0) {
+        // Client-side shape check mirrors core (awxb_ + 48 alnum)
+        if (!/^awxb_[A-Za-z0-9]{48}$/.test(key)) {
+            alert('API key must be awxb_ followed by exactly 48 letters or digits.');
+            return;
+        }
+    }
+    if (enabled && !key && !(config && config.api && config.api.key_set)) {
+        alert('Paste an API key before enabling the link, or disable the link.');
+        return;
+    }
+    try {
+        const body = {
+            api: {
+                enabled,
+                base_url: baseUrl,
+            },
+        };
+        if (key) {
+            body.api.key = key;
+        }
+        await api('/config', {
+            method: 'PUT',
+            body: JSON.stringify(body),
+        });
+        apiLinkDirty = false;
+        document.getElementById('apiKey').value = '';
+        showNotification('AviationWX link settings saved.', 'success');
+        await loadConfig();
+        loadAPILinkSettings();
+    } catch (err) {
+        alert('Failed to save API link: ' + err.message);
+    }
+}
+
+async function testAPIBootstrap() {
+    const resultDiv = document.getElementById('apiLinkTestResult');
+    if (resultDiv) resultDiv.innerHTML = '<div class="test-result">Testing bootstrap...</div>';
+    const key = document.getElementById('apiKey')?.value?.trim() || '';
+    const baseUrl = document.getElementById('apiBaseUrl')?.value?.trim() || '';
+    try {
+        const result = await api('/test/api-bootstrap', {
+            method: 'POST',
+            body: JSON.stringify({ key, base_url: baseUrl }),
+        });
+        if (result.status === 'ok' && result.bootstrap) {
+            const b = result.bootstrap;
+            const decl = typeof b.declination_deg === 'number'
+                ? `${b.declination_deg}° (${b.declination_source || 'n/a'})`
+                : '--';
+            if (resultDiv) {
+                resultDiv.innerHTML = `<div class="test-result success">Bootstrap OK: ${b.airport_id || '?'} / ${b.bridge_id || '?'} - declination ${decl}</div>`;
+            }
+        } else {
+            if (resultDiv) {
+                resultDiv.innerHTML = `<div class="test-result error">${result.error || 'Bootstrap failed'}</div>`;
+            }
+        }
+    } catch (err) {
+        if (resultDiv) {
+            resultDiv.innerHTML = `<div class="test-result error">${err.message}</div>`;
+        }
+    }
+}
+
+async function testAPIHealth() {
+    const resultDiv = document.getElementById('apiLinkTestResult');
+    if (resultDiv) resultDiv.innerHTML = '<div class="test-result">Testing link...</div>';
+    try {
+        const result = await api('/test/api-health', {
+            method: 'POST',
+            body: JSON.stringify({}),
+        });
+        if (result.status === 'ok' && result.result) {
+            const r = result.result;
+            if (resultDiv) {
+                resultDiv.innerHTML = `<div class="test-result success">Link OK: ${r.airport_id || '?'} / ${r.bridge_id || '?'} (${r.link_status || 'operational'})</div>`;
+            }
+        } else {
+            if (resultDiv) {
+                resultDiv.innerHTML = `<div class="test-result error">${result.error || 'Link test failed'}</div>`;
+            }
+        }
+    } catch (err) {
+        if (resultDiv) {
+            resultDiv.innerHTML = `<div class="test-result error">${err.message}</div>`;
+        }
+    }
 }
 
 function uploadSshStatusLabel(status) {
@@ -1819,33 +2598,18 @@ function smoothRefreshImage(cameraId) {
     const camStats = status?.orchestrator?.camera_stats?.find((cs) => cs.camera_id === cameraId);
     const newCaptureTime = new Date(camStats.capture_stats.last_capture_time).getTime();
 
-    const refreshUrl = `/api/cameras/${cameraId}/preview?t=${Date.now()}`;
-    const newImg = new Image();
-
-    newImg.onload = function () {
-        lastDisplayedCaptureTime.set(cameraId, newCaptureTime);
-        const imgs = document.querySelectorAll(`.camera-preview-img[data-camera-id="${cameraId}"]`);
-        imgs.forEach((img) => {
-            img.style.transition = 'opacity 0.5s ease-in-out';
-            img.style.opacity = '0';
-
-            setTimeout(() => {
-                img.src = refreshUrl;
-                img.style.opacity = '1';
-            }, 500);
-        });
-    };
-
-    newImg.onerror = function () {
-        console.log(`Failed to load preview for ${cameraId}`);
-    };
-
-    newImg.src = refreshUrl;
+    loadAuthenticatedPreview(cameraId).then(() => {
+        if (previewBlobURLs.has(cameraId)) {
+            lastDisplayedCaptureTime.set(cameraId, newCaptureTime);
+        }
+    });
 }
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
     imageRefreshIntervals.forEach(interval => clearInterval(interval));
+    previewBlobURLs.forEach((url) => URL.revokeObjectURL(url));
+    previewBlobURLs.clear();
 });
 
 // Update Management

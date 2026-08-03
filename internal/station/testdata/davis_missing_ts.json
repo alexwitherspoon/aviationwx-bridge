@@ -1,0 +1,22 @@
+{
+  "data": {
+    "did": "001D0A700002",
+    "ts": 0,
+    "conditions": [
+      {
+        "lsid": 48308,
+        "data_structure_type": 1,
+        "txid": 1,
+        "temp": 62.7,
+        "hum": 55.0,
+        "rx_state": 0
+      },
+      {
+        "lsid": 48306,
+        "data_structure_type": 3,
+        "bar_sea_level": 30.008
+      }
+    ]
+  },
+  "error": null
+}

@@ -1012,10 +1012,14 @@ func (b *Bridge) testStationPoll(st config.Station) (map[string]interface{}, err
 	}
 	out := map[string]interface{}{
 		"provider":      obs.Provider,
-		"observed_at":   obs.ObservedAt.UTC().Format(time.RFC3339),
 		"did":           obs.DID,
 		"transmitters":  obs.Transmitters,
 		"provider_meta": obs.ProviderMeta,
+	}
+	// Missing station ts leaves ObservedAt zero; omit so the console shows
+	// "no station timestamp" instead of year-1 RFC3339.
+	if !obs.ObservedAt.IsZero() {
+		out["observed_at"] = obs.ObservedAt.UTC().Format(time.RFC3339)
 	}
 	return out, nil
 }

@@ -2,8 +2,6 @@ package config
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
 )
 
 const maxCameraIDSlugLen = 64
@@ -17,38 +15,12 @@ func SlugCameraIDFromName(name string) string {
 // ValidateCameraID reports whether id is safe for use in camera config filenames.
 // Allowed: ASCII letters, digits, and hyphens (same rules as legacy config validation).
 func ValidateCameraID(id string) error {
-	if id == "" {
-		return fmt.Errorf("camera id is required")
-	}
-	for _, r := range id {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
-			continue
-		}
-		return fmt.Errorf("camera id contains invalid characters (alphanumeric and hyphens only)")
-	}
-	return nil
+	return validateConfigFileID(id, "camera")
 }
 
 // CameraConfigPath returns the absolute path for a camera JSON file under baseDir/cameras.
 func CameraConfigPath(baseDir, id string) (string, error) {
-	if err := ValidateCameraID(id); err != nil {
-		return "", err
-	}
-	camerasDir := filepath.Join(baseDir, "cameras")
-	path := filepath.Join(camerasDir, id+".json")
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve camera config path: %w", err)
-	}
-	absCameras, err := filepath.Abs(camerasDir)
-	if err != nil {
-		return "", fmt.Errorf("resolve cameras directory: %w", err)
-	}
-	rel, err := filepath.Rel(absCameras, absPath)
-	if err != nil || strings.HasPrefix(rel, "..") || strings.Contains(rel, string(filepath.Separator)+"..") {
-		return "", fmt.Errorf("camera id escapes cameras directory")
-	}
-	return absPath, nil
+	return containedConfigPath(baseDir, "cameras", id, "camera")
 }
 
 // allocateUniqueCameraIDLocked returns a unique camera id from the display name.

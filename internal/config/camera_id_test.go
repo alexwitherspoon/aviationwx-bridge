@@ -33,7 +33,7 @@ func TestValidateCameraID(t *testing.T) {
 	if err := ValidateCameraID("tower-north"); err != nil {
 		t.Fatalf("valid id: %v", err)
 	}
-	for _, id := range []string{"", "../x", "bad/id", "dots.not"} {
+	for _, id := range []string{"", "../x", "bad/id", `bad\id`, "dots.not", ".."} {
 		if err := ValidateCameraID(id); err == nil {
 			t.Fatalf("ValidateCameraID(%q) expected error", id)
 		}

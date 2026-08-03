@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
@@ -43,38 +42,12 @@ func slugIDFromName(name string, maxLen int) string {
 
 // ValidateStationID reports whether id is safe for stations/<id>.json filenames.
 func ValidateStationID(id string) error {
-	if id == "" {
-		return fmt.Errorf("station id is required")
-	}
-	for _, r := range id {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
-			continue
-		}
-		return fmt.Errorf("station id contains invalid characters (alphanumeric and hyphens only)")
-	}
-	return nil
+	return validateConfigFileID(id, "station")
 }
 
 // StationConfigPath returns the absolute path for a station JSON file under baseDir/stations.
 func StationConfigPath(baseDir, id string) (string, error) {
-	if err := ValidateStationID(id); err != nil {
-		return "", err
-	}
-	stationsDir := filepath.Join(baseDir, "stations")
-	path := filepath.Join(stationsDir, id+".json")
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve station config path: %w", err)
-	}
-	absStations, err := filepath.Abs(stationsDir)
-	if err != nil {
-		return "", fmt.Errorf("resolve stations directory: %w", err)
-	}
-	rel, err := filepath.Rel(absStations, absPath)
-	if err != nil || strings.HasPrefix(rel, "..") || strings.Contains(rel, string(filepath.Separator)+"..") {
-		return "", fmt.Errorf("station id escapes stations directory")
-	}
-	return absPath, nil
+	return containedConfigPath(baseDir, "stations", id, "station")
 }
 
 func (s *Service) allocateUniqueStationIDLocked(displayName string) string {

@@ -398,19 +398,38 @@ func (w *stationWorker) tick(ctx context.Context) {
 	obs, err := w.prov.Poll(pollCtx, w.cfg)
 	now := time.Now().UTC()
 	if err != nil {
+		// Providers may return a partial Observation with an error (e.g. Davis
+		// HTTP OK but configured txid absent). That is LAN reachable / degraded,
+		// not down - keep raw for operator diagnosis.
+		lanOK := obs != nil
 		w.mgr.setStatus(w.cfg.ID, func(s *StationStatus) {
-			s.LANOK = false
+			s.LANOK = lanOK
+			s.Degraded = lanOK
 			s.LastPollAt = now
 			s.LastPollError = err.Error()
 			s.WaitingForTxid = false
+			if obs != nil {
+				s.LastObservedAt = obs.ObservedAt
+			}
 		})
-		w.mgr.notePayload(PayloadLogEntry{
+		entry := PayloadLogEntry{
 			At:        now,
 			StationID: w.cfg.ID,
-			LANOK:     false,
+			LANOK:     lanOK,
 			Message:   err.Error(),
-		})
-		w.mgr.log.Warn("station poll failed", "station", w.cfg.ID, "error", err)
+		}
+		if obs != nil {
+			entry.ObservedAt = obs.ObservedAt
+			if obs.ProviderMeta != nil {
+				entry.Raw = obs.ProviderMeta["raw"]
+			}
+		}
+		w.mgr.notePayload(entry)
+		if lanOK {
+			w.mgr.log.Warn("station poll degraded", "station", w.cfg.ID, "error", err)
+		} else {
+			w.mgr.log.Warn("station poll failed", "station", w.cfg.ID, "error", err)
+		}
 		return
 	}
 

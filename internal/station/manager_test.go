@@ -251,6 +251,70 @@ func TestManagerSkipsPostWhenTimestampMissing(t *testing.T) {
 	}
 }
 
+func TestManagerMissingTxidIsDegradedNotDown(t *testing.T) {
+	fixture, err := os.ReadFile(filepath.Join("testdata", "davis_current_conditions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(fixture)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txid := 99 // not present in fixture (txid 1 only)
+	if _, err := svc.AddStation(config.Station{
+		ID:                  "station-davis",
+		Name:                "Davis",
+		Type:                config.StationTypeDavisWeatherLinkLive,
+		Enabled:             true,
+		Host:                srv.Listener.Addr().String(),
+		PollIntervalSeconds: 10,
+		Txid:                &txid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	poster := &fakePoster{configured: true}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	davis := NewDavis()
+	davis.client = srv.Client()
+	mgr.providers[ProviderDavisWeatherLinkLive] = davis
+	mgr.SyncFromConfig()
+	defer mgr.Stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	var statuses []StationStatus
+	for time.Now().Before(deadline) {
+		statuses = mgr.StatusSnapshot()
+		if len(statuses) == 1 && statuses[0].LastPollError != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("status = %+v", statuses)
+	}
+	if !statuses[0].LANOK || !statuses[0].Degraded {
+		t.Fatalf("want LANOK+degraded on missing txid, got %+v", statuses[0])
+	}
+	if poster.calls != 0 {
+		t.Fatalf("posts = %d, want 0", poster.calls)
+	}
+	payloads := mgr.RecentPayloads()
+	if len(payloads) < 1 || payloads[0].Raw == nil {
+		t.Fatalf("payload log should keep raw: %+v", payloads)
+	}
+	sub, ok := mgr.WeatherSubsystemHealth()
+	if !ok || sub.Status != bridgeapi.StatusDegraded {
+		t.Fatalf("weather subsystem = %+v ok=%v, want degraded", sub, ok)
+	}
+}
+
 func TestManagerNoPostWithoutAPI(t *testing.T) {
 	fixture, err := os.ReadFile(filepath.Join("testdata", "davis_current_conditions.json"))
 	if err != nil {

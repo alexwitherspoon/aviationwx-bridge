@@ -260,8 +260,12 @@ func discoverDavisHTTPProbe(ctx context.Context, targets []string, onFound func(
 			break
 		}
 		ip := ip
+		select {
+		case <-ctx.Done():
+			return
+		case sem <- struct{}{}:
+		}
 		wg.Add(1)
-		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()

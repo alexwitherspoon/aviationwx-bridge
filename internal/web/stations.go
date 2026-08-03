@@ -155,15 +155,11 @@ func (s *Server) updateStation(w http.ResponseWriter, r *http.Request, stationID
 		}
 		// txid is presence-sensitive: omit keeps current; null clears; number sets.
 		if v, ok := raw["txid"]; ok {
-			if string(v) == "null" {
-				st.Txid = nil
-			} else {
-				var txid int
-				if err := json.Unmarshal(v, &txid); err != nil {
-					return fmt.Errorf("txid: %w", err)
-				}
-				st.Txid = &txid
+			var txid *int
+			if err := json.Unmarshal(v, &txid); err != nil {
+				return fmt.Errorf("txid: %w", err)
 			}
+			st.Txid = txid
 		}
 		return nil
 	})

@@ -113,6 +113,28 @@ func TestStationsCRUD(t *testing.T) {
 		}
 	})
 
+	t.Run("update null txid clears transmitter", func(t *testing.T) {
+		body := map[string]interface{}{
+			"txid": nil,
+		}
+		raw, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPut, "/api/stations/"+createdID, bytes.NewReader(raw))
+		req.SetBasicAuth("admin", pass)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		server.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+		}
+		st, err := server.configService.GetStation(createdID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Txid != nil {
+			t.Fatalf("txid should be cleared: %+v", st)
+		}
+	})
+
 	t.Run("delete", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodDelete, "/api/stations/"+createdID, nil)
 		req.SetBasicAuth("admin", pass)

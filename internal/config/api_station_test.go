@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -129,5 +130,21 @@ func TestAPIUpdateGlobalValidates(t *testing.T) {
 	}
 	if !APIConfigured(svc.GetGlobal().API) {
 		t.Fatal("api not configured after update")
+	}
+}
+
+func TestStationUnmarshalEnabledDefault(t *testing.T) {
+	var st Station
+	if err := json.Unmarshal([]byte(`{"id":"s1","name":"N","type":"davis_weatherlink_live","host":"1.2.3.4"}`), &st); err != nil {
+		t.Fatal(err)
+	}
+	if !st.Enabled {
+		t.Fatal("omitted enabled should default true")
+	}
+	if err := json.Unmarshal([]byte(`{"id":"s2","name":"N","type":"davis_weatherlink_live","host":"1.2.3.4","enabled":false}`), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Enabled {
+		t.Fatal("explicit false must stick")
 	}
 }

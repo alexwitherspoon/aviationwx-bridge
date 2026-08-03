@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -24,6 +25,34 @@ type Station struct {
 	Host                string `json:"host,omitempty"`
 	PollIntervalSeconds int    `json:"poll_interval_seconds,omitempty"`
 	Txid                *int   `json:"txid,omitempty"` // required for Davis once user picks
+}
+
+// UnmarshalJSON defaults enabled to true when the field is omitted (CONFIG_SCHEMA).
+func (st *Station) UnmarshalJSON(data []byte) error {
+	aux := struct {
+		ID                  string `json:"id"`
+		Name                string `json:"name"`
+		Type                string `json:"type"`
+		Enabled             *bool  `json:"enabled"`
+		Host                string `json:"host,omitempty"`
+		PollIntervalSeconds int    `json:"poll_interval_seconds,omitempty"`
+		Txid                *int   `json:"txid,omitempty"`
+	}{}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	st.ID = aux.ID
+	st.Name = aux.Name
+	st.Type = aux.Type
+	st.Host = aux.Host
+	st.PollIntervalSeconds = aux.PollIntervalSeconds
+	st.Txid = aux.Txid
+	if aux.Enabled == nil {
+		st.Enabled = true
+	} else {
+		st.Enabled = *aux.Enabled
+	}
+	return nil
 }
 
 // NormalizeStationDefaults fills defaults for known station types.

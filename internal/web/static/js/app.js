@@ -265,15 +265,14 @@ async function api(endpoint, options = {}) {
 
     if (!response.ok) {
         const error = await response.text();
+        let parsed = null;
         try {
-            const parsed = JSON.parse(error);
-            if (parsed && parsed.error) {
-                throw new Error(parsed.error);
-            }
-        } catch (e) {
-            if (e instanceof Error && e.message && !e.message.startsWith('{') && e.message !== error) {
-                throw e;
-            }
+            parsed = JSON.parse(error);
+        } catch {
+            // Non-JSON error bodies are common; fall through to raw text / status.
+        }
+        if (parsed && parsed.error) {
+            throw new Error(parsed.error);
         }
         throw new Error(error || `HTTP ${response.status}`);
     }

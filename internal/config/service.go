@@ -405,40 +405,39 @@ func (s *Service) reload() error {
 	camerasDir := filepath.Join(s.baseDir, "cameras")
 	entries, err := os.ReadDir(camerasDir)
 	if err != nil {
-		// Camera directory might not exist yet
-		if os.IsNotExist(err) {
-			return nil
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("read cameras directory: %w", err)
 		}
-		return fmt.Errorf("read cameras directory: %w", err)
-	}
+		// Missing cameras dir is fine; still load stations below.
+	} else {
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+				continue
+			}
 
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
+			camPath := filepath.Join(camerasDir, entry.Name())
+			data, err := os.ReadFile(camPath)
+			if err != nil {
+				return fmt.Errorf("read camera file %s: %w", entry.Name(), err)
+			}
+
+			var cam Camera
+			if err := json.Unmarshal(data, &cam); err != nil {
+				return fmt.Errorf("parse camera file %s: %w", entry.Name(), err)
+			}
+
+			// Normalize upload config for backward compatibility
+			NormalizeUploadConfig(cam.Upload)
+
+			if err := ValidateCameraID(cam.ID); err != nil {
+				return fmt.Errorf("camera file %s: %w", entry.Name(), err)
+			}
+			if _, err := CameraConfigPath(s.baseDir, cam.ID); err != nil {
+				return fmt.Errorf("camera file %s: %w", entry.Name(), err)
+			}
+
+			s.cameras[cam.ID] = &cam
 		}
-
-		camPath := filepath.Join(camerasDir, entry.Name())
-		data, err := os.ReadFile(camPath)
-		if err != nil {
-			return fmt.Errorf("read camera file %s: %w", entry.Name(), err)
-		}
-
-		var cam Camera
-		if err := json.Unmarshal(data, &cam); err != nil {
-			return fmt.Errorf("parse camera file %s: %w", entry.Name(), err)
-		}
-
-		// Normalize upload config for backward compatibility
-		NormalizeUploadConfig(cam.Upload)
-
-		if err := ValidateCameraID(cam.ID); err != nil {
-			return fmt.Errorf("camera file %s: %w", entry.Name(), err)
-		}
-		if _, err := CameraConfigPath(s.baseDir, cam.ID); err != nil {
-			return fmt.Errorf("camera file %s: %w", entry.Name(), err)
-		}
-
-		s.cameras[cam.ID] = &cam
 	}
 
 	if err := s.loadStationsLocked(); err != nil {
@@ -466,8 +465,8 @@ func (s *Service) saveGlobal() error {
 		return err
 	}
 
-	// Write with proper permissions (0644 = rw-r--r--)
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	// Write with proper permissions (0600 = owner read/write; holds API key + console password)
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write global config: %w", err)
 	}
 

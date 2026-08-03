@@ -90,6 +90,29 @@ func TestStationsCRUD(t *testing.T) {
 		}
 	})
 
+	t.Run("update omits txid keeps transmitter", func(t *testing.T) {
+		body := map[string]interface{}{
+			"name": "Scappoose Davis Renamed",
+			"host": "192.168.1.51",
+		}
+		raw, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPut, "/api/stations/"+createdID, bytes.NewReader(raw))
+		req.SetBasicAuth("admin", pass)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		server.GetMux().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+		}
+		st, err := server.configService.GetStation(createdID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Name != "Scappoose Davis Renamed" || st.Txid == nil || *st.Txid != 2 {
+			t.Fatalf("txid should be preserved: %+v", st)
+		}
+	})
+
 	t.Run("delete", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodDelete, "/api/stations/"+createdID, nil)
 		req.SetBasicAuth("admin", pass)

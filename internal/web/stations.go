@@ -101,8 +101,8 @@ func (s *Server) getStation(w http.ResponseWriter, r *http.Request, stationID st
 }
 
 func (s *Server) updateStation(w http.ResponseWriter, r *http.Request, stationID string) {
-	var updates config.Station
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -112,18 +112,59 @@ func (s *Server) updateStation(w http.ResponseWriter, r *http.Request, stationID
 	}
 
 	err := s.configService.UpdateStation(stationID, func(st *config.Station) error {
-		if strings.TrimSpace(updates.Name) != "" {
-			st.Name = updates.Name
+		if v, ok := raw["name"]; ok {
+			var name string
+			if err := json.Unmarshal(v, &name); err != nil {
+				return fmt.Errorf("name: %w", err)
+			}
+			if strings.TrimSpace(name) != "" {
+				st.Name = name
+			}
 		}
-		if strings.TrimSpace(updates.Type) != "" {
-			st.Type = updates.Type
+		if v, ok := raw["type"]; ok {
+			var typ string
+			if err := json.Unmarshal(v, &typ); err != nil {
+				return fmt.Errorf("type: %w", err)
+			}
+			if strings.TrimSpace(typ) != "" {
+				st.Type = typ
+			}
 		}
-		st.Enabled = updates.Enabled
-		st.Host = updates.Host
-		if updates.PollIntervalSeconds > 0 {
-			st.PollIntervalSeconds = updates.PollIntervalSeconds
+		if v, ok := raw["enabled"]; ok {
+			var enabled bool
+			if err := json.Unmarshal(v, &enabled); err != nil {
+				return fmt.Errorf("enabled: %w", err)
+			}
+			st.Enabled = enabled
 		}
-		st.Txid = updates.Txid
+		if v, ok := raw["host"]; ok {
+			var host string
+			if err := json.Unmarshal(v, &host); err != nil {
+				return fmt.Errorf("host: %w", err)
+			}
+			st.Host = host
+		}
+		if v, ok := raw["poll_interval_seconds"]; ok {
+			var poll int
+			if err := json.Unmarshal(v, &poll); err != nil {
+				return fmt.Errorf("poll_interval_seconds: %w", err)
+			}
+			if poll > 0 {
+				st.PollIntervalSeconds = poll
+			}
+		}
+		// txid is presence-sensitive: omit keeps current; null clears; number sets.
+		if v, ok := raw["txid"]; ok {
+			if string(v) == "null" {
+				st.Txid = nil
+			} else {
+				var txid int
+				if err := json.Unmarshal(v, &txid); err != nil {
+					return fmt.Errorf("txid: %w", err)
+				}
+				st.Txid = &txid
+			}
+		}
 		return nil
 	})
 	if err != nil {

@@ -129,6 +129,16 @@ function revokePreviewBlob(cameraId) {
     }
 }
 
+/** Drop object URLs for cameras no longer in the active list. */
+function prunePreviewBlobs(activeCameraIds) {
+    const keep = new Set(activeCameraIds || []);
+    for (const id of [...previewBlobURLs.keys()]) {
+        if (!keep.has(id)) {
+            revokePreviewBlob(id);
+        }
+    }
+}
+
 function applyPreviewBlob(cameraId, objectURL) {
     revokePreviewBlob(cameraId);
     previewBlobURLs.set(cameraId, objectURL);
@@ -1103,7 +1113,8 @@ function updateCameraOverviewStatus() {
 
 function updateCameraList() {
     const container = document.getElementById('cameraList');
-    
+    prunePreviewBlobs(cameras.map((c) => c.id));
+
     if (cameras.length === 0) {
         container.innerHTML = `
             <div class="empty-state">

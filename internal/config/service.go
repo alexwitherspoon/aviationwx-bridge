@@ -179,7 +179,7 @@ func (s *Service) UpdateGlobal(fn func(*GlobalSettings) error) error {
 	}
 
 	path := filepath.Join(s.baseDir, "global.json")
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write global config: %w", err)
 	}
 

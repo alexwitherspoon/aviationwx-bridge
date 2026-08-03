@@ -326,8 +326,15 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(out)
 
 	case http.MethodPut:
+		// Cap body before ReadAll - Pi Zero has little RAM for a hostile PUT.
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "Failed to read body", http.StatusBadRequest)
 			return
 		}

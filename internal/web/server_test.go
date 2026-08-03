@@ -130,6 +130,20 @@ func TestConfigPutTopLevelFields(t *testing.T) {
 	}
 }
 
+func TestConfigPutRejectsOversizedBody(t *testing.T) {
+	server := testServerWithAuth(t, ServerConfig{})
+	pass := server.configService.GetWebPassword()
+	body := bytes.Repeat([]byte("a"), 1<<20+1)
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.SetBasicAuth("admin", pass)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d body=%s, want 413", w.Code, w.Body.String())
+	}
+}
+
 // TestConfigPutPartialUploadSettingsPreservesTimezoneAndWebConsole verifies the settings UI pattern:
 // PUT only top-level upload/limit fields without resending nested objects or timezone.
 func TestConfigPutPartialUploadSettingsPreservesTimezoneAndWebConsole(t *testing.T) {

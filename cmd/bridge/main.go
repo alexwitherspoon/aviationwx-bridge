@@ -1077,14 +1077,20 @@ func (b *Bridge) buildAPIHealthRequest() bridgeapi.HealthRequest {
 	subsystems := map[string]bridgeapi.SubsystemHealth{}
 	if len(cameras) > 0 {
 		camStatus := bridgeapi.StatusOperational
-		subsystems["cameras"] = bridgeapi.SubsystemHealth{Status: camStatus}
 		uploadStatus := bridgeapi.StatusOperational
 		if b.orchestrator != nil {
 			orch := b.orchestrator.GetStatus()
+			for _, cs := range orch.CameraStats {
+				if cs.IsBackingOff || cs.LastError != nil {
+					camStatus = bridgeapi.StatusDegraded
+					break
+				}
+			}
 			if orch.UploadStats.UploadsFailed > 0 {
 				uploadStatus = bridgeapi.StatusDegraded
 			}
 		}
+		subsystems["cameras"] = bridgeapi.SubsystemHealth{Status: camStatus}
 		subsystems["upload"] = bridgeapi.SubsystemHealth{Status: uploadStatus}
 	}
 	if b.stationManager != nil {

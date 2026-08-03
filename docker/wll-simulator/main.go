@@ -52,11 +52,6 @@ const baseFixture = `{
   "error": null
 }`
 
-type envelope struct {
-	Data  map[string]json.RawMessage `json:"data"`
-	Error *string                    `json:"error"`
-}
-
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	flag.Parse()

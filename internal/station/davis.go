@@ -85,7 +85,7 @@ func (d *Davis) fetch(ctx context.Context, host string) (*davisData, json.RawMes
 	if err != nil {
 		return nil, nil, fmt.Errorf("davis fetch: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, nil, fmt.Errorf("davis read body: %w", err)

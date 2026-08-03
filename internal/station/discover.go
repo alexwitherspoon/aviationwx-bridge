@@ -314,7 +314,7 @@ func probeDavisURL(ctx context.Context, client *http.Client, rawURL string) (Dis
 	if err != nil {
 		return DiscoverCandidate{}, false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return DiscoverCandidate{}, false
 	}

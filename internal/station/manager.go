@@ -467,7 +467,10 @@ func (w *stationWorker) tick(ctx context.Context) {
 	}
 
 	if w.cfg.Txid != nil && w.mgr.poster != nil && w.mgr.poster.APIConfigured() {
-		postErr := w.mgr.postObservation(pollCtx, w.cfg, obs)
+		// Fresh timeout: pollCtx may be nearly spent after a slow Davis fetch.
+		postCtx, postCancel := context.WithTimeout(ctx, 30*time.Second)
+		postErr := w.mgr.postObservation(postCtx, w.cfg, obs)
+		postCancel()
 		posted := postErr == nil
 		entry.Posted = &posted
 		if postErr != nil {

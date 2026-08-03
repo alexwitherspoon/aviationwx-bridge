@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/hashicorp/mdns"
 )
 
 const (
@@ -129,14 +127,20 @@ func discoverDavisStream(ctx context.Context, subnet string, emit DiscoverEmit) 
 
 	safeEmit(DiscoverEvent{Type: "phase", Phase: "mdns", Message: "Browsing mDNS for WeatherLink Live..."})
 	mdnsCtx, cancel := context.WithTimeout(ctx, discoverMDNSTimeout)
+	var mdnsCountMu sync.Mutex
 	mdnsCount := 0
 	discoverDavisMDNS(mdnsCtx, func(c DiscoverCandidate) {
+		mdnsCountMu.Lock()
 		mdnsCount++
+		mdnsCountMu.Unlock()
 		emitCandidate(c)
 	})
 	cancel()
 
-	if mdnsCount == 0 {
+	mdnsCountMu.Lock()
+	foundMDNS := mdnsCount
+	mdnsCountMu.Unlock()
+	if foundMDNS == 0 {
 		safeEmit(DiscoverEvent{Type: "note", Message: "No WeatherLink Live devices via mDNS. Multicast often fails across Docker bridge networking."})
 	}
 
@@ -219,63 +223,6 @@ func preferDNSName(ctx context.Context, c *DiscoverCandidate) {
 	}
 	c.IP = ipStr
 	c.Host = name
-}
-
-func discoverDavisMDNS(ctx context.Context, onFound func(DiscoverCandidate)) {
-	entriesCh := make(chan *mdns.ServiceEntry, 8)
-	go func() {
-		params := mdns.DefaultParams(davisMDNSService)
-		params.Entries = entriesCh
-		params.Timeout = discoverMDNSTimeout
-		params.DisableIPv6 = true
-		_ = mdns.Query(params)
-		close(entriesCh)
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case e, ok := <-entriesCh:
-			if !ok {
-				return
-			}
-			if c, ok := mdnsEntryToCandidate(e); ok {
-				onFound(c)
-			}
-		}
-	}
-}
-
-func mdnsEntryToCandidate(e *mdns.ServiceEntry) (DiscoverCandidate, bool) {
-	if e == nil {
-		return DiscoverCandidate{}, false
-	}
-	ip := ""
-	if e.AddrV4 != nil {
-		ip = e.AddrV4.String()
-	} else if len(e.AddrV6) > 0 {
-		ip = e.AddrV6.String()
-	}
-	mdnsName := strings.TrimSuffix(e.Host, ".")
-	host := mdnsName
-	if host == "" {
-		host = ip
-	}
-	if host == "" {
-		return DiscoverCandidate{}, false
-	}
-	port := e.Port
-	if port == 0 {
-		port = 80
-	}
-	return DiscoverCandidate{
-		Host:   host,
-		IP:     ip,
-		Port:   port,
-		Name:   e.Name,
-		Method: "mdns",
-	}, true
 }
 
 func discoverDavisHTTPProbe(ctx context.Context, targets []string, onFound func(DiscoverCandidate), onProgress func(done, total int)) {

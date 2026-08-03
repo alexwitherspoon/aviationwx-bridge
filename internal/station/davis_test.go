@@ -30,13 +30,12 @@ func TestDavisPollFixture(t *testing.T) {
 	davis.client = srv.Client()
 	txid := 1
 	cfg := config.Station{
-		ID:            "station-test",
-		Name:          "Test",
-		Type:          config.StationTypeDavisWeatherLinkLive,
-		Enabled:       true,
-		Host:          srv.URL,
-		WindReference: config.WindReferenceTrue,
-		Txid:          &txid,
+		ID:      "station-test",
+		Name:    "Test",
+		Type:    config.StationTypeDavisWeatherLinkLive,
+		Enabled: true,
+		Host:    srv.URL,
+		Txid:    &txid,
 	}
 
 	obs, err := davis.Poll(context.Background(), cfg)

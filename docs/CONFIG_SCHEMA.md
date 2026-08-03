@@ -81,10 +81,9 @@ Optional weather stations. One JSON file per station. Inventory is advertised in
 | `enabled` | boolean | No | `true` | Enable/disable station |
 | `host` | string | Cond. | - | IP (IPv4 or IPv6) or hostname of WeatherLink Live (Davis). IPv6 may be bare or bracketed; with a non-default port use `[addr]:port`. Discover scans IPv4 CIDRs only. |
 | `poll_interval_seconds` | integer | No | `10` | Davis HTTP floor is 10s; must be >= 10 for Davis |
-| `wind_reference` | string | No | `true` | `true` (Davis true-north install) or `magnetic` |
 | `txid` | integer | No | - | Davis transmitter id; installer always picks after Test poll |
 
-Runtime (epic #102 / aviationwx#274): enabled stations with a `txid` are polled over LAN (HTTP `/v1/current_conditions`). Weather POST carries `provider`, `source_id`, and station-native detail in `provider_meta.raw` only - no bridge-normalized `sample`. Core owns unit conversion and weather semantics. When WLL `ts` is missing, the bridge skips weather POST and marks the station degraded (no bridge-clock `observed_at`). When `api` is configured, each valid observation is POSTed to `/v1/bridge/weather` (in-memory retry ring only; no disk weather queue). LAN poll still runs without an API key. Console: `POST /api/test/station-poll` (transmitters / ISS pick) and user-initiated `POST /api/test/station-discover` (SSE progress; operator-supplied IPv4 CIDR /24-/30 for rate-limited HTTP probe plus best-effort mDNS; never automatic). Local WLL + weather POST capture: `docker/wll-simulator/README.md` and golden wire sample `internal/bridgeapi/testdata/weather_post_davis_wll.example.json`.
+Runtime (epic #102 / aviationwx#274): enabled stations with a `txid` are polled over LAN (HTTP `/v1/current_conditions`). Weather POST carries `provider`, `source_id`, and station-native detail in `provider_meta.raw` only - no bridge-normalized `sample`. Wind is always treated as true north (install/calibrate the vane accordingly; no magnetic/`wind_reference` mode). Core owns unit conversion and weather semantics. When WLL `ts` is missing, the bridge skips weather POST (no bridge-clock `observed_at`). When `api` is configured, each valid observation is POSTed to `/v1/bridge/weather` (in-memory retry ring only; no disk weather queue). LAN poll still runs without an API key. Console: `POST /api/test/station-poll` (transmitters / ISS pick) and user-initiated `POST /api/test/station-discover` (SSE progress; operator-supplied IPv4 CIDR /24-/30 for rate-limited HTTP probe plus best-effort mDNS; never automatic). Local WLL + weather POST capture: `docker/wll-simulator/README.md` and golden wire sample `internal/bridgeapi/testdata/weather_post_davis_wll.example.json`.
 
 Example:
 
@@ -96,7 +95,6 @@ Example:
   "enabled": true,
   "host": "192.168.1.50",
   "poll_interval_seconds": 10,
-  "wind_reference": "true",
   "txid": 1
 }
 ```

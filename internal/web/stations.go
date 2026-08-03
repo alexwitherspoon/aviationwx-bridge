@@ -123,9 +123,6 @@ func (s *Server) updateStation(w http.ResponseWriter, r *http.Request, stationID
 		if updates.PollIntervalSeconds > 0 {
 			st.PollIntervalSeconds = updates.PollIntervalSeconds
 		}
-		if updates.WindReference != "" {
-			st.WindReference = updates.WindReference
-		}
 		st.Txid = updates.Txid
 		return nil
 	})
@@ -155,7 +152,6 @@ func stationToMap(st config.Station) map[string]interface{} {
 		"enabled":               st.Enabled,
 		"host":                  st.Host,
 		"poll_interval_seconds": st.PollIntervalSeconds,
-		"wind_reference":        st.WindReference,
 	}
 	if st.Txid != nil {
 		m["txid"] = *st.Txid

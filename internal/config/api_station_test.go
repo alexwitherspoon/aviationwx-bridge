@@ -68,9 +68,6 @@ func TestStationCRUD(t *testing.T) {
 	if st.ID == "" || st.PollIntervalSeconds != DefaultDavisPollIntervalSeconds {
 		t.Fatalf("defaults not applied: %+v", st)
 	}
-	if st.WindReference != WindReferenceTrue {
-		t.Fatalf("wind_reference = %q", st.WindReference)
-	}
 
 	list := svc.ListStations()
 	if len(list) != 1 {

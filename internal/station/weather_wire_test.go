@@ -30,13 +30,12 @@ func TestWeatherRequestGoldenDavisWLL(t *testing.T) {
 
 	txid := 1
 	cfg := config.Station{
-		ID:            "station-davis-wll",
-		Name:          "Davis WLL",
-		Type:          config.StationTypeDavisWeatherLinkLive,
-		Enabled:       true,
-		Host:          "192.168.1.50",
-		WindReference: config.WindReferenceTrue,
-		Txid:          &txid,
+		ID:      "station-davis-wll",
+		Name:    "Davis WLL",
+		Type:    config.StationTypeDavisWeatherLinkLive,
+		Enabled: true,
+		Host:    "192.168.1.50",
+		Txid:    &txid,
 	}
 	obs, err := buildDavisObservation(cfg, env.Data, rawData)
 	if err != nil {

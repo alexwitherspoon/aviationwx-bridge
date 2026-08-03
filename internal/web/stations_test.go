@@ -39,7 +39,6 @@ func TestStationsCRUD(t *testing.T) {
 			"enabled":               true,
 			"host":                  "192.168.1.50",
 			"poll_interval_seconds": 10,
-			"wind_reference":        "true",
 			"txid":                  1,
 		}
 		raw, _ := json.Marshal(body)
@@ -71,7 +70,6 @@ func TestStationsCRUD(t *testing.T) {
 			"enabled":               false,
 			"host":                  "192.168.1.51",
 			"poll_interval_seconds": 20,
-			"wind_reference":        "magnetic",
 			"txid":                  2,
 		}
 		raw, _ := json.Marshal(body)

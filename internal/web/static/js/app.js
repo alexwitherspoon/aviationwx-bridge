@@ -526,7 +526,6 @@ function editStation(id) {
 
 function getStationFormHtml(st = null) {
     const isEdit = st !== null;
-    const windRef = st?.wind_reference || 'true';
     const poll = st?.poll_interval_seconds || 10;
     const txid = st?.txid != null ? String(st.txid) : '';
     return `
@@ -555,7 +554,7 @@ function getStationFormHtml(st = null) {
                     <input type="text" id="stHost" class="form-control" required
                            value="${escapeHtml(st?.host || '')}"
                            placeholder="192.168.1.50 or [2001:db8::1]">
-                    <p class="form-help">We recommend using a static IP or hostname whenever possible. Enter manually (IPv4, IPv6 with brackets optional, or hostname), or use Discover below after scanning your LAN. Discover scans IPv4 only.</p>
+                    <p class="form-help">We recommend using a static IP or hostname whenever possible. Enter manually (IPv4, IPv6 with brackets optional, or hostname), or use Discover below after scanning your LAN. Discover scans IPv4 only. Wind direction assumes a true-north vane install.</p>
                 </div>
                 <div class="form-group">
                     <label for="stDiscoverSubnet">Discover network (CIDR)</label>
@@ -570,19 +569,10 @@ function getStationFormHtml(st = null) {
                     <p class="form-help">Required for HTTP scan (IPv4 /24–/30). The bridge runs in Docker and cannot see your LAN prefix automatically. mDNS is best-effort.</p>
                     <div id="stationDiscoverResult" class="camera-test-result" style="margin-top:var(--space-sm)"></div>
                 </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="stPoll">Poll interval (seconds)</label>
-                        <input type="number" id="stPoll" class="form-control" min="10" max="3600" required value="${poll}">
-                        <p class="form-help">Davis Local API floor is 10 seconds.</p>
-                    </div>
-                    <div class="form-group">
-                        <label for="stWindRef">Wind reference</label>
-                        <select id="stWindRef" class="form-control">
-                            <option value="true" ${windRef === 'true' ? 'selected' : ''}>True north (default)</option>
-                            <option value="magnetic" ${windRef === 'magnetic' ? 'selected' : ''}>Magnetic</option>
-                        </select>
-                    </div>
+                <div class="form-group">
+                    <label for="stPoll">Poll interval (seconds)</label>
+                    <input type="number" id="stPoll" class="form-control" min="10" max="3600" required value="${poll}">
+                    <p class="form-help">Davis Local API floor is 10 seconds.</p>
                 </div>
                 <div class="form-group">
                     <label>
@@ -625,7 +615,6 @@ function buildStationConfigFromForm() {
         host,
         enabled: document.getElementById('stEnabled')?.checked === true,
         poll_interval_seconds: poll,
-        wind_reference: document.getElementById('stWindRef')?.value || 'true',
     };
     if (txidRaw !== '' && txidRaw != null) {
         body.txid = parseInt(txidRaw, 10);

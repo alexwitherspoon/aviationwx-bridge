@@ -5,6 +5,5 @@
   "enabled": true,
   "host": "192.168.1.50",
   "poll_interval_seconds": 10,
-  "wind_reference": "true",
   "txid": 1
 }

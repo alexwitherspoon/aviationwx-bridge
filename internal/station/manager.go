@@ -452,7 +452,7 @@ func samePollConfig(a, b config.Station) bool {
 	if a.Host != b.Host || a.Type != b.Type || a.Enabled != b.Enabled {
 		return false
 	}
-	if a.PollIntervalSeconds != b.PollIntervalSeconds || a.WindReference != b.WindReference {
+	if a.PollIntervalSeconds != b.PollIntervalSeconds {
 		return false
 	}
 	if (a.Txid == nil) != (b.Txid == nil) {

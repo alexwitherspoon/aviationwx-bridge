@@ -10,16 +10,11 @@ const (
 	StationTypeDavisWeatherLinkLive = "davis_weatherlink_live"
 )
 
-// Wind reference values for anemometer orientation.
-const (
-	WindReferenceTrue     = "true"
-	WindReferenceMagnetic = "magnetic"
-)
-
 // DefaultDavisPollIntervalSeconds is the Davis Local API current_conditions floor.
 const DefaultDavisPollIntervalSeconds = 10
 
 // Station is a LAN weather station configuration (file-per-station under stations/).
+// Wind from Davis is assumed true-north install; there is no magnetic mode.
 type Station struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
@@ -28,8 +23,7 @@ type Station struct {
 
 	Host                string `json:"host,omitempty"`
 	PollIntervalSeconds int    `json:"poll_interval_seconds,omitempty"`
-	WindReference       string `json:"wind_reference,omitempty"` // "true" (default) or "magnetic"
-	Txid                *int   `json:"txid,omitempty"`           // required for Davis once user picks
+	Txid                *int   `json:"txid,omitempty"` // required for Davis once user picks
 }
 
 // NormalizeStationDefaults fills defaults for known station types.
@@ -40,9 +34,6 @@ func NormalizeStationDefaults(st *Station) {
 	if st.Type == StationTypeDavisWeatherLinkLive {
 		if st.PollIntervalSeconds <= 0 {
 			st.PollIntervalSeconds = DefaultDavisPollIntervalSeconds
-		}
-		if st.WindReference == "" {
-			st.WindReference = WindReferenceTrue
 		}
 	}
 }
@@ -71,13 +62,6 @@ func validateDavisStation(st Station) error {
 	}
 	if st.PollIntervalSeconds > 0 && st.PollIntervalSeconds < DefaultDavisPollIntervalSeconds {
 		return fmt.Errorf("davis poll_interval_seconds must be >= %d", DefaultDavisPollIntervalSeconds)
-	}
-	ref := st.WindReference
-	if ref == "" {
-		ref = WindReferenceTrue
-	}
-	if ref != WindReferenceTrue && ref != WindReferenceMagnetic {
-		return fmt.Errorf("wind_reference must be %q or %q", WindReferenceTrue, WindReferenceMagnetic)
 	}
 	return nil
 }

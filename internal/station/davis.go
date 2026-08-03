@@ -168,11 +168,10 @@ func buildDavisObservation(cfg config.Station, data *davisData, rawData json.Raw
 		Provider: ProviderDavisWeatherLinkLive,
 		DID:      data.DID,
 		ProviderMeta: map[string]interface{}{
-			"api":            "weatherlink_live_local_v1",
-			"path":           davisPath,
-			"wind_reference": cfg.WindReference,
-			"did":            data.DID,
-			"raw":            rawObj,
+			"api":  "weatherlink_live_local_v1",
+			"path": davisPath,
+			"did":  data.DID,
+			"raw":  rawObj,
 		},
 	}
 	if data.TS > 0 {

@@ -2,6 +2,7 @@ package bridgeapi
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 
 const (
 	defaultHeartbeatInterval = 60 * time.Second
+	minHeartbeatInterval     = 15 * time.Second
+	maxHeartbeatInterval     = 300 * time.Second
 	maxErrorFingerprints     = 32
 )
 
@@ -37,8 +40,7 @@ type Reporter struct {
 	lastHealthErr   string
 	bridgeAPIStatus string
 
-	errorsMu sync.Mutex
-	errors   map[string]*ErrorFingerprint
+	errors map[string]*ErrorFingerprint
 }
 
 // ReporterConfig wires a Reporter.
@@ -97,6 +99,7 @@ func (r *Reporter) SyncFromConfig() {
 	if err != nil {
 		cancel, done := r.detachLoopLocked()
 		r.client = nil
+		r.bootstrap = nil
 		r.bridgeAPIStatus = StatusDown
 		r.lastHealthErr = err.Error()
 		r.mu.Unlock()
@@ -107,6 +110,8 @@ func (r *Reporter) SyncFromConfig() {
 
 	cancel, done := r.detachLoopLocked()
 	r.client = client
+	// New credentials/base URL must not reuse a prior bridge_id.
+	r.bootstrap = nil
 	r.mu.Unlock()
 	waitLoop(cancel, done)
 
@@ -162,9 +167,24 @@ func (r *Reporter) BootstrapNow(ctx context.Context) (*BootstrapResponse, error)
 		return nil, err
 	}
 	r.bootstrap = boot
+	r.applyBootstrapIntervalLocked(boot)
 	r.bridgeAPIStatus = StatusOperational
 	r.lastHealthErr = ""
 	return boot, nil
+}
+
+func (r *Reporter) applyBootstrapIntervalLocked(boot *BootstrapResponse) {
+	if boot == nil || boot.HeartbeatIntervalSeconds <= 0 {
+		return
+	}
+	d := time.Duration(boot.HeartbeatIntervalSeconds) * time.Second
+	if d < minHeartbeatInterval {
+		d = minHeartbeatInterval
+	}
+	if d > maxHeartbeatInterval {
+		d = maxHeartbeatInterval
+	}
+	r.interval = d
 }
 
 // PostWeather posts a weather sample when the API client is configured.
@@ -202,7 +222,13 @@ func (r *Reporter) Snapshot() LinkSnapshot {
 		Status:       r.bridgeAPIStatus,
 		LastHealthOK: r.lastHealthOK,
 		LastError:    r.lastHealthErr,
-		Bootstrap:    r.bootstrap,
+	}
+	if r.bootstrap != nil {
+		cp := *r.bootstrap
+		if r.bootstrap.EnabledSources != nil {
+			cp.EnabledSources = append([]EnabledSource(nil), r.bootstrap.EnabledSources...)
+		}
+		snap.Bootstrap = &cp
 	}
 	return snap
 }
@@ -224,15 +250,17 @@ func (r *Reporter) NoteError(fingerprint, message string) {
 }
 
 func (r *Reporter) noteErrorLocked(fingerprint, message string) {
-	r.errorsMu.Lock()
-	defer r.errorsMu.Unlock()
 	if existing, ok := r.errors[fingerprint]; ok {
 		existing.Count++
 		existing.LastMessage = truncateMsg(message)
 		return
 	}
 	if len(r.errors) >= maxErrorFingerprints {
-		return
+		// Evict one arbitrary entry so new codes are not silently dropped forever.
+		for k := range r.errors {
+			delete(r.errors, k)
+			break
+		}
 	}
 	r.errors[fingerprint] = &ErrorFingerprint{
 		Fingerprint: fingerprint,
@@ -242,8 +270,6 @@ func (r *Reporter) noteErrorLocked(fingerprint, message string) {
 }
 
 func (r *Reporter) drainErrorsLocked() []ErrorFingerprint {
-	r.errorsMu.Lock()
-	defer r.errorsMu.Unlock()
 	out := make([]ErrorFingerprint, 0, len(r.errors))
 	for _, e := range r.errors {
 		out = append(out, *e)
@@ -252,19 +278,40 @@ func (r *Reporter) drainErrorsLocked() []ErrorFingerprint {
 	return out
 }
 
+func (r *Reporter) restoreErrorsLocked(fps []ErrorFingerprint) {
+	for i := range fps {
+		fp := fps[i]
+		if existing, ok := r.errors[fp.Fingerprint]; ok {
+			existing.Count += fp.Count
+			if fp.LastMessage != "" {
+				existing.LastMessage = fp.LastMessage
+			}
+			continue
+		}
+		if len(r.errors) >= maxErrorFingerprints {
+			continue
+		}
+		cp := fp
+		r.errors[fp.Fingerprint] = &cp
+	}
+}
+
 func (r *Reporter) run(ctx context.Context) {
 	defer close(r.done)
 
 	// Immediate bootstrap + health so link status is available without waiting a full interval.
 	r.tick(ctx)
 
-	ticker := time.NewTicker(r.interval)
-	defer ticker.Stop()
 	for {
+		r.mu.Lock()
+		d := r.interval
+		r.mu.Unlock()
+		timer := time.NewTimer(d)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			r.tick(ctx)
 		}
 	}
@@ -311,7 +358,8 @@ func (r *Reporter) tick(ctx context.Context) {
 	if r.bootstrap != nil && req.BridgeID == "" {
 		req.BridgeID = r.bootstrap.BridgeID
 	}
-	req.Errors = r.drainErrorsLocked()
+	drained := r.drainErrorsLocked()
+	req.Errors = drained
 	if req.Subsystems == nil {
 		req.Subsystems = map[string]SubsystemHealth{}
 	}
@@ -330,6 +378,7 @@ func (r *Reporter) tick(ctx context.Context) {
 	defer postCancel()
 	if err := client.PostHealth(postCtx, req); err != nil {
 		r.mu.Lock()
+		r.restoreErrorsLocked(drained)
 		r.bridgeAPIStatus = StatusDegraded
 		if IsUnauthorized(err) {
 			r.bridgeAPIStatus = StatusDown
@@ -350,14 +399,11 @@ func (r *Reporter) tick(ctx context.Context) {
 }
 
 func truncateMsg(s string) string {
-	if len(s) <= 200 {
+	runes := []rune(s)
+	if len(runes) <= 200 {
 		return s
 	}
-	return s[:200]
+	return string(runes[:200])
 }
 
-var errAPINotConfigured = errString("bridge api is not configured")
-
-type errString string
-
-func (e errString) Error() string { return string(e) }
+var errAPINotConfigured = errors.New("bridge api is not configured")

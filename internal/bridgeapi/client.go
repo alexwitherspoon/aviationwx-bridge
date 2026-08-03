@@ -5,12 +5,14 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -76,6 +78,9 @@ func apiTLSInsecureFromEnv() bool {
 }
 
 func newTLSHTTPClient(timeout time.Duration, insecureSkipVerify bool) *http.Client {
+	if insecureSkipVerify {
+		warnAPIInsecureTLS()
+	}
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -99,6 +104,14 @@ func newTLSHTTPClient(timeout time.Duration, insecureSkipVerify bool) *http.Clie
 			return fmt.Errorf("redirect not allowed")
 		},
 	}
+}
+
+var apiInsecureTLSWarn sync.Once
+
+func warnAPIInsecureTLS() {
+	apiInsecureTLSWarn.Do(func() {
+		fmt.Fprintf(os.Stderr, "WARNING: AVIATIONWX_API_TLS_INSECURE is set - TLS certificate verification is disabled (local mock only)\n")
+	})
 }
 
 // Bootstrap calls GET /v1/bridge/bootstrap.
@@ -203,7 +216,8 @@ func IsUnauthorized(err error) bool {
 
 // StatusCode returns the HTTP status from an API error, or 0.
 func StatusCode(err error) int {
-	if e, ok := err.(*apiError); ok {
+	var e *apiError
+	if errors.As(err, &e) {
 		return e.StatusCode
 	}
 	return 0

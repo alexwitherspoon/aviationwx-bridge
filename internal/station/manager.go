@@ -2,6 +2,7 @@ package station
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -28,6 +29,7 @@ type Manager struct {
 	workers map[string]*stationWorker
 	status  map[string]StationStatus
 	ring    *outboundRing
+	postMu  sync.Mutex // serializes flush + PostWeather across station workers
 
 	// recentPayloads is an in-memory newest-first log for console (no disk).
 	recentMu       sync.Mutex
@@ -45,7 +47,10 @@ type PayloadLogEntry struct {
 	Raw        interface{} `json:"raw,omitempty"` // station-native payload as received
 }
 
-const maxPayloadLog = 40
+const (
+	maxPayloadLog  = 40
+	maxRawLogBytes = 4096
+)
 
 // ManagerConfig wires a Manager.
 type ManagerConfig struct {
@@ -268,6 +273,7 @@ func (m *Manager) setStatus(id string, mut func(*StationStatus)) {
 }
 
 func (m *Manager) notePayload(entry PayloadLogEntry) {
+	entry.Raw = truncateRawForConsole(entry.Raw)
 	m.recentMu.Lock()
 	defer m.recentMu.Unlock()
 	m.recentPayloads = append([]PayloadLogEntry{entry}, m.recentPayloads...)
@@ -276,11 +282,31 @@ func (m *Manager) notePayload(entry PayloadLogEntry) {
 	}
 }
 
+func truncateRawForConsole(raw interface{}) interface{} {
+	if raw == nil {
+		return nil
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	if len(b) <= maxRawLogBytes {
+		return raw
+	}
+	return map[string]interface{}{
+		"_truncated": true,
+		"_bytes":     len(b),
+		"preview":    string(b[:maxRawLogBytes]),
+	}
+}
+
 func (m *Manager) postObservation(ctx context.Context, st config.Station, obs *Observation) error {
 	if m.poster == nil || !m.poster.APIConfigured() {
 		return nil
 	}
 	req := weatherRequestFromObs(obs)
+	m.postMu.Lock()
+	defer m.postMu.Unlock()
 	m.flushRing(ctx)
 	if err := m.poster.PostWeather(ctx, req); err != nil {
 		m.ring.Push(req)

@@ -193,10 +193,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     startAutoRefresh(); // Auto-refresh dashboard every second
     startLiveLogs();    // Start live log streaming
     
-    // Check for first run
-    if (status && status.first_run) {
-        document.getElementById('setupBanner').style.display = 'block';
-    }
+    // Check for first run (dismissible welcome)
+    updateSetupBanner();
+    renderConfigBanners();
 
     document.addEventListener('input', markCameraFormDirtyIfNeeded, true);
     document.addEventListener('change', markCameraFormDirtyIfNeeded, true);
@@ -291,6 +290,8 @@ async function refreshStatus() {
         dot.classList.remove('error');
         dot.classList.add('connected');
         document.getElementById('statusText').textContent = 'Connected';
+        updateSetupBanner();
+        renderConfigBanners();
         return true;
     } catch (err) {
         console.error('Failed to fetch status:', err);
@@ -313,6 +314,7 @@ async function loadConfig() {
             updateSettingsUnsavedHints();
         }
         loadAPILinkSettings();
+        renderConfigBanners();
     } catch (err) {
         console.error('Failed to load config:', err);
     }
@@ -328,6 +330,7 @@ async function loadCameras() {
         if (camerasChanged) {
             updateCameraList();
             updateCameraOverview();
+            renderConfigBanners();
         } else {
             updateCameraListStatus();
             updateCameraOverviewStatus();
@@ -341,6 +344,7 @@ async function loadStations() {
     try {
         stations = await api('/stations');
         updateStationsDisplay();
+        renderConfigBanners();
     } catch (err) {
         console.error('Failed to load stations:', err);
     }
@@ -2345,50 +2349,154 @@ async function saveGlobalSettings() {
     }
 }
 
-// Setup Wizard
-function showSetupWizard() {
-    showModal('Welcome to AviationWX.org Bridge', `
+// Setup Wizard + incomplete-config banners
+const SETUP_DISMISSED_KEY = 'aviationwx_setup_dismissed';
+let wizardStep = 'timezone';
+let wizardResume = false;
+
+function setupDismissed() {
+    try {
+        return sessionStorage.getItem(SETUP_DISMISSED_KEY) === '1';
+    } catch {
+        return false;
+    }
+}
+
+function setSetupDismissed(v) {
+    try {
+        if (v) {
+            sessionStorage.setItem(SETUP_DISMISSED_KEY, '1');
+        } else {
+            sessionStorage.removeItem(SETUP_DISMISSED_KEY);
+        }
+    } catch {
+        // ignore
+    }
+}
+
+function updateSetupBanner() {
+    const el = document.getElementById('setupBanner');
+    if (!el) return;
+    const firstRun = window.isFirstRunSetup ? window.isFirstRunSetup(status) : Boolean(status?.first_run);
+    el.style.display = firstRun && !setupDismissed() ? 'block' : 'none';
+}
+
+function dismissSetupBanner() {
+    setSetupDismissed(true);
+    updateSetupBanner();
+}
+
+function renderConfigBanners() {
+    const host = document.getElementById('configBanners');
+    if (!host) return;
+    const select = window.selectConfigBanners;
+    if (typeof select !== 'function') {
+        host.innerHTML = '';
+        return;
+    }
+    const banners = select({ config, status, cameras, stations }) || [];
+    host.innerHTML = banners.map((b) => {
+        const tone = b.tone === 'strong' ? 'banner-strong' : (b.tone === 'soft' ? 'banner-soft' : 'banner-info');
+        return `<div class="banner ${tone}" data-banner-id="${escapeHtml(b.id)}">
+            <div class="banner-content">
+                <h3>${escapeHtml(b.title)}</h3>
+                <p>${escapeHtml(b.body)}</p>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function wizardFooter(primaryLabel, primaryFn, { showSkip = false, skipFn = null, showBack = false, backFn = null } = {}) {
+    const back = showBack
+        ? `<button type="button" class="btn" onclick="${backFn}">Back</button>`
+        : `<button type="button" class="btn" onclick="closeModal()">Cancel</button>`;
+    const skip = showSkip
+        ? `<button type="button" class="btn" onclick="${skipFn}">Skip</button>`
+        : '';
+    return `<div style="display:flex;gap:var(--space-md);justify-content:flex-end;margin-top:var(--space-lg);flex-wrap:wrap;">
+        ${back}
+        ${skip}
+        <button type="button" class="btn btn-primary" onclick="${primaryFn}">${primaryLabel}</button>
+    </div>`;
+}
+
+function wizardGoTimezone() {
+    wizardStep = 'timezone';
+    renderWizardStep();
+}
+
+function wizardGoAPI() {
+    wizardStep = 'api';
+    renderWizardStep();
+}
+
+function wizardGoCameras() {
+    wizardStep = 'cameras';
+    renderWizardStep();
+}
+
+function showSetupWizard(resume = false) {
+    wizardResume = Boolean(resume);
+    setSetupDismissed(false);
+    updateSetupBanner();
+    if (wizardResume && typeof window.firstIncompleteWizardStep === 'function') {
+        const next = window.firstIncompleteWizardStep({ config, cameras, stations });
+        wizardStep = (next === 'api' || next === 'cameras' || next === 'weather' || next === 'done')
+            ? next
+            : 'timezone';
+    } else {
+        wizardStep = 'timezone';
+    }
+    renderWizardStep();
+}
+
+function renderWizardStep() {
+    switch (wizardStep) {
+        case 'api':
+            renderWizardAPI();
+            break;
+        case 'cameras':
+            renderWizardCameras();
+            break;
+        case 'weather':
+            renderWizardWeather();
+            break;
+        case 'done':
+            renderWizardDone();
+            break;
+        case 'timezone':
+        default:
+            renderWizardTimezone();
+            break;
+    }
+}
+
+function renderWizardTimezone() {
+    const current = document.getElementById('timezone')?.value || status?.timezone || 'America/Los_Angeles';
+    showModal('Setup - Timezone', `
         <div class="form-section">
-            <p style="margin-bottom: var(--space-lg);">
-                Let's set up your first camera! You'll need:
-            </p>
-            <ul style="margin-left: var(--space-lg); margin-bottom: var(--space-lg); color: var(--color-text-muted);">
-                <li>Your camera's snapshot URL or RTSP stream address</li>
-                <li>SFTP credentials from aviationwx.org</li>
-            </ul>
-            <p style="margin-bottom: var(--space-lg);">
-                Don't have SFTP credentials yet? 
-                Contact <a href="mailto:contact@aviationwx.org">contact@aviationwx.org</a> to get them.
-            </p>
-        </div>
-        
-        <div class="form-section">
-            <div class="form-section-title">Step 1: Set Your Timezone</div>
+            <p class="form-help" style="margin-bottom:var(--space-md)">Step 1 of 4. Timezone is required for camera timestamps. Later steps are optional.</p>
             <div class="form-group">
-                <label for="wizardTimezone">Where are your cameras located?</label>
+                <label for="wizardTimezone">Where are your cameras / stations located?</label>
                 <select id="wizardTimezone" class="form-control">
-                    ${TIMEZONES.map(tz => `<option value="${tz.value}">${tz.label}</option>`).join('')}
+                    ${TIMEZONES.map((tz) => `<option value="${tz.value}" ${tz.value === current ? 'selected' : ''}>${tz.label}</option>`).join('')}
                 </select>
             </div>
         </div>
-        
-        <div style="display: flex; gap: var(--space-md); justify-content: flex-end; margin-top: var(--space-lg);">
-            <button type="button" class="btn" onclick="closeModal()">Cancel</button>
-            <button type="button" class="btn btn-primary" onclick="wizardStep2()">Continue →</button>
-        </div>
+        ${wizardFooter('Continue', 'wizardSaveTimezone()')}
     `);
 }
 
-async function wizardStep2() {
-    // Save timezone
-    const timezone = document.getElementById('wizardTimezone').value;
+async function wizardSaveTimezone() {
+    const timezone = document.getElementById('wizardTimezone')?.value;
+    if (!timezone) return;
     try {
         await api('/time', {
             method: 'PUT',
             body: JSON.stringify({ timezone }),
         });
     } catch (err) {
-        console.error('Failed to set timezone:', err);
+        alert(err.message || String(err));
         return;
     }
     timezoneDirty = false;
@@ -2396,12 +2504,155 @@ async function wizardStep2() {
     if (tzMain) tzMain.value = timezone;
     updateSettingsUnsavedHints();
     await loadConfig();
+    wizardStep = 'api';
+    renderWizardStep();
+}
 
-    // Show add camera form
+function renderWizardAPI() {
+    const hint = config?.api?.key_set
+        ? `Key on disk: ${config.api.key_hint || 'awxb_...'}. Leave blank to keep it.`
+        : 'Paste a key from aviationwx.org ops (awxb_ + 48 characters). Skip if waiting on ops.';
+    showModal('Setup - AviationWX Link', `
+        <div class="form-section">
+            <p class="form-help" style="margin-bottom:var(--space-md)">Step 2 of 4 (skippable). Optional HTTPS link for fleet health and weather push. Cameras and SFTP work without a key.</p>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="wizardApiEnabled" ${config?.api?.enabled ? 'checked' : ''}>
+                    Enable AviationWX API link
+                </label>
+            </div>
+            <div class="form-group">
+                <label for="wizardApiKey">API key</label>
+                <input type="password" id="wizardApiKey" class="form-control" autocomplete="off" spellcheck="false"
+                       placeholder="Paste awxb_... key">
+                <p class="form-help">${escapeHtml(hint)}</p>
+            </div>
+            <div id="wizardApiResult" class="camera-test-result"></div>
+        </div>
+        ${wizardFooter('Confirm & continue', 'wizardConfirmAPI()', {
+            showSkip: true,
+            skipFn: 'wizardSkipAPI()',
+            showBack: true,
+            backFn: 'wizardGoTimezone()',
+        })}
+    `);
+}
+
+async function wizardSkipAPI() {
+    wizardStep = 'cameras';
+    renderWizardStep();
+}
+
+async function wizardConfirmAPI() {
+    const resultDiv = document.getElementById('wizardApiResult');
+    const enabled = document.getElementById('wizardApiEnabled')?.checked === true;
+    const key = document.getElementById('wizardApiKey')?.value?.trim() || '';
+    if (enabled && key && !/^awxb_[A-Za-z0-9]{48}$/.test(key)) {
+        if (resultDiv) {
+            resultDiv.innerHTML = '<div class="test-result error">API key must be awxb_ followed by exactly 48 letters or digits.</div>';
+        }
+        return;
+    }
+    if (enabled && !key && !(config && config.api && config.api.key_set)) {
+        if (resultDiv) {
+            resultDiv.innerHTML = '<div class="test-result error">Paste an API key, or uncheck Enable, or Skip.</div>';
+        }
+        return;
+    }
+    try {
+        const body = { api: { enabled } };
+        if (key) body.api.key = key;
+        await api('/config', { method: 'PUT', body: JSON.stringify(body) });
+        apiLinkDirty = false;
+        await loadConfig();
+        await refreshStatus();
+        const boot = await api('/test/api-bootstrap', {
+            method: 'POST',
+            body: JSON.stringify({ key: key || undefined, base_url: config?.api?.base_url || '' }),
+        });
+        const b = boot.result || boot;
+        if (resultDiv) {
+            const decl = typeof b.declination_deg === 'number'
+                ? `${b.declination_deg}° (${b.declination_source || 'n/a'})`
+                : 'n/a';
+            resultDiv.innerHTML = `<div class="test-result success">Bootstrap OK: ${escapeHtml(b.airport_id || '?')} / ${escapeHtml(b.bridge_id || '?')} - declination ${escapeHtml(String(decl))} (display only; wind is true north)</div>`;
+        }
+        setTimeout(() => {
+            wizardStep = 'cameras';
+            renderWizardStep();
+        }, 600);
+    } catch (err) {
+        if (resultDiv) {
+            resultDiv.innerHTML = `<div class="test-result error">${escapeHtml(err.message || String(err))}</div>`;
+        }
+    }
+}
+
+function renderWizardCameras() {
+    showModal('Setup - Cameras', `
+        <div class="form-section">
+            <p class="form-help" style="margin-bottom:var(--space-md)">Step 3 of 4 (skippable). Add an HTTP/RTSP/ONVIF camera with its own SFTP credentials, or skip for a weather-only site.</p>
+            <p class="form-help">Configured cameras: <strong>${cameras.length}</strong></p>
+        </div>
+        ${wizardFooter('Add camera', 'wizardAddCamera()', {
+            showSkip: true,
+            skipFn: 'wizardSkipCameras()',
+            showBack: true,
+            backFn: 'wizardGoAPI()',
+        })}
+    `);
+}
+
+function wizardSkipCameras() {
+    wizardStep = 'weather';
+    renderWizardStep();
+}
+
+function wizardAddCamera() {
     closeModal();
     showSection('cameras');
     showAddCamera();
-    document.getElementById('setupBanner').style.display = 'none';
+    // After closing camera modal the operator can Resume setup again.
+}
+
+function renderWizardWeather() {
+    showModal('Setup - Weather', `
+        <div class="form-section">
+            <p class="form-help" style="margin-bottom:var(--space-md)">Step 4 of 4 (skippable). Add a Davis WeatherLink Live station (true-north vane install), or skip.</p>
+            <p class="form-help">Configured stations: <strong>${stations.length}</strong></p>
+        </div>
+        ${wizardFooter('Add station', 'wizardAddStation()', {
+            showSkip: true,
+            skipFn: 'wizardFinish()',
+            showBack: true,
+            backFn: 'wizardGoCameras()',
+        })}
+    `);
+}
+
+function wizardAddStation() {
+    closeModal();
+    showSection('weather');
+    showAddStation();
+}
+
+function wizardFinish() {
+    setSetupDismissed(true);
+    updateSetupBanner();
+    renderConfigBanners();
+    showModal('Setup complete', `
+        <div class="form-section">
+            <p style="margin-bottom:var(--space-md)">You can resume this flow anytime from Settings → AviationWX Link → Resume setup.</p>
+            <p class="form-help">Wind direction assumes a true-north vane. Dashboard banners will nudge if weather is enabled without an API key.</p>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:var(--space-lg);">
+            <button type="button" class="btn btn-primary" onclick="closeModal()">Done</button>
+        </div>
+    `);
+}
+
+function renderWizardDone() {
+    wizardFinish();
 }
 
 // Modal management

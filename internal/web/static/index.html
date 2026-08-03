@@ -46,11 +46,15 @@
                 <!-- First Run Setup Banner -->
                 <div id="setupBanner" class="banner banner-info" style="display: none;">
                     <div class="banner-content">
-                        <h3>Welcome to AviationWX.org Bridge!</h3>
-                        <p>Let's set up your first camera. Each camera needs its own SFTP account from aviationwx.org.</p>
+                        <h3>Welcome to AviationWX.org Bridge</h3>
+                        <p>Set timezone, optional AviationWX API link, then add cameras and/or weather stations. Each step after timezone can be skipped.</p>
                         <button class="btn btn-primary" onclick="showSetupWizard()">Start Setup</button>
+                        <button class="btn btn-secondary" style="margin-left:var(--space-sm)" onclick="dismissSetupBanner()">Dismiss</button>
                     </div>
                 </div>
+
+                <!-- Incomplete-config banners (not hard blocks) -->
+                <div id="configBanners"></div>
 
                 <!-- Stats Grid -->
                 <div class="stats-grid">
@@ -295,6 +299,7 @@
                             <button type="button" class="btn btn-primary" onclick="saveAPILinkSettings()">Save link</button>
                             <button type="button" class="btn btn-secondary" onclick="testAPIBootstrap()">Test bootstrap</button>
                             <button type="button" class="btn btn-secondary" onclick="testAPIHealth()">Test link</button>
+                            <button type="button" class="btn btn-secondary" onclick="showSetupWizard(true)">Resume setup</button>
                         </div>
                     </div>
                 </div>
@@ -478,6 +483,7 @@
         import { shouldRefreshPreview } from '/js/preview-refresh.js';
         import { shouldSkipSettingsHydrate, shouldWarnBeforePageLeave } from '/js/settings-draft.js';
         import { formatObservationAge, formatRawPayload, consumeSSEBuffer, discoverHostValue } from '/js/weather-display.js';
+        import { selectConfigBanners, firstIncompleteWizardStep, isFirstRunSetup } from '/js/setup-guidance.js';
         import {
             canApplyUpdateFromUI,
             updateBannerLabel,
@@ -498,6 +504,9 @@
         window.formatRawPayload = formatRawPayload;
         window.consumeSSEBuffer = consumeSSEBuffer;
         window.discoverHostValue = discoverHostValue;
+        window.selectConfigBanners = selectConfigBanners;
+        window.firstIncompleteWizardStep = firstIncompleteWizardStep;
+        window.isFirstRunSetup = isFirstRunSetup;
         window.canApplyUpdateFromUI = canApplyUpdateFromUI;
         window.updateBannerLabel = updateBannerLabel;
         window.manualUpdateConfirmMessage = manualUpdateConfirmMessage;

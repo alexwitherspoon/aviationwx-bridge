@@ -1169,6 +1169,10 @@ func (b *Bridge) buildStatus() interface{} {
 		"uploads_today":       uploadsToday,
 		"self_update_enabled": deploy.SelfUpdateEnabled(),
 	}
+	stations := b.configService.ListStations()
+	status["total_stations"] = len(stations)
+	status["first_run"] = len(cameras) == 0 && len(stations) == 0
+
 	if tag := readHostDataLabel("configured-image-tag.txt"); tag != "" {
 		status["configured_image_tag"] = tag
 	}
@@ -1236,6 +1240,7 @@ func (b *Bridge) buildStatus() interface{} {
 			apiStatus["airport_id"] = snap.Bootstrap.Airport.ID
 			apiStatus["airport_name"] = snap.Bootstrap.Airport.Name
 			apiStatus["declination_deg"] = snap.Bootstrap.DeclinationDeg
+			apiStatus["enabled_sources"] = snap.Bootstrap.EnabledSources
 		}
 		status["api_link"] = apiStatus
 	}

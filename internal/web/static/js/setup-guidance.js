@@ -71,7 +71,7 @@ export function selectConfigBanners({ config = {}, status = {}, cameras = [], st
     if (apiConfigured && Array.isArray(enabledSources) && enabledStations.length > 0) {
         const enabledIDs = new Set(
             enabledSources
-                .filter((s) => s && s.enabled !== false)
+                .filter((s) => s && s.enabled !== false && s.kind === 'weather')
                 .map((s) => s.bridge_source_id || s.bridgeSourceId)
                 .filter(Boolean)
         );

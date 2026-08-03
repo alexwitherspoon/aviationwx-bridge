@@ -53,6 +53,22 @@ test('pending enable when station not in bootstrap enabled_sources', () => {
     assert.equal(banners.some((b) => b.id === 'pending_enable'), true);
 });
 
+test('pending enable ignores non-weather enabled_sources with same id', () => {
+    const banners = selectConfigBanners({
+        config: { api: { enabled: true, key_set: true } },
+        status: {
+            api_link: {
+                configured: true,
+                status: 'operational',
+                enabled_sources: [{ kind: 'camera', bridge_source_id: 'station-davis', enabled: true }],
+            },
+        },
+        stations: [{ id: 'station-davis', enabled: true }],
+        cameras: [],
+    });
+    assert.equal(banners.some((b) => b.id === 'pending_enable'), true);
+});
+
 test('firstIncompleteWizardStep prefers api then cameras; done when any source exists', () => {
     assert.equal(firstIncompleteWizardStep({ config: {}, cameras: [], stations: [] }), 'api');
     assert.equal(

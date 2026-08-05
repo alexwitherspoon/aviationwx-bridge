@@ -77,15 +77,24 @@ Optional weather stations. One JSON file per station. Inventory is advertised in
 |-------|------|----------|---------|-------------|
 | `id` | string | Yes | - | Unique ID (alphanumeric, hyphens) |
 | `name` | string | Yes | - | Display name |
-| `type` | string | Yes | - | `davis_weatherlink_live` (more types in epic #103) |
+| `type` | string | Yes | - | `davis_weatherlink_live` or `http_interceptor` (more types in epic #103) |
 | `enabled` | boolean | No | `true` | Enable/disable station |
-| `host` | string | Cond. | - | IP (IPv4 or IPv6) or hostname of WeatherLink Live (Davis). IPv6 may be bare or bracketed; with a non-default port use `[addr]:port`. Discover scans IPv4 CIDRs only. |
+| `host` | string | Cond. | - | Davis: IP (IPv4 or IPv6) or hostname of WeatherLink Live. IPv6 may be bare or bracketed; with a non-default port use `[addr]:port`. Discover scans IPv4 CIDRs only. |
 | `poll_interval_seconds` | integer | No | `10` | Davis HTTP floor is 10s; must be >= 10 for Davis |
 | `txid` | integer | No | - | Davis transmitter id; installer always picks after Test poll |
+| `listen_addr` | string | Cond. | `0.0.0.0:8090` | Interceptor: bind address for WU-style ingest (`host:port`) |
+| `listen_path` | string | Cond. | `/weatherstation/updateweatherstation.php` | Interceptor: exact URL path devices POST/GET to |
+| `dialect` | string | Cond. | `wunderground` | Interceptor: payload dialect (`wunderground` only in this release) |
 
-Runtime (epic #102 / aviationwx#274): enabled stations with a `txid` are polled over LAN (HTTP `/v1/current_conditions`). Weather POST carries `provider`, `source_id`, and station-native detail in `provider_meta.raw` only - no bridge-normalized `sample`. Wind is always treated as true north (install/calibrate the vane accordingly; no magnetic/`wind_reference` mode). Core owns unit conversion and weather semantics. When WLL `ts` is missing, the bridge skips weather POST (no bridge-clock `observed_at`). When `api` is configured, each valid observation is POSTed to `/v1/bridge/weather` (in-memory retry ring only; no disk weather queue). LAN poll still runs without an API key. Console: `POST /api/test/station-poll` (transmitters / ISS pick) and user-initiated `POST /api/test/station-discover` (SSE progress; operator-supplied IPv4 CIDR /24-/30 for rate-limited HTTP probe plus best-effort mDNS; never automatic). Local WLL + weather POST capture: `docker/wll-simulator/README.md` and golden wire sample `internal/bridgeapi/testdata/weather_post_davis_wll.example.json`.
+Runtime (epic #102 / #103 / aviationwx#274):
 
-Example:
+- **Davis:** enabled stations with a `txid` are polled over LAN (HTTP `/v1/current_conditions`). Discover is operator-initiated only (SSE; CIDR /24-/30 + mDNS).
+- **HTTP interceptor:** enabled stations share one listen server on `listen_addr`; routes by exact `listen_path`. Devices push Weather Underground-compatible GET/POST fields. Discovery is not applicable (stations push to the bridge). Firewall the listen port on the LAN.
+- Weather POST carries `provider`, `source_id`, and station-native detail in `provider_meta.raw` only - no bridge-normalized `sample`. Wind is always treated as true north. Core owns unit conversion and weather semantics.
+- Missing station time skips weather POST (Davis missing `ts`; interceptor missing/unparsable `dateutc`) - no bridge-clock `observed_at`. Emit ceiling ≤1 Hz. In-memory retry ring only; no disk weather queue.
+- Console: Test poll (Davis) / last-receive + inject test (interceptor). Local WLL + weather POST capture: `docker/wll-simulator/README.md` and golden wire sample `internal/bridgeapi/testdata/weather_post_davis_wll.example.json`.
+
+Davis example:
 
 ```json
 {
@@ -96,6 +105,20 @@ Example:
   "host": "192.168.1.50",
   "poll_interval_seconds": 10,
   "txid": 1
+}
+```
+
+Interceptor example:
+
+```json
+{
+  "id": "station-wu-interceptor",
+  "name": "WU Interceptor",
+  "type": "http_interceptor",
+  "enabled": true,
+  "listen_addr": "0.0.0.0:8090",
+  "listen_path": "/weatherstation/updateweatherstation.php",
+  "dialect": "wunderground"
 }
 ```
 

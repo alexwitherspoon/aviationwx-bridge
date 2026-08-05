@@ -31,6 +31,9 @@ type Manager struct {
 	ring    *outboundRing
 	postMu  sync.Mutex // serializes flush + PostWeather across station workers
 
+	// interceptorHub serves WU-style push ingest (nil when no interceptor stations).
+	hub *interceptorHub
+
 	// recentPayloads is an in-memory newest-first log for console (no disk).
 	recentMu       sync.Mutex
 	recentPayloads []PayloadLogEntry
@@ -78,7 +81,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 	}
 }
 
-// SyncFromConfig starts, restarts, or stops poll workers to match config.
+// SyncFromConfig starts, restarts, or stops poll workers and interceptor listen routes.
 func (m *Manager) SyncFromConfig() {
 	stations := m.cfgService.ListStations()
 	wanted := make(map[string]config.Station, len(stations))
@@ -91,7 +94,7 @@ func (m *Manager) SyncFromConfig() {
 	m.mu.Lock()
 	for id, w := range m.workers {
 		st, ok := wanted[id]
-		if !ok || !st.Enabled || st.Txid == nil || !samePollConfig(w.cfg, st) {
+		if !ok || !st.Enabled || st.Type != config.StationTypeDavisWeatherLinkLive || st.Txid == nil || !samePollConfig(w.cfg, st) {
 			toStop = append(toStop, w)
 			delete(m.workers, id)
 		}
@@ -103,11 +106,20 @@ func (m *Manager) SyncFromConfig() {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	for id, st := range wanted {
 		m.status[id] = m.statusFromConfig(st, m.status[id])
 		if !st.Enabled {
+			continue
+		}
+		if st.Type == config.StationTypeHTTPInterceptor {
+			// Listen path is handled by syncInterceptorHub (below).
+			s := m.status[id]
+			s.WaitingForTxid = false
+			m.status[id] = s
+			continue
+		}
+		if st.Type != config.StationTypeDavisWeatherLinkLive {
 			continue
 		}
 		if st.Txid == nil {
@@ -139,9 +151,71 @@ func (m *Manager) SyncFromConfig() {
 			delete(m.status, id)
 		}
 	}
+	m.mu.Unlock()
+
+	m.syncInterceptorHub(wanted)
 }
 
-// Stop halts all poll workers.
+// syncInterceptorHub rebuilds the shared interceptor listener (own locking).
+func (m *Manager) syncInterceptorHub(wanted map[string]config.Station) {
+	routes := make(map[string]interceptorRoute)
+	addr := ""
+	for _, st := range wanted {
+		if !st.Enabled || st.Type != config.StationTypeHTTPInterceptor {
+			continue
+		}
+		config.NormalizeStationDefaults(&st)
+		if addr == "" {
+			addr = st.ListenAddr
+		} else if st.ListenAddr != addr {
+			m.log.Warn("interceptor listen_addr mismatch; using first",
+				"station", st.ID, "want", st.ListenAddr, "using", addr)
+		}
+		path := st.ListenPath
+		if prev, ok := routes[path]; ok {
+			m.log.Warn("interceptor listen_path conflict; keeping first station",
+				"path", path, "keep", prev.station.ID, "skip", st.ID)
+			continue
+		}
+		routes[path] = interceptorRoute{station: st}
+	}
+
+	m.mu.Lock()
+	old := m.hub
+	if len(routes) == 0 {
+		m.hub = nil
+		m.mu.Unlock()
+		if old != nil {
+			old.stop()
+			m.log.Info("interceptor listen stopped")
+		}
+		return
+	}
+	if old != nil && old.addr == addr {
+		m.mu.Unlock()
+		old.setRoutes(routes)
+		return
+	}
+	m.hub = nil
+	m.mu.Unlock()
+
+	if old != nil {
+		old.stop()
+	}
+
+	hub := newInterceptorHub(m, addr)
+	hub.setRoutes(routes)
+	if err := hub.start(); err != nil {
+		m.log.Warn("interceptor listen failed", "addr", addr, "error", err)
+		return
+	}
+	m.mu.Lock()
+	m.hub = hub
+	m.mu.Unlock()
+	m.log.Info("interceptor listen started", "addr", addr, "routes", len(routes))
+}
+
+// Stop halts all poll workers and the interceptor listener.
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	toStop := make([]*stationWorker, 0, len(m.workers))
@@ -149,9 +223,14 @@ func (m *Manager) Stop() {
 		toStop = append(toStop, w)
 		delete(m.workers, id)
 	}
+	hub := m.hub
+	m.hub = nil
 	m.mu.Unlock()
 	for _, w := range toStop {
 		w.stop()
+	}
+	if hub != nil {
+		hub.stop()
 	}
 }
 
@@ -260,7 +339,9 @@ func (m *Manager) statusFromConfig(st config.Station, prev StationStatus) Statio
 	prev.Name = st.Name
 	prev.Type = st.Type
 	prev.Enabled = st.Enabled
-	prev.WaitingForTxid = st.Enabled && st.Txid == nil
+	prev.WaitingForTxid = st.Enabled &&
+		st.Type == config.StationTypeDavisWeatherLinkLive &&
+		st.Txid == nil
 	return prev
 }
 

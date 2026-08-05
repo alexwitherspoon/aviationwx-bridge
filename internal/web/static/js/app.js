@@ -472,11 +472,16 @@ function updateStationsDisplay() {
             const observed = rt.last_observed_at || '';
             const age = ageFn(observed);
             const err = rt.last_poll_error ? `<div class="station-error">${escapeHtml(rt.last_poll_error)}</div>` : '';
-            const host = cfg.host ? escapeHtml(cfg.host) : '—';
+            const host = cfg.host ? escapeHtml(cfg.host)
+                : (cfg.listen_addr ? escapeHtml(cfg.listen_addr) : '—');
             const typeLabel = cfg.type === 'davis_weatherlink_live'
                 ? 'Davis WeatherLink Live'
-                : escapeHtml(cfg.type || 'Station');
-            const txidLabel = cfg.txid != null ? `Transmitter ${escapeHtml(String(cfg.txid))}` : 'No transmitter';
+                : (cfg.type === 'http_interceptor'
+                    ? 'HTTP Interceptor (WU)'
+                    : escapeHtml(cfg.type || 'Station'));
+            const txidLabel = cfg.type === 'http_interceptor'
+                ? (cfg.listen_path ? escapeHtml(cfg.listen_path) : 'WU path')
+                : (cfg.txid != null ? `Transmitter ${escapeHtml(String(cfg.txid))}` : 'No transmitter');
             return `
             <div class="station-card" data-station-id="${escapeHtml(cfg.id)}">
                 <div class="station-card-header">
@@ -544,6 +549,11 @@ function getStationFormHtml(st = null) {
     const isEdit = st !== null;
     const poll = st?.poll_interval_seconds || 10;
     const txid = st?.txid != null ? String(st.txid) : '';
+    const typ = st?.type || 'davis_weatherlink_live';
+    const isInterceptor = typ === 'http_interceptor';
+    const listenAddr = st?.listen_addr || '0.0.0.0:8090';
+    const listenPath = st?.listen_path || '/weatherstation/updateweatherstation.php';
+    const dialect = st?.dialect || 'wunderground';
     return `
         <form id="stationForm" onsubmit="saveStation(event, ${isEdit ? `'${st.id}'` : 'null'})">
             <div class="form-section">
@@ -561,34 +571,62 @@ function getStationFormHtml(st = null) {
                 </div>
                 <div class="form-group">
                     <label for="stType">Type</label>
-                    <select id="stType" class="form-control" required>
-                        <option value="davis_weatherlink_live" selected>Davis WeatherLink Live (LAN)</option>
+                    <select id="stType" class="form-control" required onchange="onStationTypeChange()">
+                        <option value="davis_weatherlink_live" ${!isInterceptor ? 'selected' : ''}>Davis WeatherLink Live (LAN)</option>
+                        <option value="http_interceptor" ${isInterceptor ? 'selected' : ''}>HTTP Interceptor (Weather Underground)</option>
                     </select>
                 </div>
-                <div class="form-group">
-                    <label for="stHost">Host (IP or hostname)</label>
-                    <input type="text" id="stHost" class="form-control" required
-                           value="${escapeHtml(st?.host || '')}"
-                           placeholder="192.168.1.50 or weatherlink.local">
-                    <p class="form-help">Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.</p>
-                </div>
-                <div class="form-group">
-                    <label for="stDiscoverSubnet">Discover network (CIDR)</label>
-                    <div class="form-row" style="align-items:flex-end;gap:var(--space-sm)">
-                        <div style="flex:1">
-                            <input type="text" id="stDiscoverSubnet" class="form-control"
-                                   placeholder="192.168.1.0/24"
-                                   value="${escapeHtml(loadDiscoverSubnet())}">
-                        </div>
-                        <button type="button" class="btn" onclick="discoverStations()">Discover</button>
+                <div id="stationDavisFields" ${isInterceptor ? 'hidden' : ''}>
+                    <div class="form-group">
+                        <label for="stHost">Host (IP or hostname)</label>
+                        <input type="text" id="stHost" class="form-control"
+                               value="${escapeHtml(st?.host || '')}"
+                               placeholder="192.168.1.50 or weatherlink.local"
+                               ${isInterceptor ? '' : 'required'}>
+                        <p class="form-help">Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.</p>
                     </div>
-                    <p class="form-help">Enter your LAN subnet for Discover (IPv4 /24 to /30), for example 192.168.1.0/24. Hostname discovery is best-effort.</p>
-                    <div id="stationDiscoverResult" class="camera-test-result" style="margin-top:var(--space-sm)"></div>
+                    <div class="form-group">
+                        <label for="stDiscoverSubnet">Discover network (CIDR)</label>
+                        <div class="form-row" style="align-items:flex-end;gap:var(--space-sm)">
+                            <div style="flex:1">
+                                <input type="text" id="stDiscoverSubnet" class="form-control"
+                                       placeholder="192.168.1.0/24"
+                                       value="${escapeHtml(loadDiscoverSubnet())}">
+                            </div>
+                            <button type="button" class="btn" onclick="discoverStations()">Discover</button>
+                        </div>
+                        <p class="form-help">Enter your LAN subnet for Discover (IPv4 /24 to /30), for example 192.168.1.0/24. Hostname discovery is best-effort.</p>
+                        <div id="stationDiscoverResult" class="camera-test-result" style="margin-top:var(--space-sm)"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="stPoll">Poll interval (seconds)</label>
+                        <input type="number" id="stPoll" class="form-control" min="10" max="3600" value="${poll}">
+                        <p class="form-help">How often to read the station. Minimum 10 seconds.</p>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="stPoll">Poll interval (seconds)</label>
-                    <input type="number" id="stPoll" class="form-control" min="10" max="3600" required value="${poll}">
-                    <p class="form-help">How often to read the station. Minimum 10 seconds.</p>
+                <div id="stationInterceptorFields" ${isInterceptor ? '' : 'hidden'}>
+                    <div class="form-group">
+                        <label for="stListenAddr">Listen address</label>
+                        <input type="text" id="stListenAddr" class="form-control"
+                               value="${escapeHtml(listenAddr)}"
+                               placeholder="0.0.0.0:8090"
+                               ${isInterceptor ? 'required' : ''}>
+                        <p class="form-help">Bind host:port for Weather Underground-style POSTs/GETs. Firewall this port to the LAN. Point the wind vane true north.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="stListenPath">Listen path</label>
+                        <input type="text" id="stListenPath" class="form-control"
+                               value="${escapeHtml(listenPath)}"
+                               placeholder="/weatherstation/updateweatherstation.php"
+                               ${isInterceptor ? 'required' : ''}>
+                        <p class="form-help">Exact URL path devices post to. Discovery is not available for interceptor stations (devices push to the bridge).</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="stDialect">Dialect</label>
+                        <select id="stDialect" class="form-control">
+                            <option value="wunderground" ${dialect === 'wunderground' ? 'selected' : ''}>Weather Underground</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>
@@ -597,7 +635,7 @@ function getStationFormHtml(st = null) {
                     </label>
                 </div>
             </div>
-            <div class="form-section">
+            <div id="stationTxidSection" class="form-section" ${isInterceptor ? 'hidden' : ''}>
                 <div class="form-section-title">Transmitter</div>
                 <p class="form-help">Run Test poll, then choose which sensor transmitter to use. Required for ongoing readings.</p>
                 <div class="form-group">
@@ -607,10 +645,11 @@ function getStationFormHtml(st = null) {
                         ${txid !== '' ? `<option value="${escapeHtml(txid)}" selected>Transmitter ${escapeHtml(txid)}</option>` : ''}
                     </select>
                 </div>
-                <div id="stationTestResult" class="camera-test-result"></div>
             </div>
+            <div id="stationTestResult" class="camera-test-result"></div>
             <div class="modal-actions">
-                <button type="button" class="btn" onclick="testStationPoll()">Test poll</button>
+                <button type="button" class="btn" id="stationTestBtn"
+                        onclick="testStationPoll()">${isInterceptor ? 'Test receive' : 'Test poll'}</button>
                 <button type="button" class="btn" onclick="closeModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary">Save</button>
             </div>
@@ -618,20 +657,49 @@ function getStationFormHtml(st = null) {
     `;
 }
 
+function onStationTypeChange() {
+    const typ = document.getElementById('stType')?.value || 'davis_weatherlink_live';
+    const isInterceptor = typ === 'http_interceptor';
+    const davis = document.getElementById('stationDavisFields');
+    const interceptor = document.getElementById('stationInterceptorFields');
+    const txid = document.getElementById('stationTxidSection');
+    const testBtn = document.getElementById('stationTestBtn');
+    const host = document.getElementById('stHost');
+    const listenAddr = document.getElementById('stListenAddr');
+    const listenPath = document.getElementById('stListenPath');
+    if (davis) davis.hidden = isInterceptor;
+    if (interceptor) interceptor.hidden = !isInterceptor;
+    if (txid) txid.hidden = isInterceptor;
+    if (testBtn) testBtn.textContent = isInterceptor ? 'Test receive' : 'Test poll';
+    if (host) host.required = !isInterceptor;
+    if (listenAddr) listenAddr.required = isInterceptor;
+    if (listenPath) listenPath.required = isInterceptor;
+}
+
 function buildStationConfigFromForm() {
     const name = document.getElementById('stName')?.value?.trim();
-    const host = document.getElementById('stHost')?.value?.trim();
     const type = document.getElementById('stType')?.value || 'davis_weatherlink_live';
-    if (!name || !host) return null;
-    const poll = parseInt(document.getElementById('stPoll')?.value, 10) || 10;
-    const txidRaw = document.getElementById('stTxid')?.value;
+    if (!name) return null;
     const body = {
         name,
         type,
-        host,
         enabled: document.getElementById('stEnabled')?.checked === true,
-        poll_interval_seconds: poll,
     };
+    if (type === 'http_interceptor') {
+        const listenAddr = document.getElementById('stListenAddr')?.value?.trim();
+        const listenPath = document.getElementById('stListenPath')?.value?.trim();
+        if (!listenAddr || !listenPath) return null;
+        body.listen_addr = listenAddr;
+        body.listen_path = listenPath;
+        body.dialect = document.getElementById('stDialect')?.value || 'wunderground';
+        return body;
+    }
+    const host = document.getElementById('stHost')?.value?.trim();
+    if (!host) return null;
+    const poll = parseInt(document.getElementById('stPoll')?.value, 10) || 10;
+    const txidRaw = document.getElementById('stTxid')?.value;
+    body.host = host;
+    body.poll_interval_seconds = poll;
     if (txidRaw !== '' && txidRaw != null) {
         body.txid = parseInt(txidRaw, 10);
     }
@@ -850,17 +918,38 @@ async function testStationPoll() {
     const resultDiv = document.getElementById('stationTestResult');
     if (!resultDiv) return;
     const body = buildStationConfigFromForm();
+    const type = body?.type || document.getElementById('stType')?.value || 'davis_weatherlink_live';
     if (!body) {
-        resultDiv.innerHTML = '<div class="test-result error">✗ Name and host are required</div>';
+        resultDiv.innerHTML = type === 'http_interceptor'
+            ? '<div class="test-result error">✗ Name, listen address, and path are required</div>'
+            : '<div class="test-result error">✗ Name and host are required</div>';
         return;
     }
-    resultDiv.innerHTML = '<div class="test-result" style="background: var(--color-bg)">Polling LAN station...</div>';
+    const busyMsg = type === 'http_interceptor'
+        ? 'Parsing sample Weather Underground payload...'
+        : 'Polling LAN station...';
+    resultDiv.innerHTML = `<div class="test-result" style="background: var(--color-bg)">${busyMsg}</div>`;
     try {
         const resp = await api('/test/station-poll', {
             method: 'POST',
             body: JSON.stringify(body),
         });
         const result = resp.result || resp;
+        if (type === 'http_interceptor') {
+            const ageFn = window.formatObservationAge || (() => '');
+            const obsNote = result.observed_at
+                ? `station time ${result.observed_at} (${ageFn(result.observed_at)})`
+                : 'no station timestamp (readings will not upload without dateutc)';
+            const listen = result.listen_addr
+                ? `${escapeHtml(result.listen_addr)}${result.listen_path ? escapeHtml(result.listen_path) : ''}`
+                : '';
+            resultDiv.innerHTML = `
+            <div class="test-result success">✓ Sample payload parsed · ${escapeHtml(obsNote)}${listen ? ` · ${listen}` : ''}</div>
+            ${result.provider_meta?.raw
+        ? `<pre class="station-raw-payload">${escapeHtml((window.formatRawPayload || ((r) => JSON.stringify(r, null, 2)))(result.provider_meta.raw))}</pre>`
+        : ''}`;
+            return;
+        }
         const transmitters = result.transmitters || [];
         const select = document.getElementById('stTxid');
         const prev = select?.value || '';
@@ -901,10 +990,13 @@ async function saveStation(event, existingId) {
     event.preventDefault();
     const body = buildStationConfigFromForm();
     if (!body) {
-        alert('Name and host are required');
+        const typ = document.getElementById('stType')?.value || 'davis_weatherlink_live';
+        alert(typ === 'http_interceptor'
+            ? 'Name, listen address, and path are required'
+            : 'Name and host are required');
         return;
     }
-    if (body.txid == null) {
+    if (body.type !== 'http_interceptor' && body.txid == null) {
         if (!confirm('No transmitter selected. Save anyway? Ongoing readings will wait until you pick one.')) {
             return;
         }

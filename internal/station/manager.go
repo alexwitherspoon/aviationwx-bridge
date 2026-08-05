@@ -220,6 +220,15 @@ func (m *Manager) syncInterceptorHub(wanted map[string]config.Station) {
 	hub.setRoutes(routes)
 	if err := hub.start(); err != nil {
 		m.log.Warn("interceptor listen failed", "addr", addr, "error", err)
+		for _, route := range routes {
+			stID := route.station.ID
+			errMsg := fmt.Sprintf("interceptor listen failed on %s: %v", addr, err)
+			m.setStatus(stID, func(s *StationStatus) {
+				s.Degraded = true
+				s.LANOK = false
+				s.LastPollError = errMsg
+			})
+		}
 		return
 	}
 	m.mu.Lock()

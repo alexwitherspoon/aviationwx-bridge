@@ -315,3 +315,51 @@ func TestSyncInterceptorHubSkipsListenAddrMismatch(t *testing.T) {
 		t.Fatalf("expected degraded mismatch status: %+v", skipStatus)
 	}
 }
+
+func TestSyncInterceptorHubMarksDegradedOnBindFailure(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(ManagerConfig{ConfigService: svc})
+	defer mgr.Stop()
+
+	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Close()
+	addr := blocker.Addr().String()
+
+	st, err := svc.AddStation(config.Station{
+		ID:         "station-wu-bindfail",
+		Name:       "WU BindFail",
+		Type:       config.StationTypeHTTPInterceptor,
+		Enabled:    true,
+		ListenAddr: addr,
+		ListenPath: "/weatherstation/updateweatherstation.php",
+		Dialect:    config.HTTPInterceptorDialectWunderground,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.SyncFromConfig()
+
+	mgr.mu.Lock()
+	hub := mgr.hub
+	mgr.mu.Unlock()
+	if hub != nil {
+		t.Fatal("expected hub nil after bind failure")
+	}
+	var status StationStatus
+	for _, s := range mgr.StatusSnapshot() {
+		if s.ID == st.ID {
+			status = s
+			break
+		}
+	}
+	if !status.Degraded || status.LANOK || !strings.Contains(status.LastPollError, "listen failed") {
+		t.Fatalf("expected degraded bind-failure status: %+v", status)
+	}
+}

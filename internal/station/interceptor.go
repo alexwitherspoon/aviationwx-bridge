@@ -223,12 +223,13 @@ func (h *interceptorHub) serve(w http.ResponseWriter, r *http.Request) {
 	h.lastEmit[st.ID] = now
 	h.mu.Unlock()
 
-	h.mgr.handleInterceptorObservation(st, obs)
-
-	// WU devices expect a plain success body.
+	// ACK immediately. Weather POST can block up to tens of seconds; WU-style
+	// devices retry or drop if the listener stalls on the response.
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("success\n"))
+
+	go h.mgr.handleInterceptorObservation(st, obs)
 }
 
 // PreviewInterceptorRequest parses a WU-style payload without posting (console Test).

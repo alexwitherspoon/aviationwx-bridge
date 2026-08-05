@@ -153,6 +153,15 @@ func (h *interceptorHub) setRoutes(routes map[string]interceptorRoute) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.routes = routes
+	keep := make(map[string]struct{}, len(routes))
+	for _, r := range routes {
+		keep[r.station.ID] = struct{}{}
+	}
+	for id := range h.lastEmit {
+		if _, ok := keep[id]; !ok {
+			delete(h.lastEmit, id)
+		}
+	}
 }
 
 func (h *interceptorHub) start() error {

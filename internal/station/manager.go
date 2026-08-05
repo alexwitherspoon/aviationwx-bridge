@@ -157,6 +157,8 @@ func (m *Manager) SyncFromConfig() {
 }
 
 // syncInterceptorHub rebuilds the shared interceptor listener (own locking).
+// All enabled interceptor stations must share one listen_addr; mismatched
+// stations are skipped (not routed) so devices are never pointed at a dead bind.
 func (m *Manager) syncInterceptorHub(wanted map[string]config.Station) {
 	routes := make(map[string]interceptorRoute)
 	addr := ""
@@ -168,13 +170,24 @@ func (m *Manager) syncInterceptorHub(wanted map[string]config.Station) {
 		if addr == "" {
 			addr = st.ListenAddr
 		} else if st.ListenAddr != addr {
-			m.log.Warn("interceptor listen_addr mismatch; using first",
+			m.log.Warn("interceptor listen_addr mismatch; station not routed",
 				"station", st.ID, "want", st.ListenAddr, "using", addr)
+			m.setStatus(st.ID, func(s *StationStatus) {
+				s.Degraded = true
+				s.LANOK = false
+				s.LastPollError = fmt.Sprintf("listen_addr %q does not match active bind %q", st.ListenAddr, addr)
+			})
+			continue
 		}
 		path := st.ListenPath
 		if prev, ok := routes[path]; ok {
 			m.log.Warn("interceptor listen_path conflict; keeping first station",
 				"path", path, "keep", prev.station.ID, "skip", st.ID)
+			m.setStatus(st.ID, func(s *StationStatus) {
+				s.Degraded = true
+				s.LANOK = false
+				s.LastPollError = fmt.Sprintf("listen_path %q already used by %s", path, prev.station.ID)
+			})
 			continue
 		}
 		routes[path] = interceptorRoute{station: st}

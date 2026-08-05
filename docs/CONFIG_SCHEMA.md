@@ -89,7 +89,7 @@ Optional weather stations. One JSON file per station. Inventory is advertised in
 Runtime (epic #102 / #103 / aviationwx#274):
 
 - **Davis:** enabled stations with a `txid` are polled over LAN (HTTP `/v1/current_conditions`). Discover is operator-initiated only (SSE; CIDR /24-/30 + mDNS).
-- **HTTP interceptor:** enabled stations share one listen server on `listen_addr`; routes by exact `listen_path`. Devices push Weather Underground-compatible GET/POST fields. Discovery is not applicable (stations push to the bridge). Firewall the listen port on the LAN.
+- **HTTP interceptor:** enabled stations share one listen server on `listen_addr`; routes by exact `listen_path`. All interceptor stations must use the same `listen_addr`; a mismatched address is not routed (status degraded). Devices push Weather Underground-compatible GET/POST fields. Discovery is not applicable (stations push to the bridge). Firewall the listen port on the LAN.
 - Weather POST carries `provider`, `source_id`, and station-native detail in `provider_meta.raw` only - no bridge-normalized `sample`. Wind is always treated as true north. Core owns unit conversion and weather semantics.
 - Missing station time skips weather POST (Davis missing `ts`; interceptor missing/unparsable `dateutc`) - no bridge-clock `observed_at`. Emit ceiling ≤1 Hz. In-memory retry ring only; no disk weather queue.
 - Console: Test poll (Davis) / last-receive + inject test (interceptor). Local WLL + weather POST capture: `docker/wll-simulator/README.md` and golden wire sample `internal/bridgeapi/testdata/weather_post_davis_wll.example.json`.

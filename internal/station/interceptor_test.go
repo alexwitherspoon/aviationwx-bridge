@@ -230,3 +230,80 @@ func TestPreviewInterceptorRequest(t *testing.T) {
 		t.Fatal("expected observed_at")
 	}
 }
+
+func TestSyncInterceptorHubSkipsListenAddrMismatch(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(ManagerConfig{ConfigService: svc})
+	defer mgr.Stop()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	keep, err := svc.AddStation(config.Station{
+		ID:         "station-wu-a",
+		Name:       "WU A",
+		Type:       config.StationTypeHTTPInterceptor,
+		Enabled:    true,
+		ListenAddr: addr,
+		ListenPath: "/a",
+		Dialect:    config.HTTPInterceptorDialectWunderground,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	skip, err := svc.AddStation(config.Station{
+		ID:         "station-wu-b",
+		Name:       "WU B",
+		Type:       config.StationTypeHTTPInterceptor,
+		Enabled:    true,
+		ListenAddr: "127.0.0.1:1",
+		ListenPath: "/b",
+		Dialect:    config.HTTPInterceptorDialectWunderground,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.SyncFromConfig()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mgr.mu.Lock()
+		ready := mgr.hub != nil
+		mgr.mu.Unlock()
+		if ready {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	mgr.mu.Lock()
+	hub := mgr.hub
+	mgr.mu.Unlock()
+	if hub == nil {
+		t.Fatal("expected hub")
+	}
+	hub.mu.RLock()
+	_, hasKeep := hub.routes[keep.ListenPath]
+	_, hasSkip := hub.routes[skip.ListenPath]
+	hub.mu.RUnlock()
+	if !hasKeep || hasSkip {
+		t.Fatalf("routes keep=%v skip=%v", hasKeep, hasSkip)
+	}
+	var skipStatus StationStatus
+	for _, s := range mgr.StatusSnapshot() {
+		if s.ID == skip.ID {
+			skipStatus = s
+			break
+		}
+	}
+	if !skipStatus.Degraded || skipStatus.LastPollError == "" {
+		t.Fatalf("expected degraded mismatch status: %+v", skipStatus)
+	}
+}

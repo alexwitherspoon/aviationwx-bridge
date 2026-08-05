@@ -35,8 +35,7 @@ services:
 
   bridge:
     ports:
-      - "1229:1229"
-      - "18090:8090"  # HTTP interceptor ingest (WU-style)
+      - "18090:8090"  # HTTP interceptor ingest (WU-style); console 1229 comes from base compose
     environment:
       - AVIATIONWX_API_TLS_INSECURE=1
     depends_on:

@@ -90,13 +90,16 @@ func NormalizeStationDefaults(st *Station) {
 			st.PollIntervalSeconds = DefaultDavisPollIntervalSeconds
 		}
 	case StationTypeHTTPInterceptor:
-		if strings.TrimSpace(st.ListenAddr) == "" {
+		st.ListenAddr = strings.TrimSpace(st.ListenAddr)
+		st.ListenPath = strings.TrimSpace(st.ListenPath)
+		st.Dialect = strings.TrimSpace(st.Dialect)
+		if st.ListenAddr == "" {
 			st.ListenAddr = DefaultHTTPInterceptorListenAddr
 		}
-		if strings.TrimSpace(st.ListenPath) == "" {
+		if st.ListenPath == "" {
 			st.ListenPath = DefaultHTTPInterceptorListenPath
 		}
-		if strings.TrimSpace(st.Dialect) == "" {
+		if st.Dialect == "" {
 			st.Dialect = HTTPInterceptorDialectWunderground
 		}
 	}

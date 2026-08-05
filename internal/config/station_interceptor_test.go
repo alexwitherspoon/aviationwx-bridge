@@ -58,4 +58,15 @@ func TestNormalizeHTTPInterceptorDefaults(t *testing.T) {
 	if st.Dialect != HTTPInterceptorDialectWunderground {
 		t.Fatalf("dialect = %q", st.Dialect)
 	}
+
+	padded := Station{
+		Type:       StationTypeHTTPInterceptor,
+		ListenAddr: " 0.0.0.0:8090 ",
+		ListenPath: " /weatherstation/updateweatherstation.php ",
+		Dialect:    " wunderground ",
+	}
+	NormalizeStationDefaults(&padded)
+	if padded.ListenAddr != "0.0.0.0:8090" || padded.ListenPath != "/weatherstation/updateweatherstation.php" || padded.Dialect != "wunderground" {
+		t.Fatalf("expected trimmed fields, got %+v", padded)
+	}
 }

@@ -454,9 +454,11 @@ function updateStationsDisplay() {
         listEl.innerHTML = stations.map((cfg) => {
             const rt = runtimeById[cfg.id] || {};
             const lanOk = Boolean(rt.lan_ok);
+            const isInterceptor = cfg.type === 'http_interceptor';
+            const needsTxid = !isInterceptor && (cfg.txid == null || cfg.txid === '');
             let lanLabel = 'Offline';
             let lanClass = 'error';
-            if (cfg.txid == null || cfg.txid === '') {
+            if (needsTxid) {
                 lanLabel = 'Needs transmitter';
                 lanClass = 'degraded';
             } else if (rt.degraded) {
@@ -466,20 +468,21 @@ function updateStationsDisplay() {
                 lanLabel = 'Online';
                 lanClass = 'active';
             } else if (!rt.last_poll_at) {
-                lanLabel = 'Starting';
+                lanLabel = isInterceptor ? 'Waiting for POST' : 'Starting';
                 lanClass = 'degraded';
             }
             const observed = rt.last_observed_at || '';
             const age = ageFn(observed);
             const err = rt.last_poll_error ? `<div class="station-error">${escapeHtml(rt.last_poll_error)}</div>` : '';
-            const host = cfg.host ? escapeHtml(cfg.host)
-                : (cfg.listen_addr ? escapeHtml(cfg.listen_addr) : '—');
+            const host = cfg.host
+                ? escapeHtml(cfg.host)
+                : (cfg.listen_addr ? `bind ${escapeHtml(cfg.listen_addr)}` : '—');
             const typeLabel = cfg.type === 'davis_weatherlink_live'
                 ? 'Davis WeatherLink Live'
-                : (cfg.type === 'http_interceptor'
+                : (isInterceptor
                     ? 'HTTP Interceptor (WU)'
                     : escapeHtml(cfg.type || 'Station'));
-            const txidLabel = cfg.type === 'http_interceptor'
+            const txidLabel = isInterceptor
                 ? (cfg.listen_path ? escapeHtml(cfg.listen_path) : 'WU path')
                 : (cfg.txid != null ? `Transmitter ${escapeHtml(String(cfg.txid))}` : 'No transmitter');
             return `

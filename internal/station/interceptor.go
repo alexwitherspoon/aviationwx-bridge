@@ -164,6 +164,18 @@ func (h *interceptorHub) setRoutes(routes map[string]interceptorRoute) {
 	}
 }
 
+func (h *interceptorHub) alive() bool {
+	if h == nil || h.done == nil {
+		return false
+	}
+	select {
+	case <-h.done:
+		return false
+	default:
+		return true
+	}
+}
+
 func (h *interceptorHub) start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", h.serve)

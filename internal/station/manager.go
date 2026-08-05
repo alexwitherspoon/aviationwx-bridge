@@ -228,7 +228,7 @@ func (m *Manager) syncInterceptorHub(wanted map[string]config.Station) {
 		}
 		return
 	}
-	if old != nil && old.addr == addr {
+	if old != nil && old.addr == addr && old.alive() {
 		m.mu.Unlock()
 		old.setRoutes(routes)
 		return

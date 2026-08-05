@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -159,17 +160,31 @@ func (m *Manager) SyncFromConfig() {
 // syncInterceptorHub rebuilds the shared interceptor listener (own locking).
 // All enabled interceptor stations must share one listen_addr; mismatched
 // stations are skipped (not routed) so devices are never pointed at a dead bind.
+// Active bind is the listen_addr of the lexicographically smallest station id
+// so map iteration order cannot flip the bind across restarts.
 func (m *Manager) syncInterceptorHub(wanted map[string]config.Station) {
-	routes := make(map[string]interceptorRoute)
-	addr := ""
-	for _, st := range wanted {
+	type candidate struct {
+		id string
+		st config.Station
+	}
+	var enabled []candidate
+	for id, st := range wanted {
 		if !st.Enabled || st.Type != config.StationTypeHTTPInterceptor {
 			continue
 		}
 		config.NormalizeStationDefaults(&st)
-		if addr == "" {
-			addr = st.ListenAddr
-		} else if st.ListenAddr != addr {
+		enabled = append(enabled, candidate{id: id, st: st})
+	}
+	sort.Slice(enabled, func(i, j int) bool { return enabled[i].id < enabled[j].id })
+
+	routes := make(map[string]interceptorRoute)
+	addr := ""
+	if len(enabled) > 0 {
+		addr = enabled[0].st.ListenAddr
+	}
+	for _, c := range enabled {
+		st := c.st
+		if st.ListenAddr != addr {
 			m.log.Warn("interceptor listen_addr mismatch; station not routed",
 				"station", st.ID, "want", st.ListenAddr, "using", addr)
 			m.setStatus(st.ID, func(s *StationStatus) {

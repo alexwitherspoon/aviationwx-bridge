@@ -92,7 +92,7 @@ Runtime (epic #102 / #103 / aviationwx#274):
 - **HTTP interceptor:** enabled stations share one listen server on `listen_addr`; routes by exact `listen_path`. All interceptor stations must use the same `listen_addr` (active bind is the lexicographically smallest station id when they differ); a mismatched address is not routed (status degraded). Devices push Weather Underground-compatible GET/POST fields. Discovery is not applicable (stations push to the bridge). Firewall the listen port on the LAN.
 - Weather POST carries `provider`, `source_id`, and station-native detail in `provider_meta.raw` only - no bridge-normalized `sample`. Wind is always treated as true north. Core owns unit conversion and weather semantics.
 - Missing station time skips weather POST (Davis missing `ts`; interceptor missing/unparsable `dateutc`) - no bridge-clock `observed_at`. Emit ceiling ≤1 Hz. In-memory retry ring only; no disk weather queue.
-- Console: Test poll (Davis) / last-receive + inject test (interceptor). Local WLL + weather POST capture: `docker/wll-simulator/README.md` and golden wire sample `internal/bridgeapi/testdata/weather_post_davis_wll.example.json`.
+- Console: Test poll (Davis) / Test receive sample parse (interceptor; live ingest is last-receive in status). Local WLL + weather POST capture: `docker/wll-simulator/README.md` and golden wire sample `internal/bridgeapi/testdata/weather_post_davis_wll.example.json`.
 
 Davis example:
 

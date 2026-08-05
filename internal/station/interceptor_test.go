@@ -1,6 +1,7 @@
 package station
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -361,5 +362,52 @@ func TestSyncInterceptorHubMarksDegradedOnBindFailure(t *testing.T) {
 	}
 	if !status.Degraded || status.LANOK || !strings.Contains(status.LastPollError, "listen failed") {
 		t.Fatalf("expected degraded bind-failure status: %+v", status)
+	}
+}
+
+func TestSyncInterceptorHubClearsRoutingErrorWhenRoutable(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(ManagerConfig{ConfigService: svc})
+	defer mgr.Stop()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	st, err := svc.AddStation(config.Station{
+		ID:         "station-wu-recover",
+		Name:       "WU Recover",
+		Type:       config.StationTypeHTTPInterceptor,
+		Enabled:    true,
+		ListenAddr: addr,
+		ListenPath: "/recover",
+		Dialect:    config.HTTPInterceptorDialectWunderground,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.setStatus(st.ID, func(s *StationStatus) {
+		s.Degraded = true
+		s.LANOK = false
+		s.LastPollError = fmt.Sprintf("listen_addr %q does not match active bind %q", "127.0.0.1:1", addr)
+	})
+	mgr.SyncFromConfig()
+
+	var status StationStatus
+	for _, s := range mgr.StatusSnapshot() {
+		if s.ID == st.ID {
+			status = s
+			break
+		}
+	}
+	if status.Degraded || status.LastPollError != "" {
+		t.Fatalf("expected routing error cleared: %+v", status)
 	}
 }

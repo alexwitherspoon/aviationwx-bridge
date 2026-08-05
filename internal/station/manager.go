@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -206,6 +207,14 @@ func (m *Manager) syncInterceptorHub(wanted map[string]config.Station) {
 			continue
 		}
 		routes[path] = interceptorRoute{station: st}
+		// Clear stale routing/bind errors once the station is routable again.
+		// LANOK stays false until the first device ingest (no poll loop).
+		m.setStatus(st.ID, func(s *StationStatus) {
+			if interceptorRoutingError(s.LastPollError) {
+				s.Degraded = false
+				s.LastPollError = ""
+			}
+		})
 	}
 
 	m.mu.Lock()
@@ -250,6 +259,15 @@ func (m *Manager) syncInterceptorHub(wanted map[string]config.Station) {
 	m.hub = hub
 	m.mu.Unlock()
 	m.log.Info("interceptor listen started", "addr", addr, "routes", len(routes))
+}
+
+func interceptorRoutingError(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	return strings.Contains(msg, "listen_addr") ||
+		strings.Contains(msg, "listen_path") ||
+		strings.Contains(msg, "interceptor listen failed")
 }
 
 // Stop halts all poll workers and the interceptor listener.

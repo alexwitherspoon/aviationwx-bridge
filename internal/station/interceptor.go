@@ -2,6 +2,7 @@ package station
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -171,7 +172,26 @@ func (h *interceptorHub) start() error {
 	}
 	go func() {
 		defer close(h.done)
-		_ = h.server.Serve(ln)
+		err := h.server.Serve(ln)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			h.mgr.log.Warn("interceptor listener stopped unexpectedly",
+				"addr", h.addr, "error", err)
+			h.mu.RLock()
+			routes := make([]interceptorRoute, 0, len(h.routes))
+			for _, r := range h.routes {
+				routes = append(routes, r)
+			}
+			h.mu.RUnlock()
+			for _, route := range routes {
+				stID := route.station.ID
+				errMsg := fmt.Sprintf("interceptor listen failed on %s: %v", h.addr, err)
+				h.mgr.setStatus(stID, func(s *StationStatus) {
+					s.Degraded = true
+					s.LANOK = false
+					s.LastPollError = errMsg
+				})
+			}
+		}
 	}()
 	return nil
 }
@@ -202,6 +222,11 @@ func (h *interceptorHub) serve(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, interceptorMaxBody)
 	vals, err := formOrQueryValues(r)
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) || strings.Contains(err.Error(), "body too large") {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

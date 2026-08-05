@@ -32,6 +32,18 @@ func TestValidateHTTPInterceptorStation(t *testing.T) {
 	if err := ValidateStation(badAddr); err == nil {
 		t.Fatal("expected listen_addr without host to fail")
 	}
+
+	nonNumeric := st
+	nonNumeric.ListenAddr = "0.0.0.0:abc"
+	if err := ValidateStation(nonNumeric); err == nil {
+		t.Fatal("expected non-numeric port to fail")
+	}
+
+	zeroPort := st
+	zeroPort.ListenAddr = "0.0.0.0:0"
+	if err := ValidateStation(zeroPort); err == nil {
+		t.Fatal("expected port 0 to fail")
+	}
 }
 
 func TestNormalizeHTTPInterceptorDefaults(t *testing.T) {

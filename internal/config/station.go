@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -136,15 +137,22 @@ func validateHTTPInterceptorStation(st Station) error {
 	if addr == "" {
 		addr = DefaultHTTPInterceptorListenAddr
 	}
-	host, port, err := net.SplitHostPort(addr)
+	host, portStr, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fmt.Errorf("listen_addr must be host:port (got %q)", st.ListenAddr)
 	}
-	if port == "" {
+	if portStr == "" {
 		return fmt.Errorf("listen_addr missing port")
 	}
 	if host == "" {
 		return fmt.Errorf("listen_addr missing host (use 0.0.0.0 or 127.0.0.1)")
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return fmt.Errorf("listen_addr port must be an integer (got %q)", portStr)
+	}
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("listen_addr port must be 1-65535 (got %d)", port)
 	}
 	path := strings.TrimSpace(st.ListenPath)
 	if path == "" {
@@ -154,7 +162,7 @@ func validateHTTPInterceptorStation(st Station) error {
 		return fmt.Errorf("listen_path must start with /")
 	}
 	if strings.Contains(path, "..") {
-		return fmt.Errorf("listen_path must not contain ..")
+		return fmt.Errorf("listen_path must not contain path traversal segments")
 	}
 	dialect := strings.TrimSpace(st.Dialect)
 	if dialect == "" {

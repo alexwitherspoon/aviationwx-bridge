@@ -19,10 +19,11 @@ import (
 // Storage layout:
 //
 //	baseDir/
-//	  global.json       - Bridge-wide settings (timezone, web console, etc.)
+//	  global.json       - Bridge-wide settings (timezone, web console, api, etc.)
 //	  cameras/
 //	    cam1.json       - Individual camera configs
-//	    cam2.json
+//	  stations/
+//	    station1.json   - Individual weather station configs
 //
 // Design principles:
 //   - Single source of truth (Service owns all config)
@@ -34,8 +35,9 @@ type Service struct {
 	mu      sync.RWMutex
 
 	// In-memory cache (immutable snapshots)
-	global  *GlobalSettings
-	cameras map[string]*Camera // Key: camera ID
+	global   *GlobalSettings
+	cameras  map[string]*Camera  // Key: camera ID
+	stations map[string]*Station // Key: station ID
 
 	// Event listeners (called asynchronously)
 	listeners []func(event ConfigEvent)
@@ -54,12 +56,14 @@ type GlobalSettings struct {
 	Queue                 *QueueGlobal `json:"queue,omitempty"`                   // Queue settings
 	SNTP                  *SNTP        `json:"sntp,omitempty"`                    // Time sync settings
 	WebConsole            *WebConsole  `json:"web_console,omitempty"`             // Web console settings
+	API                   *APISettings `json:"api,omitempty"`                     // Optional HTTPS link to api.aviationwx.org
 }
 
 // ConfigEvent represents a configuration change
 type ConfigEvent struct {
-	Type     string // "camera_added", "camera_updated", "camera_deleted", "global_updated"
-	CameraID string // Empty for global events
+	Type      string // "camera_*", "station_*", "global_updated"
+	CameraID  string // Set for camera events
+	StationID string // Set for station events
 }
 
 // NewService creates a config service
@@ -67,12 +71,16 @@ func NewService(baseDir string) (*Service, error) {
 	s := &Service{
 		baseDir:   baseDir,
 		cameras:   make(map[string]*Camera),
+		stations:  make(map[string]*Station),
 		listeners: []func(ConfigEvent){},
 	}
 
 	// Ensure directories exist
 	if err := os.MkdirAll(filepath.Join(baseDir, "cameras"), 0755); err != nil {
 		return nil, fmt.Errorf("create config directories: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(baseDir, "stations"), 0755); err != nil {
+		return nil, fmt.Errorf("create stations directory: %w", err)
 	}
 
 	// Load existing config
@@ -160,6 +168,9 @@ func (s *Service) UpdateGlobal(fn func(*GlobalSettings) error) error {
 	if err := fn(&updated); err != nil {
 		return err
 	}
+	if err := ValidateAPISettings(updated.API); err != nil {
+		return err
+	}
 
 	// Save to disk
 	data, err := json.MarshalIndent(updated, "", "  ")
@@ -168,7 +179,7 @@ func (s *Service) UpdateGlobal(fn func(*GlobalSettings) error) error {
 	}
 
 	path := filepath.Join(s.baseDir, "global.json")
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write global config: %w", err)
 	}
 
@@ -394,40 +405,43 @@ func (s *Service) reload() error {
 	camerasDir := filepath.Join(s.baseDir, "cameras")
 	entries, err := os.ReadDir(camerasDir)
 	if err != nil {
-		// Camera directory might not exist yet
-		if os.IsNotExist(err) {
-			return nil
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("read cameras directory: %w", err)
 		}
-		return fmt.Errorf("read cameras directory: %w", err)
+		// Missing cameras dir is fine; still load stations below.
+	} else {
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+				continue
+			}
+
+			camPath := filepath.Join(camerasDir, entry.Name())
+			data, err := os.ReadFile(camPath)
+			if err != nil {
+				return fmt.Errorf("read camera file %s: %w", entry.Name(), err)
+			}
+
+			var cam Camera
+			if err := json.Unmarshal(data, &cam); err != nil {
+				return fmt.Errorf("parse camera file %s: %w", entry.Name(), err)
+			}
+
+			// Normalize upload config for backward compatibility
+			NormalizeUploadConfig(cam.Upload)
+
+			if err := ValidateCameraID(cam.ID); err != nil {
+				return fmt.Errorf("camera file %s: %w", entry.Name(), err)
+			}
+			if _, err := CameraConfigPath(s.baseDir, cam.ID); err != nil {
+				return fmt.Errorf("camera file %s: %w", entry.Name(), err)
+			}
+
+			s.cameras[cam.ID] = &cam
+		}
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-
-		camPath := filepath.Join(camerasDir, entry.Name())
-		data, err := os.ReadFile(camPath)
-		if err != nil {
-			return fmt.Errorf("read camera file %s: %w", entry.Name(), err)
-		}
-
-		var cam Camera
-		if err := json.Unmarshal(data, &cam); err != nil {
-			return fmt.Errorf("parse camera file %s: %w", entry.Name(), err)
-		}
-
-		// Normalize upload config for backward compatibility
-		NormalizeUploadConfig(cam.Upload)
-
-		if err := ValidateCameraID(cam.ID); err != nil {
-			return fmt.Errorf("camera file %s: %w", entry.Name(), err)
-		}
-		if _, err := CameraConfigPath(s.baseDir, cam.ID); err != nil {
-			return fmt.Errorf("camera file %s: %w", entry.Name(), err)
-		}
-
-		s.cameras[cam.ID] = &cam
+	if err := s.loadStationsLocked(); err != nil {
+		return err
 	}
 
 	return nil
@@ -451,8 +465,8 @@ func (s *Service) saveGlobal() error {
 		return err
 	}
 
-	// Write with proper permissions (0644 = rw-r--r--)
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	// Write with proper permissions (0600 = owner read/write; holds API key + console password)
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write global config: %w", err)
 	}
 

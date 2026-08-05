@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/scheduler"
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/station"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/update"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/upload"
 )
@@ -125,6 +127,20 @@ func TestConfigPutTopLevelFields(t *testing.T) {
 	}
 	if g.TimeoutUploadSeconds != 400 {
 		t.Errorf("timeout_upload_seconds: want 400, got %d", g.TimeoutUploadSeconds)
+	}
+}
+
+func TestConfigPutRejectsOversizedBody(t *testing.T) {
+	server := testServerWithAuth(t, ServerConfig{})
+	pass := server.configService.GetWebPassword()
+	body := bytes.Repeat([]byte("a"), 1<<20+1)
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.SetBasicAuth("admin", pass)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d body=%s, want 413", w.Code, w.Body.String())
 	}
 }
 
@@ -1379,6 +1395,22 @@ func testServerWithAuth(t *testing.T, cfg ServerConfig) *Server {
 	return NewServer(cfg)
 }
 
+// TestAPIAuthOmitsWWWAuthenticate ensures API 401 does not challenge Basic Auth.
+// The SPA prompts for the password in JS; a WWW-Authenticate header causes browsers
+// to show a second username/password dialog for unauthenticated resource loads.
+func TestAPIAuthOmitsWWWAuthenticate(t *testing.T) {
+	server := testServerWithAuth(t, ServerConfig{})
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+	if got := w.Header().Get("WWW-Authenticate"); got != "" {
+		t.Fatalf("WWW-Authenticate = %q, want empty (SPA handles auth)", got)
+	}
+}
+
 // TestHandleTestCamera tests the POST /api/test/camera endpoint
 func TestHandleTestCamera(t *testing.T) {
 	fakeJPEG := []byte{0xFF, 0xD8, 0xFF, 0xD9} // Minimal valid JPEG
@@ -1809,4 +1841,52 @@ func TestUploadSSHHostKeys_endpoint(t *testing.T) {
 			t.Fatalf("status = %q, want roster_sync_failed", ep.Status)
 		}
 	})
+}
+
+func TestHandleTestStationDiscoverSSE(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc, err := config.NewService(tmpDir)
+	if err != nil {
+		t.Fatalf("config service: %v", err)
+	}
+
+	server := NewServer(ServerConfig{
+		ConfigService: svc,
+		TestStationDiscoverStream: func(ctx context.Context, stationType, subnet string, emit func(station.DiscoverEvent)) error {
+			if stationType != "davis_weatherlink_live" {
+				t.Fatalf("type = %q", stationType)
+			}
+			if subnet != "192.168.1.0/24" {
+				t.Fatalf("subnet = %q", subnet)
+			}
+			emit(station.DiscoverEvent{Type: "phase", Phase: "mdns", Message: "Browsing"})
+			emit(station.DiscoverEvent{
+				Type:      "candidate",
+				Candidate: &station.DiscoverCandidate{Host: "wll.local", Method: "mdns"},
+			})
+			emit(station.DiscoverEvent{Type: "done", Message: "1 candidate(s)"})
+			return nil
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/test/station-discover",
+		bytes.NewBufferString(`{"type":"davis_weatherlink_live","subnet":"192.168.1.0/24"}`))
+	req.SetBasicAuth("admin", svc.GetWebPassword())
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	ct := w.Header().Get("Content-Type")
+	if !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"type":"phase"`) || !strings.Contains(body, `"type":"candidate"`) || !strings.Contains(body, `"type":"done"`) {
+		t.Fatalf("body missing events: %s", body)
+	}
+	if !strings.Contains(body, "wll.local") {
+		t.Fatalf("body missing candidate host: %s", body)
+	}
 }

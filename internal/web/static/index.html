@@ -24,6 +24,7 @@
             <div class="nav-links">
                 <a href="#dashboard" class="nav-link active" data-section="dashboard">Dashboard</a>
                 <a href="#cameras" class="nav-link" data-section="cameras">Cameras</a>
+                <a href="#weather" class="nav-link" data-section="weather">Weather</a>
                 <a href="#settings" class="nav-link" data-section="settings">Settings</a>
                 <a href="#logs" class="nav-link" data-section="logs">Logs</a>
             </div>
@@ -45,11 +46,15 @@
                 <!-- First Run Setup Banner -->
                 <div id="setupBanner" class="banner banner-info" style="display: none;">
                     <div class="banner-content">
-                        <h3>Welcome to AviationWX.org Bridge!</h3>
-                        <p>Let's set up your first camera. Each camera needs its own SFTP account from aviationwx.org.</p>
+                        <h3>Welcome to AviationWX.org Bridge</h3>
+                        <p>Set your timezone, then optionally connect to aviationwx.org and add cameras or weather stations. You can skip any step after timezone.</p>
                         <button class="btn btn-primary" onclick="showSetupWizard()">Start Setup</button>
+                        <button class="btn btn-secondary" style="margin-left:var(--space-sm)" onclick="dismissSetupBanner()">Dismiss</button>
                     </div>
                 </div>
+
+                <!-- Incomplete-config banners (not hard blocks) -->
+                <div id="configBanners"></div>
 
                 <!-- Stats Grid -->
                 <div class="stats-grid">
@@ -158,6 +163,35 @@
                 </div>
             </section>
 
+            <!-- Weather Section -->
+            <section id="weather" class="section">
+                <div class="section-header">
+                    <h1>Weather</h1>
+                    <button class="btn btn-primary" onclick="showAddStation()">+ Add Station</button>
+                </div>
+                <p class="form-help" style="margin-bottom: var(--space-lg);">
+                    Connect a Davis WeatherLink Live station on your local network. The bridge polls it for
+                    current conditions and shows live status here. With AviationWX Link configured, those
+                    observations are sent to aviationwx.org for your airport. Install the wind vane pointing
+                    true north.
+                </p>
+                <div id="stationList" class="station-list">
+                    <div class="empty-state">
+                        <p>No weather stations configured yet</p>
+                        <button class="btn btn-primary" onclick="showAddStation()">Add Station</button>
+                    </div>
+                </div>
+                <div class="card" style="margin-top: var(--space-lg);">
+                    <div class="card-header">
+                        <h2>Recent observations</h2>
+                        <span class="form-help" style="margin:0;">Newest first. Cleared when the bridge restarts.</span>
+                    </div>
+                    <div id="stationPayloadLog" class="station-payload-log">
+                        <div class="empty-state"><p>No observations yet</p></div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Settings Section -->
             <section id="settings" class="section">
                 <div class="section-header">
@@ -219,6 +253,60 @@
                             <p id="webConsoleUnsavedHint" class="form-help" style="display:none;color:var(--color-warning);">Unsaved changes — click Save password to apply.</p>
                         </div>
                         <button type="button" class="btn btn-primary" onclick="saveWebSettings()">Save password</button>
+                    </div>
+                </div>
+
+                <!-- AviationWX API Link -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>AviationWX Link</h2>
+                    </div>
+                    <div class="card-body">
+                        <p class="form-help">
+                            Optional connection to aviationwx.org for bridge health and weather uploads.
+                            Cameras and image uploads keep working without a key. Ask aviationwx.org for an API key
+                            (<code>awxb_</code> followed by 48 characters), then paste it here.
+                        </p>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="apiEnabled" onchange="markAPILinkDirty()">
+                                Enable AviationWX Link
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="apiKey">API key</label>
+                            <div class="password-input-row">
+                                <input type="password" id="apiKey" class="form-control" autocomplete="off" spellcheck="false"
+                                       placeholder="Paste awxb_... key" oninput="markAPILinkDirty()">
+                                <button type="button" class="btn btn-secondary btn-sm" id="apiKeyToggle" aria-pressed="false"
+                                        aria-label="Show API key" onclick="togglePasswordField('apiKey', 'apiKeyToggle', 'API key')">Show</button>
+                            </div>
+                            <p class="form-help" id="apiKeyHint">Leave blank when saving to keep the current key.</p>
+                        </div>
+                        <details id="apiAdvancedDetails" style="margin-bottom: var(--space-md);">
+                            <summary style="cursor:pointer;">Advanced</summary>
+                            <div class="form-group" style="margin-top: var(--space-md);">
+                                <label for="apiBaseUrl">API base URL</label>
+                                <input type="url" id="apiBaseUrl" class="form-control" spellcheck="false"
+                                       placeholder="https://api.aviationwx.org" oninput="markAPILinkDirty()">
+                                <p class="form-help">Leave blank for production. Change only if aviationwx.org support asks you to (https required).</p>
+                            </div>
+                        </details>
+                        <div id="apiLinkStatusPanel" class="upload-ssh-keys-panel" style="margin-bottom: var(--space-md);">
+                            <p class="form-help">Link status loads with bridge status...</p>
+                        </div>
+                        <p id="apiLinkUnsavedHint" class="form-help" style="display:none;color:var(--color-warning);">Unsaved changes - click Save link to apply.</p>
+                        <div id="apiLinkTestResult"></div>
+                        <div style="display:flex;flex-wrap:wrap;gap:var(--space-sm);margin-top:var(--space-md);">
+                            <button type="button" class="btn btn-primary" onclick="saveAPILinkSettings()">Save link</button>
+                            <button type="button" class="btn btn-secondary" onclick="testAPIBootstrap()">Test connection</button>
+                            <button type="button" class="btn btn-secondary" onclick="testAPIHealth()">Test link</button>
+                            <button type="button" class="btn btn-secondary" onclick="showSetupWizard(true)">Resume setup</button>
+                        </div>
+                        <p class="form-help" style="margin-top:var(--space-sm)">
+                            Test connection checks the API key and airport binding.
+                            Test link sends a health check to aviationwx.org.
+                        </p>
                     </div>
                 </div>
 
@@ -400,6 +488,8 @@
         import { buildCameraConfigFromFormValues, uploadCredentialKey, findConflictingCameraId, slugCameraIdFromName, encodeBasicAuthHeader } from '/js/form-utils.js';
         import { shouldRefreshPreview } from '/js/preview-refresh.js';
         import { shouldSkipSettingsHydrate, shouldWarnBeforePageLeave } from '/js/settings-draft.js';
+        import { formatObservationAge, formatRawPayload, consumeSSEBuffer, discoverHostValue } from '/js/weather-display.js';
+        import { selectConfigBanners, firstIncompleteWizardStep, isFirstRunSetup } from '/js/setup-guidance.js';
         import {
             canApplyUpdateFromUI,
             updateBannerLabel,
@@ -416,6 +506,13 @@
         window.shouldRefreshPreview = shouldRefreshPreview;
         window.shouldSkipSettingsHydrate = shouldSkipSettingsHydrate;
         window.shouldWarnBeforePageLeave = shouldWarnBeforePageLeave;
+        window.formatObservationAge = formatObservationAge;
+        window.formatRawPayload = formatRawPayload;
+        window.consumeSSEBuffer = consumeSSEBuffer;
+        window.discoverHostValue = discoverHostValue;
+        window.selectConfigBanners = selectConfigBanners;
+        window.firstIncompleteWizardStep = firstIncompleteWizardStep;
+        window.isFirstRunSetup = isFirstRunSetup;
         window.canApplyUpdateFromUI = canApplyUpdateFromUI;
         window.updateBannerLabel = updateBannerLabel;
         window.manualUpdateConfirmMessage = manualUpdateConfirmMessage;

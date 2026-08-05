@@ -46,5 +46,10 @@
     "check_interval_seconds": 300,
     "max_offset_seconds": 5,
     "timeout_seconds": 5
+  },
+  "api": {
+    "enabled": false,
+    "key": "",
+    "base_url": "https://api.aviationwx.org"
   }
 }

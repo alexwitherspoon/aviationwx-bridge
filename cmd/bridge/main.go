@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/bridgeapi"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/camera"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/deploy"
@@ -21,6 +22,7 @@ import (
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/logger"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/resource"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/scheduler"
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/station"
 	timehealth "github.com/alexwitherspoon/AviationWX.org-Bridge/internal/time"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/update"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/upload"
@@ -83,6 +85,8 @@ type Bridge struct {
 	orchestrator    *scheduler.Orchestrator
 	webServer       *web.Server
 	updateChecker   *update.Checker
+	apiReporter     *bridgeapi.Reporter
+	stationManager  *station.Manager
 	systemMonitor   *health.SystemMonitor
 	timeHealth      *timehealth.TimeHealth
 	resourceLimiter *resource.Limiter
@@ -220,6 +224,25 @@ func main() {
 	}
 	bridge.statusCache = newStatusCache(500*time.Millisecond, bridge.buildStatus)
 
+	bridge.apiReporter = bridgeapi.NewReporter(bridgeapi.ReporterConfig{
+		ConfigService: configService,
+		Version:       Version,
+		Commit:        GitCommit,
+		Log:           log,
+		BuildHealth:   bridge.buildAPIHealthRequest,
+	})
+	bridge.apiReporter.SyncFromConfig()
+	if config.APIConfigured(configService.GetGlobal().API) {
+		log.Info("Bridge API reporter started")
+	}
+
+	bridge.stationManager = station.NewManager(station.ManagerConfig{
+		ConfigService: configService,
+		Poster:        bridge.apiReporter,
+		Log:           log,
+	})
+	bridge.stationManager.SyncFromConfig()
+
 	// Initialize orchestrator
 	if err := bridge.initOrchestrator(); err != nil {
 		log.Warn("Could not initialize orchestrator - cameras disabled", "error", err)
@@ -227,13 +250,17 @@ func main() {
 
 	// Create web server (no callbacks - uses ConfigService directly)
 	bridge.webServer = web.NewServer(web.ServerConfig{
-		ConfigService:       configService,
-		GetStatus:           bridge.getStatusCached,
-		GetCaptureReadiness: bridge.getCaptureReadiness,
-		TestCamera:          bridge.testCamera,
-		TestUpload:          bridge.testUpload,
-		GetCameraImage:      bridge.getCameraImage,
-		GetWorkerStatus:     bridge.getWorkerStatus,
+		ConfigService:             configService,
+		GetStatus:                 bridge.getStatusCached,
+		GetCaptureReadiness:       bridge.getCaptureReadiness,
+		TestCamera:                bridge.testCamera,
+		TestUpload:                bridge.testUpload,
+		TestAPIBootstrap:          bridge.testAPIBootstrap,
+		TestAPIHealth:             bridge.testAPIHealth,
+		TestStationPoll:           bridge.testStationPoll,
+		TestStationDiscoverStream: bridge.testStationDiscoverStream,
+		GetCameraImage:            bridge.getCameraImage,
+		GetWorkerStatus:           bridge.getWorkerStatus,
 	})
 
 	// Subscribe to config changes
@@ -284,6 +311,12 @@ func main() {
 	}
 
 	// Stop services
+	if bridge.stationManager != nil {
+		bridge.stationManager.Stop()
+	}
+	if bridge.apiReporter != nil {
+		bridge.apiReporter.Stop()
+	}
 	if bridge.updateChecker != nil {
 		bridge.updateChecker.Stop()
 	}
@@ -775,6 +808,11 @@ func (b *Bridge) handleConfigEvent(event config.ConfigEvent) {
 
 		b.log.Info("Camera removed", "camera", event.CameraID)
 
+	case "station_added", "station_updated", "station_deleted":
+		if b.stationManager != nil {
+			b.stationManager.SyncFromConfig()
+		}
+
 	case "global_updated":
 		// Global settings changed - update services that need hot-reload
 		global := b.configService.GetGlobal()
@@ -801,11 +839,20 @@ func (b *Bridge) handleConfigEvent(event config.ConfigEvent) {
 			b.refreshUploadersFromGlobal()
 		}
 
+		if b.apiReporter != nil {
+			b.apiReporter.SyncFromConfig()
+		}
+		if b.stationManager != nil {
+			// API link may have become available for weather POST.
+			b.stationManager.SyncFromConfig()
+		}
+
 		b.log.Info("Global config updated",
 			"timezone", global.Timezone,
 			"sntp_enabled", global.SNTP != nil && global.SNTP.Enabled,
 			"max_concurrent_uploads", config.EffectiveMaxConcurrentUploads(global),
-			"max_concurrent_captures", config.EffectiveMaxConcurrentCaptures(global))
+			"max_concurrent_captures", config.EffectiveMaxConcurrentCaptures(global),
+			"api_configured", config.APIConfigured(global.API))
 	}
 }
 
@@ -871,11 +918,231 @@ func (b *Bridge) testUpload(uploadConfig config.Upload) error {
 	return nil
 }
 
+// testAPIBootstrap probes core GET /v1/bridge/bootstrap with optional unsaved credentials.
+func (b *Bridge) testAPIBootstrap(key, baseURL string) (map[string]interface{}, error) {
+	global := b.configService.GetGlobal()
+	key = strings.TrimSpace(key)
+	baseURL = strings.TrimSpace(baseURL)
+	if key == "" && global.API != nil {
+		key = global.API.Key
+	}
+	if baseURL == "" {
+		baseURL = config.EffectiveAPIBaseURL(global.API)
+	}
+	if key == "" {
+		return nil, fmt.Errorf("api key is required")
+	}
+	if !config.ValidAPIKeyShape(key) {
+		return nil, fmt.Errorf("api key must be awxb_ plus %d alphanumeric characters", config.APIKeySecretLength)
+	}
+	client, err := bridgeapi.NewClient(bridgeapi.ClientConfig{
+		BaseURL: baseURL,
+		APIKey:  key,
+		Version: Version,
+	})
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	boot, err := client.Bootstrap(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]interface{}{
+		"airport_id":                 boot.Airport.ID,
+		"airport_name":               boot.Airport.Name,
+		"bridge_id":                  boot.BridgeID,
+		"declination_deg":            boot.DeclinationDeg,
+		"declination_source":         boot.DeclinationSource,
+		"heartbeat_interval_seconds": boot.HeartbeatIntervalSeconds,
+		"enabled_sources":            boot.EnabledSources,
+	}
+	if b.apiReporter != nil {
+		// Refresh configured reporter bootstrap cache when testing the saved key.
+		if global.API != nil && key == global.API.Key {
+			_, _ = b.apiReporter.BootstrapNow(ctx)
+		}
+	}
+	return out, nil
+}
+
+// testAPIHealth posts one health heartbeat using the running reporter.
+func (b *Bridge) testAPIHealth() (map[string]interface{}, error) {
+	if b.apiReporter == nil {
+		return nil, fmt.Errorf("api reporter not available")
+	}
+	global := b.configService.GetGlobal()
+	if !config.APIConfigured(global.API) {
+		return nil, fmt.Errorf("api link is not configured - save an enabled key first")
+	}
+	b.apiReporter.SyncFromConfig()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	boot, err := b.apiReporter.BootstrapNow(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: %w", err)
+	}
+	snap := b.apiReporter.Snapshot()
+	return map[string]interface{}{
+		"bridge_id":   boot.BridgeID,
+		"airport_id":  boot.Airport.ID,
+		"link_status": snap.Status,
+		"last_error":  snap.LastError,
+		"configured":  snap.Configured,
+	}, nil
+}
+
+// testStationPoll probes a LAN weather station once (ISS list + optional sample).
+func (b *Bridge) testStationPoll(st config.Station) (map[string]interface{}, error) {
+	if b.stationManager == nil {
+		return nil, fmt.Errorf("station manager not available")
+	}
+	if strings.TrimSpace(st.Type) == "" {
+		st.Type = config.StationTypeDavisWeatherLinkLive
+	}
+	if strings.TrimSpace(st.Host) == "" {
+		return nil, fmt.Errorf("station host is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	obs, err := b.stationManager.TestPoll(ctx, st)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]interface{}{
+		"provider":      obs.Provider,
+		"did":           obs.DID,
+		"transmitters":  obs.Transmitters,
+		"provider_meta": obs.ProviderMeta,
+	}
+	// Missing station ts leaves ObservedAt zero; omit so the console shows
+	// "no station timestamp" instead of year-1 RFC3339.
+	if !obs.ObservedAt.IsZero() {
+		out["observed_at"] = obs.ObservedAt.UTC().Format(time.RFC3339)
+	}
+	return out, nil
+}
+
+func (b *Bridge) testStationDiscoverStream(ctx context.Context, stationType, subnet string, emit func(station.DiscoverEvent)) error {
+	return station.DiscoverStationsStream(ctx, station.DiscoverOptions{
+		Type:   stationType,
+		Subnet: subnet,
+	}, emit)
+}
+
 func (b *Bridge) getStatusCached() interface{} {
 	if b.statusCache == nil {
 		return b.buildStatus()
 	}
 	return b.statusCache.get()
+}
+
+// buildAPIHealthRequest assembles the outbound health payload for api.aviationwx.org.
+func (b *Bridge) buildAPIHealthRequest() bridgeapi.HealthRequest {
+	global := b.configService.GetGlobal()
+	cameras := b.configService.ListCameras()
+	stations := b.configService.ListStations()
+
+	hostStatus := bridgeapi.StatusOperational
+	ntpOK := true
+	var ntpFailureSeconds int64
+	if b.timeHealth != nil {
+		ts := b.timeHealth.GetStatus()
+		ntpOK = ts.Healthy
+		if !ntpOK {
+			hostStatus = bridgeapi.StatusDegraded
+			if !ts.LastGoodSync.IsZero() {
+				ntpFailureSeconds = int64(time.Since(ts.LastGoodSync).Seconds())
+			}
+		}
+	}
+
+	inv := bridgeapi.Inventory{
+		Cameras:  make([]bridgeapi.InventoryCamera, 0, len(cameras)),
+		Stations: make([]bridgeapi.InventoryStation, 0, len(stations)),
+	}
+	for _, cam := range cameras {
+		inv.Cameras = append(inv.Cameras, bridgeapi.InventoryCamera{
+			ID:              cam.ID,
+			Name:            cam.Name,
+			EnabledOnBridge: cam.Enabled,
+		})
+	}
+	for _, st := range stations {
+		inv.Stations = append(inv.Stations, bridgeapi.InventoryStation{
+			ID:              st.ID,
+			Name:            st.Name,
+			Type:            st.Type,
+			EnabledOnBridge: st.Enabled,
+		})
+	}
+
+	subsystems := map[string]bridgeapi.SubsystemHealth{}
+	if len(cameras) > 0 {
+		camStatus := bridgeapi.StatusOperational
+		uploadStatus := bridgeapi.StatusOperational
+		if b.orchestrator != nil {
+			orch := b.orchestrator.GetStatus()
+			for _, cs := range orch.CameraStats {
+				if cs.IsBackingOff || cs.LastError != nil {
+					camStatus = bridgeapi.StatusDegraded
+					break
+				}
+			}
+			if orch.UploadStats.UploadsFailed > 0 {
+				uploadStatus = bridgeapi.StatusDegraded
+			}
+		}
+		subsystems["cameras"] = bridgeapi.SubsystemHealth{Status: camStatus}
+		subsystems["upload"] = bridgeapi.SubsystemHealth{Status: uploadStatus}
+	}
+	if b.stationManager != nil {
+		if wx, ok := b.stationManager.WeatherSubsystemHealth(); ok {
+			subsystems["weather"] = wx
+		}
+	} else if len(stations) > 0 {
+		subsystems["weather"] = bridgeapi.SubsystemHealth{
+			Status: bridgeapi.StatusOperational,
+			Detail: map[string]interface{}{"lan_ok": false},
+		}
+	}
+
+	var resources *bridgeapi.HostResources
+	if b.systemMonitor != nil {
+		stats := b.systemMonitor.GetStats()
+		queueDepth := 0
+		if b.orchestrator != nil {
+			for _, cs := range b.orchestrator.GetStatus().CameraStats {
+				queueDepth += cs.QueueStats.ImageCount
+			}
+		}
+		resources = &bridgeapi.HostResources{
+			MemAvailableMB: int(stats.MemTotalMB - stats.MemUsedMB),
+			QueuePath:      os.Getenv("AVIATIONWX_QUEUE_PATH"),
+			QueueDepth:     queueDepth,
+		}
+		if resources.QueuePath == "" {
+			resources.QueuePath = "/dev/shm/aviationwx"
+		}
+	}
+
+	return bridgeapi.HealthRequest{
+		ObservedAt: time.Now().UTC(),
+		Host: bridgeapi.HostHealth{
+			Status:            hostStatus,
+			NTPOK:             ntpOK,
+			NTPFailureSeconds: ntpFailureSeconds,
+			Build: bridgeapi.BuildInfo{
+				Version: Version,
+				Commit:  GitCommit,
+				Channel: getUpdateChannel(global.UpdateChannel),
+			},
+			Resources: resources,
+		},
+		Subsystems: subsystems,
+		Inventory:  inv,
+	}
 }
 
 // buildStatus returns the current bridge status (uncached).
@@ -912,6 +1179,10 @@ func (b *Bridge) buildStatus() interface{} {
 		"uploads_today":       uploadsToday,
 		"self_update_enabled": deploy.SelfUpdateEnabled(),
 	}
+	stations := b.configService.ListStations()
+	status["total_stations"] = len(stations)
+	status["first_run"] = len(cameras) == 0 && len(stations) == 0
+
 	if tag := readHostDataLabel("configured-image-tag.txt"); tag != "" {
 		status["configured_image_tag"] = tag
 	}
@@ -960,6 +1231,39 @@ func (b *Bridge) buildStatus() interface{} {
 			"update_available": updateStatus.UpdateAvailable,
 			"last_check":       updateStatus.LastCheck.Format(time.RFC3339),
 		}
+	}
+
+	if b.apiReporter != nil {
+		snap := b.apiReporter.Snapshot()
+		apiStatus := map[string]interface{}{
+			"configured": snap.Configured,
+			"status":     snap.Status,
+		}
+		if !snap.LastHealthOK.IsZero() {
+			apiStatus["last_health_ok"] = snap.LastHealthOK.UTC().Format(time.RFC3339)
+		}
+		if snap.LastError != "" {
+			apiStatus["last_error"] = snap.LastError
+		}
+		if snap.Bootstrap != nil {
+			apiStatus["bridge_id"] = snap.Bootstrap.BridgeID
+			apiStatus["airport_id"] = snap.Bootstrap.Airport.ID
+			apiStatus["airport_name"] = snap.Bootstrap.Airport.Name
+			apiStatus["declination_deg"] = snap.Bootstrap.DeclinationDeg
+			apiStatus["enabled_sources"] = snap.Bootstrap.EnabledSources
+		}
+		status["api_link"] = apiStatus
+	}
+
+	if b.stationManager != nil {
+		stationsStatus := b.stationManager.StatusSnapshot()
+		weatherStatus := map[string]interface{}{
+			"stations": stationsStatus,
+		}
+		if payloads := b.stationManager.RecentPayloads(); len(payloads) > 0 {
+			weatherStatus["recent_payloads"] = payloads
+		}
+		status["weather"] = weatherStatus
 	}
 
 	if hostRecovery := readRecoveryExhausted(); hostRecovery != nil {

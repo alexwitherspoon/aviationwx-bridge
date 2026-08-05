@@ -501,6 +501,16 @@ select.form-control {
     border: 1px solid var(--color-primary);
 }
 
+.banner-strong {
+    background: linear-gradient(135deg, rgba(210, 153, 34, 0.25), transparent);
+    border: 1px solid var(--color-warning);
+}
+
+.banner-soft {
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+}
+
 .banner-content h3 {
     margin-bottom: var(--space-sm);
     font-size: 1.1rem;
@@ -509,6 +519,10 @@ select.form-control {
 .banner-content p {
     margin-bottom: var(--space-md);
     color: var(--color-text-muted);
+}
+
+#configBanners .banner {
+    margin-bottom: var(--space-md);
 }
 
 /* Camera Overview */
@@ -1185,4 +1199,131 @@ select.form-control {
 }
 
 
+
+/* Weather (LAN stations) */
+
+.station-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.station-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-md) var(--space-lg);
+}
+
+.station-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-md);
+    margin-bottom: var(--space-sm);
+}
+
+.station-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-shrink: 0;
+}
+
+.station-card-header h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.station-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+}
+
+.station-error {
+    margin-top: var(--space-sm);
+    color: var(--color-danger, #f87171);
+    font-size: 0.875rem;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.station-payload-log {
+    max-height: 32rem;
+    overflow: auto;
+    padding: var(--space-md);
+}
+
+.station-payload-entry {
+    border-bottom: 1px solid var(--color-border);
+    padding: var(--space-md) 0;
+}
+
+.station-payload-entry:last-child {
+    border-bottom: none;
+}
+
+.station-payload-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-sm);
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+}
+
+.station-payload-id {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.station-raw-payload {
+    margin: 0;
+    padding: var(--space-md);
+    background: var(--color-bg, #0f1419);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm, 4px);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+}
+
+.status-badge.degraded {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+}
+
+.discover-progress {
+    margin: var(--space-sm) 0;
+}
+
+.discover-progress-track {
+    height: 8px;
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-input);
+    border: 1px solid var(--color-border-muted);
+    overflow: hidden;
+}
+
+.discover-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--color-primary);
+    transition: width var(--transition-fast);
+}
+
+.discover-progress-label {
+    display: block;
+    margin-top: var(--space-xs);
+    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    color: var(--color-text-muted);
+}
 

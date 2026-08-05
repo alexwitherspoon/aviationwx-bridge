@@ -1,0 +1,39 @@
+# Local weather wire-dev overlay.
+# Usage (from repo root):
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.weather-dev.yml up -d --build
+#
+# Then:
+#   - WLL mock:  http://localhost:18080/v1/current_conditions
+#   - API mock:  https://localhost:18443/v1/bridge/weather/captured  (self-signed)
+#   - Console:   http://localhost:1229
+#
+# Station Host: wll-simulator:8080  (from bridge container) or host.docker.internal:18080
+# API Advanced base URL: https://bridge-api-mock:8443
+# API key (valid shape): awxb_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKL
+# AVIATIONWX_API_TLS_INSECURE=1 is set so the bridge accepts the mock cert.
+
+services:
+  wll-simulator:
+    build:
+      context: ..
+      dockerfile: docker/wll-simulator/Dockerfile
+    container_name: aviationwx-wll-simulator
+    ports:
+      - "18080:8080"
+    restart: unless-stopped
+
+  bridge-api-mock:
+    build:
+      context: ..
+      dockerfile: docker/bridge-api-mock/Dockerfile
+    container_name: aviationwx-bridge-api-mock
+    ports:
+      - "18443:8443"
+    restart: unless-stopped
+
+  bridge:
+    environment:
+      - AVIATIONWX_API_TLS_INSECURE=1
+    depends_on:
+      - wll-simulator
+      - bridge-api-mock

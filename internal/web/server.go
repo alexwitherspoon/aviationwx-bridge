@@ -20,6 +20,7 @@ import (
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/deploy"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/logger"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/paths"
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/station"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/upload"
 )
 
@@ -65,6 +66,29 @@ func normalizeCameraType(t string) (string, error) {
 	return t, nil
 }
 
+// redactAPIKeyInConfigMap removes api.key from a GET /api/config map and adds key_set / key_hint.
+func redactAPIKeyInConfigMap(out map[string]interface{}) {
+	raw, ok := out["api"]
+	if !ok || raw == nil {
+		return
+	}
+	api, ok := raw.(map[string]interface{})
+	if !ok {
+		return
+	}
+	key, _ := api["key"].(string)
+	key = strings.TrimSpace(key)
+	delete(api, "key")
+	if key != "" {
+		api["key_set"] = true
+		api["key_hint"] = config.APIKeyHint(key)
+	} else {
+		api["key_set"] = false
+		api["key_hint"] = ""
+	}
+	out["api"] = api
+}
+
 // validateONVIFCameraForPost ensures ONVIF cameras have a usable endpoint and credentials after normalization.
 func validateONVIFCameraForPost(cam *config.Camera) error {
 	if cam.ONVIF == nil {
@@ -98,12 +122,16 @@ type Server struct {
 	log           *logger.Logger
 
 	// Callbacks to bridge services
-	getStatus           func() interface{}
-	getCaptureReadiness func() (ok bool, reason string)
-	testCamera          func(camConfig config.Camera) ([]byte, error)
-	testUpload          func(uploadConfig config.Upload) error
-	getCameraImage      func(cameraID string) ([]byte, error)
-	getWorkerStatus     func(cameraID string) map[string]interface{}
+	getStatus                 func() interface{}
+	getCaptureReadiness       func() (ok bool, reason string)
+	testCamera                func(camConfig config.Camera) ([]byte, error)
+	testUpload                func(uploadConfig config.Upload) error
+	testAPIBootstrap          func(key, baseURL string) (map[string]interface{}, error)
+	testAPIHealth             func() (map[string]interface{}, error)
+	testStationPoll           func(st config.Station) (map[string]interface{}, error)
+	testStationDiscoverStream func(ctx context.Context, stationType, subnet string, emit func(station.DiscoverEvent)) error
+	getCameraImage            func(cameraID string) ([]byte, error)
+	getWorkerStatus           func(cameraID string) map[string]interface{}
 }
 
 // ServerConfig configures the web server
@@ -114,22 +142,35 @@ type ServerConfig struct {
 	GetCaptureReadiness func() (ok bool, reason string)
 	TestCamera          func(camConfig config.Camera) ([]byte, error)
 	TestUpload          func(uploadConfig config.Upload) error
-	GetCameraImage      func(cameraID string) ([]byte, error)
-	GetWorkerStatus     func(cameraID string) map[string]interface{}
+	// TestAPIBootstrap probes GET /v1/bridge/bootstrap with optional unsaved key/base_url.
+	TestAPIBootstrap func(key, baseURL string) (map[string]interface{}, error)
+	// TestAPIHealth posts one health heartbeat using the configured reporter.
+	TestAPIHealth func() (map[string]interface{}, error)
+	// TestStationPoll probes a LAN station (Davis current_conditions) and returns transmitters.
+	TestStationPoll func(st config.Station) (map[string]interface{}, error)
+	// TestStationDiscoverStream runs user-initiated discovery; emit is called as progress arrives (SSE).
+	// subnet is an operator-supplied IPv4 CIDR for the HTTP probe (/24-/30).
+	TestStationDiscoverStream func(ctx context.Context, stationType, subnet string, emit func(station.DiscoverEvent)) error
+	GetCameraImage            func(cameraID string) ([]byte, error)
+	GetWorkerStatus           func(cameraID string) map[string]interface{}
 }
 
 // NewServer creates a new web server
 func NewServer(cfg ServerConfig) *Server {
 	s := &Server{
-		configService:       cfg.ConfigService,
-		mux:                 http.NewServeMux(),
-		log:                 logger.Default(),
-		getStatus:           cfg.GetStatus,
-		getCaptureReadiness: cfg.GetCaptureReadiness,
-		testCamera:          cfg.TestCamera,
-		testUpload:          cfg.TestUpload,
-		getCameraImage:      cfg.GetCameraImage,
-		getWorkerStatus:     cfg.GetWorkerStatus,
+		configService:             cfg.ConfigService,
+		mux:                       http.NewServeMux(),
+		log:                       logger.Default(),
+		getStatus:                 cfg.GetStatus,
+		getCaptureReadiness:       cfg.GetCaptureReadiness,
+		testCamera:                cfg.TestCamera,
+		testUpload:                cfg.TestUpload,
+		testAPIBootstrap:          cfg.TestAPIBootstrap,
+		testAPIHealth:             cfg.TestAPIHealth,
+		testStationPoll:           cfg.TestStationPoll,
+		testStationDiscoverStream: cfg.TestStationDiscoverStream,
+		getCameraImage:            cfg.GetCameraImage,
+		getWorkerStatus:           cfg.GetWorkerStatus,
 	}
 
 	s.setupRoutes()
@@ -142,9 +183,15 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/config", s.authMiddleware(s.handleConfig))
 	s.mux.HandleFunc("/api/cameras", s.authMiddleware(s.handleCameras))
 	s.mux.HandleFunc("/api/cameras/", s.authMiddleware(s.handleCamera))
+	s.mux.HandleFunc("/api/stations", s.authMiddleware(s.handleStations))
+	s.mux.HandleFunc("/api/stations/", s.authMiddleware(s.handleStation))
 	s.mux.HandleFunc("/api/time", s.authMiddleware(s.handleTime))
 	s.mux.HandleFunc("/api/test/camera", s.authMiddleware(s.handleTestCamera))
 	s.mux.HandleFunc("/api/test/upload", s.authMiddleware(s.handleTestUpload))
+	s.mux.HandleFunc("/api/test/api-bootstrap", s.authMiddleware(s.handleTestAPIBootstrap))
+	s.mux.HandleFunc("/api/test/api-health", s.authMiddleware(s.handleTestAPIHealth))
+	s.mux.HandleFunc("/api/test/station-poll", s.authMiddleware(s.handleTestStationPoll))
+	s.mux.HandleFunc("/api/test/station-discover", s.authMiddleware(s.handleTestStationDiscover))
 	s.mux.HandleFunc("/api/upload/ssh-host-keys", s.authMiddleware(s.handleUploadSSHHostKeys))
 	s.mux.HandleFunc("/api/update", s.authMiddleware(s.handleUpdate))
 
@@ -195,7 +242,11 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Use constant-time comparison to prevent timing attacks
 		passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte(expectedPassword)) == 1
 		if !ok || !passwordMatch {
-			w.Header().Set("WWW-Authenticate", `Basic realm="AviationWX.org Bridge"`)
+			// Do not set WWW-Authenticate. The console SPA sends Authorization
+			// via fetch and prompts for the password in JS. A Basic challenge
+			// makes browsers show a second username/password dialog when
+			// unauthenticated requests (e.g. <img src="/api/.../preview">) hit
+			// the API.
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -270,12 +321,20 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		out["max_concurrent_captures"] = effectiveMCC
 		out["max_concurrent_captures_auto"] = autoMCC
+		redactAPIKeyInConfigMap(out)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(out)
 
 	case http.MethodPut:
+		// Cap body before ReadAll - Pi Zero has little RAM for a hostile PUT.
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "Failed to read body", http.StatusBadRequest)
 			return
 		}
@@ -353,6 +412,21 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			if updates.TimeoutUploadSeconds != 0 {
 				g.TimeoutUploadSeconds = updates.TimeoutUploadSeconds
+			}
+			if updates.API != nil {
+				merged := *updates.API
+				merged.Key = strings.TrimSpace(merged.Key)
+				merged.BaseURL = strings.TrimSpace(merged.BaseURL)
+				if merged.Key == "" && g.API != nil {
+					merged.Key = g.API.Key
+				}
+				if !merged.Enabled {
+					// Keep key on disk when disabling so re-enable does not require re-paste.
+					if merged.Key == "" && g.API != nil {
+						merged.Key = g.API.Key
+					}
+				}
+				g.API = &merged
 			}
 			return nil
 		})
@@ -751,6 +825,127 @@ func (s *Server) handleTestUpload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleTestAPIBootstrap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.testAPIBootstrap == nil {
+		http.Error(w, "Test not available", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Key     string `json:"key"`
+		BaseURL string `json:"base_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	result, err := s.testAPIBootstrap(body.Key, body.BaseURL)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "bootstrap": result})
+}
+
+func (s *Server) handleTestAPIHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.testAPIHealth == nil {
+		http.Error(w, "Test not available", http.StatusServiceUnavailable)
+		return
+	}
+	result, err := s.testAPIHealth()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "result": result})
+}
+
+func (s *Server) handleTestStationPoll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.testStationPoll == nil {
+		http.Error(w, "Test not available", http.StatusServiceUnavailable)
+		return
+	}
+	var st config.Station
+	if err := json.NewDecoder(r.Body).Decode(&st); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	result, err := s.testStationPoll(st)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "result": result})
+}
+
+func (s *Server) handleTestStationDiscover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.testStationDiscoverStream == nil {
+		http.Error(w, "Discover not available", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Type   string `json:"type"`
+		Subnet string `json:"subnet"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	writeEvent := func(ev station.DiscoverEvent) {
+		b, err := json.Marshal(ev)
+		if err != nil {
+			return
+		}
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+		flusher.Flush()
+	}
+
+	err := s.testStationDiscoverStream(ctx, body.Type, body.Subnet, writeEvent)
+	if err != nil {
+		writeEvent(station.DiscoverEvent{Type: "error", Message: err.Error()})
+	}
 }
 
 func (s *Server) handleUploadSSHHostKeys(w http.ResponseWriter, r *http.Request) {

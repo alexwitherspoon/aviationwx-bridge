@@ -6,6 +6,7 @@
 
 - `global.json` - bridge-wide settings
 - `cameras/*.json` - one file per camera
+- `stations/*.json` - one file per weather station (optional; epic #102)
 
 Legacy single-file config: `AVIATIONWX_CONFIG` (default `/data/config.json`). New installs use the directory layout above.
 
@@ -56,6 +57,47 @@ Legacy single-file config: `AVIATIONWX_CONFIG` (default `/data/config.json`). Ne
 | `queue` | object | No | (defaults) | Queue management settings |
 | `sntp` | object | No | (defaults) | NTP time health settings |
 | `web_console` | object | No | (defaults) | Web console settings |
+| `api` | object | No | (omitted) | Optional HTTPS link to `api.aviationwx.org` (fleet health + weather push). Cameras/SFTP work without this |
+
+### API Object (`global.json` → `api`)
+
+Optional. When omitted or `enabled` is false, the bridge does not call the AviationWX HTTPS API.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `enabled` | boolean | Yes | - | When true, bootstrap/health/weather HTTPS client runs |
+| `key` | string | Cond. | - | Bridge API key (`awxb_` + 48 alphanumeric). Required when enabled. Issued by aviationwx.org `scripts/generate-bridge-api-key.php` - not created in the console. Contract: OpenAPI `/v1/bridge/*` (aviationwx PR #277) |
+| `base_url` | string | No | `https://api.aviationwx.org` | Advanced override (must be `https://`). Production default is hard-coded when omitted |
+
+### Station files (`stations/<id>.json`)
+
+Optional weather stations. One JSON file per station. Inventory is advertised in HTTPS health heartbeats when `api` is configured.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `id` | string | Yes | - | Unique ID (alphanumeric, hyphens) |
+| `name` | string | Yes | - | Display name |
+| `type` | string | Yes | - | `davis_weatherlink_live` (more types in epic #103) |
+| `enabled` | boolean | No | `true` | Enable/disable station |
+| `host` | string | Cond. | - | IP (IPv4 or IPv6) or hostname of WeatherLink Live (Davis). IPv6 may be bare or bracketed; with a non-default port use `[addr]:port`. Discover scans IPv4 CIDRs only. |
+| `poll_interval_seconds` | integer | No | `10` | Davis HTTP floor is 10s; must be >= 10 for Davis |
+| `txid` | integer | No | - | Davis transmitter id; installer always picks after Test poll |
+
+Runtime (epic #102 / aviationwx#274): enabled stations with a `txid` are polled over LAN (HTTP `/v1/current_conditions`). Weather POST carries `provider`, `source_id`, and station-native detail in `provider_meta.raw` only - no bridge-normalized `sample`. Wind is always treated as true north (install/calibrate the vane accordingly; no magnetic/`wind_reference` mode). Core owns unit conversion and weather semantics. When WLL `ts` is missing, the bridge skips weather POST (no bridge-clock `observed_at`). When `api` is configured, each valid observation is POSTed to `/v1/bridge/weather` (in-memory retry ring only; no disk weather queue). LAN poll still runs without an API key. Console: `POST /api/test/station-poll` (transmitters / ISS pick) and user-initiated `POST /api/test/station-discover` (SSE progress; operator-supplied IPv4 CIDR /24-/30 for rate-limited HTTP probe plus best-effort mDNS; never automatic). Local WLL + weather POST capture: `docker/wll-simulator/README.md` and golden wire sample `internal/bridgeapi/testdata/weather_post_davis_wll.example.json`.
+
+Example:
+
+```json
+{
+  "id": "station-scappoose-davis",
+  "name": "Davis WLL",
+  "type": "davis_weatherlink_live",
+  "enabled": true,
+  "host": "192.168.1.50",
+  "poll_interval_seconds": 10,
+  "txid": 1
+}
+```
 
 ### Camera Object
 

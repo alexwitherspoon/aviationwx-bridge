@@ -47,8 +47,10 @@ func TestBuildInterceptorObservation(t *testing.T) {
 		Dialect:    config.HTTPInterceptorDialectWunderground,
 	}
 	obs := buildInterceptorObservation(st, map[string]string{
-		"dateutc": "2024-06-15 12:00:00",
-		"tempf":   "72.5",
+		"dateutc":  "2024-06-15 12:00:00",
+		"tempf":    "72.5",
+		"PASSWORD": "secret-value",
+		"ID":       "TEST",
 	})
 	if obs.Provider != ProviderHTTPInterceptor {
 		t.Fatalf("provider = %s", obs.Provider)
@@ -62,6 +64,12 @@ func TestBuildInterceptorObservation(t *testing.T) {
 	raw, ok := obs.ProviderMeta["raw"].(map[string]interface{})
 	if !ok || raw["tempf"] != "72.5" {
 		t.Fatalf("raw = %#v", obs.ProviderMeta["raw"])
+	}
+	if raw["PASSWORD"] != interceptorRedacted {
+		t.Fatalf("PASSWORD should be redacted, got %#v", raw["PASSWORD"])
+	}
+	if raw["ID"] != "TEST" {
+		t.Fatalf("ID should remain, got %#v", raw["ID"])
 	}
 	if _, hasSample := obs.ProviderMeta["sample"]; hasSample {
 		t.Fatal("must not set sample")

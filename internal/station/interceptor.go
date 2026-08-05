@@ -18,6 +18,7 @@ const (
 	interceptorAPIMeta     = "http_interceptor_wunderground_v1"
 	interceptorMaxBody     = 64 << 10
 	interceptorIdleTimeout = 60 * time.Second
+	interceptorRedacted    = "[redacted]"
 )
 
 // parseWundergroundDateUTC parses WU dateutc ("2000-01-01 00:00:00" or
@@ -37,11 +38,27 @@ func parseWundergroundDateUTC(raw string) time.Time {
 	return time.Time{}
 }
 
+// sensitiveInterceptorRawKey reports WU/query keys that must not leave the Pi
+// in weather POST or console logs (CODE_STYLE: never log passwords/tokens).
+func sensitiveInterceptorRawKey(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "password", "pass", "key", "apikey", "api_key", "token", "secret", "auth":
+		return true
+	default:
+		return false
+	}
+}
+
 // buildInterceptorObservation maps WU form/query fields into an Observation.
 // rawValues should already be flattened key -> single string (first value).
+// Credential-like keys are redacted in provider_meta.raw.
 func buildInterceptorObservation(cfg config.Station, rawValues map[string]string) *Observation {
 	metaRaw := make(map[string]interface{}, len(rawValues))
 	for k, v := range rawValues {
+		if sensitiveInterceptorRawKey(k) {
+			metaRaw[k] = interceptorRedacted
+			continue
+		}
 		metaRaw[k] = v
 	}
 	obs := &Observation{

@@ -13,7 +13,7 @@ require (
 
 require (
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/icholy/digest v1.1.0 // indirect
+	github.com/icholy/digest v1.2.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/miekg/dns v1.1.41 // indirect
 	golang.org/x/net v0.57.0 // indirect

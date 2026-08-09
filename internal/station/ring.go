@@ -151,9 +151,6 @@ func (r *outboundRing) enforceSoftMaxLocked() {
 	n := len(r.items)
 	copy(r.items, r.items[drop:])
 	keep := n - drop
-	var zero bridgeapi.WeatherRequest
-	for i := keep; i < n; i++ {
-		r.items[i] = zero
-	}
+	clearRingTail(r.items, keep)
 	r.items = r.items[:keep]
 }

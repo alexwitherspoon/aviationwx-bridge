@@ -137,5 +137,12 @@ func (r *outboundRing) enforceSoftMaxLocked() {
 		return
 	}
 	drop := len(r.items) - OutboundWeatherSoftMax
-	r.items = append([]bridgeapi.WeatherRequest(nil), r.items[drop:]...)
+	n := len(r.items)
+	copy(r.items, r.items[drop:])
+	keep := n - drop
+	var zero bridgeapi.WeatherRequest
+	for i := keep; i < n; i++ {
+		r.items[i] = zero
+	}
+	r.items = r.items[:keep]
 }

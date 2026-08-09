@@ -320,7 +320,8 @@ func (m *Manager) StatusSnapshot() []StationStatus {
 		if !ok {
 			s = m.statusFromConfig(st, StationStatus{})
 		}
-		// Ring is shared; per-station outbound_queued would duplicate the same Len.
+		// Shared ring length (same value on each station) for status consumers.
+		s.OutboundQueued = m.ring.Len()
 		out = append(out, s)
 	}
 	return out

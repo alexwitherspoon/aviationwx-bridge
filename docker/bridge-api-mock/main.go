@@ -24,8 +24,9 @@ import (
 const maxCaptured = 40
 
 type captureStore struct {
-	mu    sync.Mutex
-	items []json.RawMessage
+	mu       sync.Mutex
+	items    []json.RawMessage
+	failNext int // remaining weather POSTs to reject with 503 (0 = accept)
 }
 
 func (s *captureStore) push(raw json.RawMessage) {
@@ -45,6 +46,37 @@ func (s *captureStore) list() []json.RawMessage {
 	out := make([]json.RawMessage, len(s.items))
 	copy(out, s.items)
 	return out
+}
+
+func (s *captureStore) clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items = nil
+}
+
+func (s *captureStore) setFail(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n < 0 {
+		n = 0
+	}
+	s.failNext = n
+}
+
+func (s *captureStore) shouldFail() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failNext <= 0 {
+		return false
+	}
+	s.failNext--
+	return true
+}
+
+func (s *captureStore) failRemaining() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.failNext
 }
 
 func main() {
@@ -77,6 +109,11 @@ func main() {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
+		if store.shouldFail() {
+			log.Printf("rejecting weather POST (fail remaining=%d)", store.failRemaining())
+			http.Error(w, "simulated outage", http.StatusServiceUnavailable)
+			return
+		}
 		store.push(raw)
 		log.Printf("captured weather POST (%d bytes)", len(raw))
 		w.WriteHeader(http.StatusNoContent)
@@ -92,6 +129,35 @@ func main() {
 			"posts": store.list(),
 		})
 	})
+	// Local-only test hooks for outage / catch-up drills.
+	mux.HandleFunc("/v1/bridge/weather/fail", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			var body struct {
+				Count int `json:"count"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.Count <= 0 {
+				body.Count = 1 << 30 // "fail until cleared"
+			}
+			store.setFail(body.Count)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"fail_remaining": store.failRemaining()})
+		case http.MethodDelete:
+			store.setFail(0)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/v1/bridge/weather/captured/clear", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		store.clear()
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -106,6 +172,8 @@ func main() {
 	log.Printf("  GET  /v1/bridge/bootstrap")
 	log.Printf("  POST /v1/bridge/weather  (captured)")
 	log.Printf("  GET  /v1/bridge/weather/captured")
+	log.Printf("  POST /v1/bridge/weather/fail  (test outage)")
+	log.Printf("  DELETE /v1/bridge/weather/fail  (clear outage)")
 	if err := srv.ListenAndServeTLS("", ""); err != nil {
 		log.Printf("listen: %v", err)
 		os.Exit(1)

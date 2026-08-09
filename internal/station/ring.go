@@ -88,6 +88,7 @@ func (r *outboundRing) PopReady(due map[string]time.Time, now time.Time, minInte
 		taken[id] = struct{}{}
 		ready = append(ready, req)
 	}
+	clearRingTail(r.items, len(kept))
 	r.items = kept
 	return ready
 }
@@ -129,7 +130,16 @@ func (r *outboundRing) pruneLocked(now time.Time) {
 		}
 		dst = append(dst, req)
 	}
+	clearRingTail(r.items, len(dst))
 	r.items = dst
+}
+
+// clearRingTail zeros unused slots so dropped ProviderMeta maps can be GC'd.
+func clearRingTail(items []bridgeapi.WeatherRequest, keep int) {
+	var zero bridgeapi.WeatherRequest
+	for i := keep; i < len(items); i++ {
+		items[i] = zero
+	}
 }
 
 func (r *outboundRing) enforceSoftMaxLocked() {

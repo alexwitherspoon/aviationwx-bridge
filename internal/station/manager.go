@@ -290,7 +290,6 @@ func interceptorRoutingError(msg string) bool {
 func (m *Manager) Stop() {
 	m.stopOnce.Do(func() {
 		close(m.catchupStop)
-		<-m.catchupDone
 	})
 
 	m.mu.Lock()
@@ -308,6 +307,7 @@ func (m *Manager) Stop() {
 	if hub != nil {
 		hub.stop()
 	}
+	<-m.catchupDone
 }
 
 // StatusSnapshot returns per-station runtime status.

@@ -63,7 +63,8 @@ func (r *outboundRing) PopAll() []bridgeapi.WeatherRequest {
 }
 
 // PopReady returns at most one due catch-up request per SourceID.
-// due is last successful catch-up POST time per SourceID (read-only here).
+// due is last catch-up POST attempt time per SourceID (read-only here),
+// including failed attempts so a down API is not retried within minInterval.
 // Remaining items stay queued in FIFO order.
 func (r *outboundRing) PopReady(due map[string]time.Time, now time.Time, minInterval time.Duration) []bridgeapi.WeatherRequest {
 	r.mu.Lock()

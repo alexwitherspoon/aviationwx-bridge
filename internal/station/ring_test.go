@@ -78,3 +78,49 @@ func TestPopReadyPreservesFIFOWithinSource(t *testing.T) {
 		t.Fatalf("want oldest FIFO first, got %+v", ready)
 	}
 }
+
+func TestOutboundRingDropsByObservedAtAge(t *testing.T) {
+	r := newOutboundRing()
+	now := time.Now().UTC()
+	r.Push(bridgeapi.WeatherRequest{
+		SourceID:   "old",
+		ObservedAt: now.Add(-OutboundWeatherMaxAge - time.Minute),
+	})
+	r.Push(bridgeapi.WeatherRequest{
+		SourceID:   "fresh",
+		ObservedAt: now.Add(-time.Minute),
+	})
+	r.Push(bridgeapi.WeatherRequest{
+		SourceID:   "zero",
+		ObservedAt: time.Time{},
+	})
+	r.Push(bridgeapi.WeatherRequest{
+		SourceID:   "future",
+		ObservedAt: now.Add(outboundFutureSkew + time.Minute),
+	})
+	if r.Len() != 1 {
+		t.Fatalf("len = %d, want 1 (fresh only)", r.Len())
+	}
+	got := r.PopReady(map[string]time.Time{}, now, GlobalMinPollInterval)
+	if len(got) != 1 || got[0].SourceID != "fresh" {
+		t.Fatalf("pop = %+v", got)
+	}
+	if r.Len() != 0 {
+		t.Fatalf("ring len after pop = %d, want 0", r.Len())
+	}
+}
+
+func TestOutboundRingSoftMaxDropsOldest(t *testing.T) {
+	r := newOutboundRing()
+	now := time.Now().UTC()
+	for i := 0; i < OutboundWeatherSoftMax+5; i++ {
+		// All within the age window so SoftMax (not age) decides drops.
+		r.Push(bridgeapi.WeatherRequest{
+			SourceID:   string(rune('a' + (i % 26))),
+			ObservedAt: now.Add(-time.Duration(i) * time.Millisecond),
+		})
+	}
+	if r.Len() != OutboundWeatherSoftMax {
+		t.Fatalf("len = %d, want soft max %d", r.Len(), OutboundWeatherSoftMax)
+	}
+}

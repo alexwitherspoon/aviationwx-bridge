@@ -181,7 +181,7 @@ func TestInterceptorHubReceiveAndSkipMissingDateutc(t *testing.T) {
 	}
 }
 
-func TestInjectInterceptorMissingDateutc(t *testing.T) {
+func TestPreviewInterceptorMissingDateutc(t *testing.T) {
 	dir := t.TempDir()
 	svc, err := config.NewService(dir)
 	if err != nil {
@@ -204,10 +204,11 @@ func TestInjectInterceptorMissingDateutc(t *testing.T) {
 	mgr.SyncFromConfig()
 	defer mgr.Stop()
 
-	obs, err := mgr.InjectInterceptorRequest(st, map[string]string{"tempf": "71"})
+	obs, err := mgr.PreviewInterceptorRequest(st, map[string]string{"tempf": "71"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	mgr.handleInterceptorObservation(mgr.runCtx, st, obs)
 	if !obs.ObservedAt.IsZero() {
 		t.Fatal("expected zero observed_at")
 	}

@@ -256,7 +256,7 @@ func (h *interceptorHub) runWorker() {
 						return
 					default:
 					}
-					h.mgr.handleInterceptorObservationCtx(h.postCtx, job.station, job.obs)
+					h.mgr.handleInterceptorObservation(h.postCtx, job.station, job.obs)
 				}
 			}
 		}
@@ -402,21 +402,7 @@ func (m *Manager) PreviewInterceptorRequest(st config.Station, values map[string
 	return buildInterceptorObservation(st, values), nil
 }
 
-// InjectInterceptorRequest applies one WU ingest (status + optional weather POST).
-func (m *Manager) InjectInterceptorRequest(st config.Station, values map[string]string) (*Observation, error) {
-	obs, err := m.PreviewInterceptorRequest(st, values)
-	if err != nil {
-		return nil, err
-	}
-	config.NormalizeStationDefaults(&st)
-	if strings.TrimSpace(st.ID) == "" {
-		st.ID = "preview"
-	}
-	m.handleInterceptorObservationCtx(m.runCtx, st, obs)
-	return obs, nil
-}
-
-func (m *Manager) handleInterceptorObservationCtx(parent context.Context, st config.Station, obs *Observation) {
+func (m *Manager) handleInterceptorObservation(parent context.Context, st config.Station, obs *Observation) {
 	now := time.Now().UTC()
 	entry := PayloadLogEntry{
 		At:         now,
@@ -454,9 +440,6 @@ func (m *Manager) handleInterceptorObservationCtx(parent context.Context, st con
 	})
 
 	if m.poster != nil && m.poster.APIConfigured() {
-		if parent == nil {
-			parent = context.Background()
-		}
 		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		postErr := m.postObservation(ctx, st, obs)
 		cancel()

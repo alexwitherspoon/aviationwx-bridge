@@ -174,6 +174,14 @@ func (m *Manager) SyncFromConfig() {
 	}
 	m.mu.Unlock()
 
+	m.postMu.Lock()
+	for id := range m.lastCatchupPost {
+		if _, ok := wanted[id]; !ok {
+			delete(m.lastCatchupPost, id)
+		}
+	}
+	m.postMu.Unlock()
+
 	m.syncInterceptorHub(wanted)
 }
 
@@ -367,20 +375,22 @@ func (m *Manager) WeatherSubsystemHealth() (bridgeapi.SubsystemHealth, bool) {
 		}
 	}
 	status := bridgeapi.StatusOperational
-	if enabled == 0 {
-		status = bridgeapi.StatusOperational
-	} else if !lanOK {
+	if !lanOK {
 		status = bridgeapi.StatusDown
-	} else if waiting == enabled || degraded {
+	} else if enabled > 0 && (waiting == enabled || degraded) {
 		status = bridgeapi.StatusDegraded
-	} else if m.poster != nil && m.poster.APIConfigured() && !postOK {
+	} else if enabled > 0 && m.poster != nil && m.poster.APIConfigured() && !postOK {
 		status = bridgeapi.StatusDegraded
+	}
+	queued := 0
+	if len(statuses) > 0 {
+		queued = statuses[0].OutboundQueued
 	}
 	detail := map[string]interface{}{
 		"lan_ok":           lanOK,
 		"stations_enabled": enabled,
 		"waiting_for_txid": waiting,
-		"outbound_queued":  m.ring.Len(),
+		"outbound_queued":  queued,
 		"degraded":         degraded,
 	}
 	if m.poster != nil {

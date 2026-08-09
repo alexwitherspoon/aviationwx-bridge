@@ -52,16 +52,6 @@ func (r *outboundRing) Push(req bridgeapi.WeatherRequest) {
 	r.enforceSoftMaxLocked()
 }
 
-// PopAll returns and clears queued requests in FIFO queue order after age prune.
-func (r *outboundRing) PopAll() []bridgeapi.WeatherRequest {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.pruneLocked(time.Now().UTC())
-	out := r.items
-	r.items = make([]bridgeapi.WeatherRequest, 0, 16)
-	return out
-}
-
 // PopReady returns at most one due catch-up request per SourceID.
 // due is last catch-up POST attempt time per SourceID (read-only here),
 // including failed attempts so a down API is not retried within minInterval.

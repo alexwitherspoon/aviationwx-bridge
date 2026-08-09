@@ -146,7 +146,10 @@ func TestFlushRingPacesCatchupOnePerSecondPerSource(t *testing.T) {
 	defer mgr.Stop()
 
 	now := time.Now().UTC()
+	ctx := context.Background()
+	// Hold postMu across flushes/asserts so the catch-up ticker cannot race.
 	mgr.postMu.Lock()
+	defer mgr.postMu.Unlock()
 	for i := 0; i < 3; i++ {
 		mgr.ring.Push(bridgeapi.WeatherRequest{
 			SourceID:   "src-a",
@@ -155,10 +158,7 @@ func TestFlushRingPacesCatchupOnePerSecondPerSource(t *testing.T) {
 		})
 	}
 
-	ctx := context.Background()
 	mgr.flushRing(ctx)
-	mgr.postMu.Unlock()
-
 	poster.mu.Lock()
 	n := len(poster.posts)
 	poster.mu.Unlock()
@@ -169,25 +169,20 @@ func TestFlushRingPacesCatchupOnePerSecondPerSource(t *testing.T) {
 		t.Fatalf("ring len = %d, want 2", mgr.ring.Len())
 	}
 
-	mgr.postMu.Lock()
 	mgr.lastCatchupPost["src-a"] = time.Now().UTC()
 	mgr.flushRing(ctx)
-	nRing := mgr.ring.Len()
-	mgr.postMu.Unlock()
 	poster.mu.Lock()
 	n = len(poster.posts)
 	poster.mu.Unlock()
 	if n != 1 {
 		t.Fatalf("second flush within interval posts = %d, want still 1", n)
 	}
-	if nRing != 2 {
-		t.Fatalf("ring len after paced skip = %d, want 2", nRing)
+	if mgr.ring.Len() != 2 {
+		t.Fatalf("ring len after paced skip = %d, want 2", mgr.ring.Len())
 	}
 
-	mgr.postMu.Lock()
 	mgr.lastCatchupPost["src-a"] = time.Now().UTC().Add(-GlobalMinPollInterval)
 	mgr.flushRing(ctx)
-	mgr.postMu.Unlock()
 	poster.mu.Lock()
 	n = len(poster.posts)
 	poster.mu.Unlock()

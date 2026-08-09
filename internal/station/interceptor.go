@@ -225,24 +225,40 @@ func (h *interceptorHub) runWorker() {
 	for {
 		select {
 		case <-h.workerStop:
-			// Drop queued pending on shutdown. An in-flight PostWeather can still
-			// delay Stop until it returns (bounded by the post timeout).
-			h.mu.Lock()
-			h.pending = make(map[string]interceptorJob)
-			h.mu.Unlock()
+			h.dropPending()
 			return
 		case <-h.wake:
 			for {
+				select {
+				case <-h.workerStop:
+					h.dropPending()
+					return
+				default:
+				}
 				jobs := h.takePending()
 				if len(jobs) == 0 {
 					break
 				}
 				for _, job := range jobs {
+					select {
+					case <-h.workerStop:
+						h.dropPending()
+						return
+					default:
+					}
 					h.mgr.handleInterceptorObservation(job.station, job.obs)
 				}
 			}
 		}
 	}
+}
+
+// dropPending clears queued jobs on shutdown. An in-flight PostWeather can still
+// delay Stop until it returns (bounded by the post timeout).
+func (h *interceptorHub) dropPending() {
+	h.mu.Lock()
+	h.pending = make(map[string]interceptorJob)
+	h.mu.Unlock()
 }
 
 func (h *interceptorHub) start() error {

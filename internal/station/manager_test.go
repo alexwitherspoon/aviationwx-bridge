@@ -135,6 +135,147 @@ func TestManagerPollAndPost(t *testing.T) {
 	}
 }
 
+func TestFlushRingPacesCatchupOnePerSecondPerSource(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{configured: true}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+
+	now := time.Now().UTC()
+	mgr.postMu.Lock()
+	for i := 0; i < 3; i++ {
+		mgr.ring.Push(bridgeapi.WeatherRequest{
+			SourceID:   "src-a",
+			ObservedAt: now.Add(-time.Duration(i) * time.Second),
+			Provider:   "test",
+		})
+	}
+
+	ctx := context.Background()
+	mgr.flushRing(ctx)
+	mgr.postMu.Unlock()
+
+	poster.mu.Lock()
+	n := len(poster.posts)
+	poster.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("after first flush posts = %d, want 1", n)
+	}
+	if mgr.ring.Len() != 2 {
+		t.Fatalf("ring len = %d, want 2", mgr.ring.Len())
+	}
+
+	mgr.postMu.Lock()
+	mgr.flushRing(ctx)
+	nRing := mgr.ring.Len()
+	mgr.postMu.Unlock()
+	poster.mu.Lock()
+	n = len(poster.posts)
+	poster.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("second flush within interval posts = %d, want still 1", n)
+	}
+	if nRing != 2 {
+		t.Fatalf("ring len after paced skip = %d, want 2", nRing)
+	}
+
+	mgr.postMu.Lock()
+	mgr.lastCatchupPost["src-a"] = time.Now().UTC().Add(-GlobalMinPollInterval)
+	mgr.flushRing(ctx)
+	mgr.postMu.Unlock()
+	poster.mu.Lock()
+	n = len(poster.posts)
+	poster.mu.Unlock()
+	if n != 2 {
+		t.Fatalf("after interval posts = %d, want 2", n)
+	}
+}
+
+func TestFlushRingCatchupBudgetIndependentOfLive(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{configured: true}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+
+	now := time.Now().UTC()
+	ctx := context.Background()
+	st := config.Station{ID: "station-a", Type: config.StationTypeDavisWeatherLinkLive}
+	if err := mgr.postObservation(ctx, st, &Observation{
+		SourceID:   "src-a",
+		ObservedAt: now,
+		Provider:   ProviderDavisWeatherLinkLive,
+		ProviderMeta: map[string]interface{}{
+			"api": "test",
+			"raw": map[string]interface{}{"temp": 1},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr.postMu.Lock()
+	mgr.ring.Push(bridgeapi.WeatherRequest{
+		SourceID:   "src-a",
+		ObservedAt: now.Add(-time.Second),
+		Provider:   "test",
+	})
+	mgr.flushRing(ctx)
+	mgr.postMu.Unlock()
+
+	poster.mu.Lock()
+	defer poster.mu.Unlock()
+	if len(poster.posts) != 2 {
+		t.Fatalf("posts = %d, want live + catch-up (separate budgets)", len(poster.posts))
+	}
+}
+
+func TestCatchupTickerDrainsWithoutLive(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{configured: true}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+
+	now := time.Now().UTC()
+	mgr.postMu.Lock()
+	mgr.ring.Push(bridgeapi.WeatherRequest{
+		SourceID:   "src-a",
+		ObservedAt: now.Add(-2 * time.Second),
+		Provider:   "test",
+	})
+	mgr.ring.Push(bridgeapi.WeatherRequest{
+		SourceID:   "src-a",
+		ObservedAt: now.Add(-time.Second),
+		Provider:   "test",
+	})
+	mgr.postMu.Unlock()
+
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		poster.mu.Lock()
+		n := len(poster.posts)
+		poster.mu.Unlock()
+		if n >= 2 && mgr.ring.Len() == 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	poster.mu.Lock()
+	n := len(poster.posts)
+	poster.mu.Unlock()
+	t.Fatalf("ticker drain posts=%d ring=%d, want 2 posts and empty ring", n, mgr.ring.Len())
+}
+
 func TestOutboundRingDropsByObservedAtAge(t *testing.T) {
 	r := newOutboundRing()
 	now := time.Now().UTC()
@@ -149,6 +290,10 @@ func TestOutboundRingDropsByObservedAtAge(t *testing.T) {
 	r.Push(bridgeapi.WeatherRequest{
 		SourceID:   "zero",
 		ObservedAt: time.Time{},
+	})
+	r.Push(bridgeapi.WeatherRequest{
+		SourceID:   "future",
+		ObservedAt: now.Add(outboundFutureSkew + time.Minute),
 	})
 	if r.Len() != 1 {
 		t.Fatalf("len = %d, want 1 (fresh only)", r.Len())

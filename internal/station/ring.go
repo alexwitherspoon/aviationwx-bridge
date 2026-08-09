@@ -12,14 +12,18 @@ import (
 // request's ObservedAt (station time), not receive time.
 const OutboundWeatherMaxAge = 10 * time.Minute
 
+// outboundFutureSkew matches aviationwx.org BRIDGE_WEATHER_FUTURE_SKEW_SECONDS.
+// Far-future stamps are dropped - core would reject them on POST.
+const outboundFutureSkew = 60 * time.Second
+
 // OutboundWeatherSoftMax caps ring length if observation clocks stall (Pi
 // memory guard). Prefer age-based prune; this is a backstop only.
 // Sized for ~2 stations at the global ≤1 Hz emit ceiling over MaxAge.
 const OutboundWeatherSoftMax = int(OutboundWeatherMaxAge/GlobalMinPollInterval) * 2
 
 // outboundRing holds failed weather POSTs for retry. Retention is by
-// ObservedAt within OutboundWeatherMaxAge (drop older). When SoftMax is hit,
-// drop oldest remaining. No disk queue.
+// ObservedAt within OutboundWeatherMaxAge (drop older/far-future). SoftMax
+// drops from the front of the FIFO. In-memory only - no disk weather queue.
 type outboundRing struct {
 	mu    sync.Mutex
 	items []bridgeapi.WeatherRequest
@@ -41,15 +45,14 @@ func (r *outboundRing) Push(req bridgeapi.WeatherRequest) {
 	defer r.mu.Unlock()
 	now := time.Now().UTC()
 	r.pruneLocked(now)
-	if req.ObservedAt.IsZero() || req.ObservedAt.Before(now.Add(-OutboundWeatherMaxAge)) {
+	if !retainOutbound(req, now) {
 		return
 	}
 	r.items = append(r.items, req)
 	r.enforceSoftMaxLocked()
 }
 
-// PopAll returns and clears queued requests in FIFO order (oldest ObservedAt
-// first among remaining). Prunes by age before returning.
+// PopAll returns and clears queued requests in FIFO queue order after age prune.
 func (r *outboundRing) PopAll() []bridgeapi.WeatherRequest {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -59,7 +62,37 @@ func (r *outboundRing) PopAll() []bridgeapi.WeatherRequest {
 	return out
 }
 
-// PushFront restores items that failed to post (oldest first).
+// PopReady returns at most one due catch-up request per SourceID.
+// due is last successful catch-up POST time per SourceID (read-only here).
+// Remaining items stay queued in FIFO order.
+func (r *outboundRing) PopReady(due map[string]time.Time, now time.Time, minInterval time.Duration) []bridgeapi.WeatherRequest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(now)
+	if len(r.items) == 0 {
+		return nil
+	}
+	taken := make(map[string]struct{})
+	var ready []bridgeapi.WeatherRequest
+	kept := r.items[:0]
+	for _, req := range r.items {
+		id := req.SourceID
+		if _, already := taken[id]; already {
+			kept = append(kept, req)
+			continue
+		}
+		if last, ok := due[id]; ok && now.Sub(last) < minInterval {
+			kept = append(kept, req)
+			continue
+		}
+		taken[id] = struct{}{}
+		ready = append(ready, req)
+	}
+	r.items = kept
+	return ready
+}
+
+// PushFront restores items that failed mid-flush to the front of the FIFO.
 func (r *outboundRing) PushFront(reqs ...bridgeapi.WeatherRequest) {
 	if len(reqs) == 0 {
 		return
@@ -75,14 +108,23 @@ func (r *outboundRing) PushFront(reqs ...bridgeapi.WeatherRequest) {
 	r.enforceSoftMaxLocked()
 }
 
+func retainOutbound(req bridgeapi.WeatherRequest, now time.Time) bool {
+	if req.ObservedAt.IsZero() {
+		return false
+	}
+	if req.ObservedAt.Before(now.Add(-OutboundWeatherMaxAge)) {
+		return false
+	}
+	if req.ObservedAt.After(now.Add(outboundFutureSkew)) {
+		return false
+	}
+	return true
+}
+
 func (r *outboundRing) pruneLocked(now time.Time) {
-	cutoff := now.Add(-OutboundWeatherMaxAge)
 	dst := r.items[:0]
 	for _, req := range r.items {
-		if req.ObservedAt.IsZero() {
-			continue
-		}
-		if req.ObservedAt.Before(cutoff) {
+		if !retainOutbound(req, now) {
 			continue
 		}
 		dst = append(dst, req)

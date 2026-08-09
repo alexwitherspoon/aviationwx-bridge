@@ -33,6 +33,13 @@ type Manager struct {
 	ring    *outboundRing
 	postMu  sync.Mutex // serializes flush + PostWeather across station workers
 
+	// lastCatchupPost paces ring flush at ≤1 Hz per SourceID (separate from live).
+	lastCatchupPost map[string]time.Time
+
+	catchupStop chan struct{}
+	catchupDone chan struct{}
+	stopOnce    sync.Once
+
 	// interceptorHub serves WU-style push ingest (nil when no interceptor stations).
 	hub *interceptorHub
 
@@ -55,6 +62,10 @@ type PayloadLogEntry struct {
 const (
 	maxPayloadLog  = 40
 	maxRawLogBytes = 4096
+	// catchupTickInterval is how often we try a paced ring flush.
+	// Shorter than GlobalMinPollInterval so due samples are not skipped a full
+	// extra second when the ticker phase lands just before the pace window.
+	catchupTickInterval = 200 * time.Millisecond
 )
 
 // ManagerConfig wires a Manager.
@@ -70,17 +81,22 @@ func NewManager(cfg ManagerConfig) *Manager {
 	if log == nil {
 		log = logger.Default()
 	}
-	return &Manager{
+	m := &Manager{
 		cfgService: cfg.ConfigService,
 		poster:     cfg.Poster,
 		log:        log.With("component", "station"),
 		providers: map[string]Provider{
 			ProviderDavisWeatherLinkLive: NewDavis(),
 		},
-		workers: make(map[string]*stationWorker),
-		status:  make(map[string]StationStatus),
-		ring:    newOutboundRing(),
+		workers:         make(map[string]*stationWorker),
+		status:          make(map[string]StationStatus),
+		ring:            newOutboundRing(),
+		lastCatchupPost: make(map[string]time.Time),
+		catchupStop:     make(chan struct{}),
+		catchupDone:     make(chan struct{}),
 	}
+	go m.runCatchup()
+	return m
 }
 
 // SyncFromConfig starts, restarts, or stops poll workers and interceptor listen routes.
@@ -270,8 +286,13 @@ func interceptorRoutingError(msg string) bool {
 		strings.Contains(msg, "interceptor listen failed")
 }
 
-// Stop halts all poll workers and the interceptor listener.
+// Stop halts all poll workers, the interceptor listener, and catch-up flush.
 func (m *Manager) Stop() {
+	m.stopOnce.Do(func() {
+		close(m.catchupStop)
+		<-m.catchupDone
+	})
+
 	m.mu.Lock()
 	toStop := make([]*stationWorker, 0, len(m.workers))
 	for id, w := range m.workers {
@@ -299,7 +320,7 @@ func (m *Manager) StatusSnapshot() []StationStatus {
 		if !ok {
 			s = m.statusFromConfig(st, StationStatus{})
 		}
-		s.OutboundQueued = m.ring.Len()
+		// Ring is shared; per-station outbound_queued would duplicate the same Len.
 		out = append(out, s)
 	}
 	return out
@@ -459,17 +480,52 @@ func (m *Manager) postObservation(ctx context.Context, st config.Station, obs *O
 	return nil
 }
 
+// flushRing posts at most one queued sample per SourceID per GlobalMinPollInterval.
+// Catch-up budget is separate from live posts (worst case ~2 Hz per station).
+// Caller must hold postMu.
 func (m *Manager) flushRing(ctx context.Context) {
 	if m.poster == nil || !m.poster.APIConfigured() {
 		return
 	}
-	pending := m.ring.PopAll()
-	for i, req := range pending {
-		if err := m.poster.PostWeather(ctx, req); err != nil {
-			m.ring.PushFront(pending[i:]...)
+	now := time.Now().UTC()
+	ready := m.ring.PopReady(m.lastCatchupPost, now, GlobalMinPollInterval)
+	for i, req := range ready {
+		err := m.poster.PostWeather(ctx, req)
+		// Stamp on attempt so a down API is not retried every live tick in the same second.
+		m.lastCatchupPost[req.SourceID] = time.Now().UTC()
+		if err != nil {
+			m.ring.PushFront(ready[i:]...)
 			return
 		}
 	}
+}
+
+func (m *Manager) runCatchup() {
+	defer close(m.catchupDone)
+	t := time.NewTicker(catchupTickInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-m.catchupStop:
+			return
+		case <-t.C:
+			m.tickCatchup()
+		}
+	}
+}
+
+func (m *Manager) tickCatchup() {
+	if m.poster == nil || !m.poster.APIConfigured() {
+		return
+	}
+	if m.ring.Len() == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	m.postMu.Lock()
+	defer m.postMu.Unlock()
+	m.flushRing(ctx)
 }
 
 func weatherRequestFromObs(obs *Observation) bridgeapi.WeatherRequest {

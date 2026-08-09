@@ -40,7 +40,7 @@ func parseWundergroundDateUTC(raw string) time.Time {
 }
 
 // sensitiveInterceptorRawKey reports WU/query keys that must not leave the Pi
-// in weather POST or console logs (CODE_STYLE: never log passwords/tokens).
+// in weather POST provider_meta.raw or console payload logs.
 func sensitiveInterceptorRawKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "password", "pass", "key", "apikey", "api_key", "token", "secret", "auth":
@@ -126,13 +126,14 @@ type interceptorRoute struct {
 	station config.Station
 }
 
-// interceptorJob is one accepted observation waiting for the hub worker.
 type interceptorJob struct {
 	station config.Station
 	obs     *Observation
 }
 
 // interceptorHub serves Weather Underground-compatible ingest for one listen_addr.
+// Under API backpressure, pending keeps at most one job per station (latest wins)
+// and a single worker posts so Serve can ACK without spawning a goroutine per request.
 type interceptorHub struct {
 	mgr  *Manager
 	addr string
@@ -140,7 +141,7 @@ type interceptorHub struct {
 	mu       sync.RWMutex
 	routes   map[string]interceptorRoute // path -> station
 	lastEmit map[string]time.Time        // station id -> last accepted emit (1 Hz)
-	pending  map[string]interceptorJob   // station id -> latest job (size ≤1)
+	pending  map[string]interceptorJob   // station id -> latest job
 
 	server     *http.Server
 	done       chan struct{} // closed when Serve exits
@@ -224,15 +225,11 @@ func (h *interceptorHub) runWorker() {
 	for {
 		select {
 		case <-h.workerStop:
-			for {
-				jobs := h.takePending()
-				if len(jobs) == 0 {
-					return
-				}
-				for _, job := range jobs {
-					h.mgr.handleInterceptorObservation(job.station, job.obs)
-				}
-			}
+			// Drop pending on shutdown - do not block Stop on a slow weather POST.
+			h.mu.Lock()
+			h.pending = make(map[string]interceptorJob)
+			h.mu.Unlock()
+			return
 		case <-h.wake:
 			for {
 				jobs := h.takePending()
@@ -349,7 +346,6 @@ func (h *interceptorHub) serve(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("success\n"))
 
-	// Latest-wins per station: at most one pending job, one hub worker.
 	h.enqueue(st, obs)
 }
 

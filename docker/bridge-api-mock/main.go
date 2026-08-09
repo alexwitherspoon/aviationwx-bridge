@@ -26,7 +26,7 @@ const maxCaptured = 40
 type captureStore struct {
 	mu       sync.Mutex
 	items    []json.RawMessage
-	failNext int // remaining weather POSTs to reject with 503 (0 = accept)
+	failNext int // 0 = accept; >0 = remaining 503s; <0 = 503 until cleared
 }
 
 func (s *captureStore) push(raw json.RawMessage) {
@@ -57,20 +57,21 @@ func (s *captureStore) clear() {
 func (s *captureStore) setFail(n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if n < 0 {
-		n = 0
-	}
 	s.failNext = n
 }
 
-func (s *captureStore) shouldFail() bool {
+// shouldFail reports whether this POST returns 503 and remaining fails after it.
+func (s *captureStore) shouldFail() (fail bool, remaining int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.failNext <= 0 {
-		return false
+	if s.failNext == 0 {
+		return false, 0
+	}
+	if s.failNext < 0 {
+		return true, -1
 	}
 	s.failNext--
-	return true
+	return true, s.failNext
 }
 
 func (s *captureStore) failRemaining() int {
@@ -109,8 +110,8 @@ func main() {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if store.shouldFail() {
-			log.Printf("rejecting weather POST (fail remaining=%d)", store.failRemaining())
+		if fail, rem := store.shouldFail(); fail {
+			log.Printf("rejecting weather POST (fail remaining=%d)", rem)
 			http.Error(w, "simulated outage", http.StatusServiceUnavailable)
 			return
 		}
@@ -138,7 +139,7 @@ func main() {
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			if body.Count <= 0 {
-				body.Count = 1 << 30 // "fail until cleared"
+				body.Count = -1 // fail until DELETE
 			}
 			store.setFail(body.Count)
 			w.Header().Set("Content-Type", "application/json")

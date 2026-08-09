@@ -330,7 +330,10 @@ func TestManagerQueuesWhenPostFails(t *testing.T) {
 	if err := json.Unmarshal(fixture, &top); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := top["data"].(map[string]interface{})
+	data, ok := top["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("fixture data: want map, got %T", top["data"])
+	}
 	data["ts"] = float64(time.Now().UTC().Unix())
 	fixture, err = json.Marshal(top)
 	if err != nil {

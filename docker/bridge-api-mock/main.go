@@ -137,7 +137,10 @@ func main() {
 			var body struct {
 				Count int `json:"count"`
 			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "invalid json", http.StatusBadRequest)
+				return
+			}
 			if body.Count <= 0 {
 				body.Count = -1 // fail until DELETE
 			}

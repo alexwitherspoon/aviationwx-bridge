@@ -126,6 +126,12 @@ type interceptorRoute struct {
 	station config.Station
 }
 
+// interceptorJob is one accepted observation waiting for the hub worker.
+type interceptorJob struct {
+	station config.Station
+	obs     *Observation
+}
+
 // interceptorHub serves Weather Underground-compatible ingest for one listen_addr.
 type interceptorHub struct {
 	mgr  *Manager
@@ -134,18 +140,26 @@ type interceptorHub struct {
 	mu       sync.RWMutex
 	routes   map[string]interceptorRoute // path -> station
 	lastEmit map[string]time.Time        // station id -> last accepted emit (1 Hz)
+	pending  map[string]interceptorJob   // station id -> latest job (size ≤1)
 
-	server *http.Server
-	done   chan struct{}
+	server     *http.Server
+	done       chan struct{} // closed when Serve exits
+	workerStop chan struct{}
+	workerDone chan struct{}
+	wake       chan struct{}
 }
 
 func newInterceptorHub(mgr *Manager, addr string) *interceptorHub {
 	return &interceptorHub{
-		mgr:      mgr,
-		addr:     addr,
-		routes:   make(map[string]interceptorRoute),
-		lastEmit: make(map[string]time.Time),
-		done:     make(chan struct{}),
+		mgr:        mgr,
+		addr:       addr,
+		routes:     make(map[string]interceptorRoute),
+		lastEmit:   make(map[string]time.Time),
+		pending:    make(map[string]interceptorJob),
+		done:       make(chan struct{}),
+		workerStop: make(chan struct{}),
+		workerDone: make(chan struct{}),
+		wake:       make(chan struct{}, 1),
 	}
 }
 
@@ -162,6 +176,11 @@ func (h *interceptorHub) setRoutes(routes map[string]interceptorRoute) {
 			delete(h.lastEmit, id)
 		}
 	}
+	for id := range h.pending {
+		if _, ok := keep[id]; !ok {
+			delete(h.pending, id)
+		}
+	}
 }
 
 func (h *interceptorHub) alive() bool {
@@ -173,6 +192,58 @@ func (h *interceptorHub) alive() bool {
 		return false
 	default:
 		return true
+	}
+}
+
+func (h *interceptorHub) enqueue(st config.Station, obs *Observation) {
+	h.mu.Lock()
+	h.pending[st.ID] = interceptorJob{station: st, obs: obs}
+	h.mu.Unlock()
+	select {
+	case h.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (h *interceptorHub) takePending() []interceptorJob {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.pending) == 0 {
+		return nil
+	}
+	out := make([]interceptorJob, 0, len(h.pending))
+	for id, job := range h.pending {
+		out = append(out, job)
+		delete(h.pending, id)
+	}
+	return out
+}
+
+func (h *interceptorHub) runWorker() {
+	defer close(h.workerDone)
+	for {
+		select {
+		case <-h.workerStop:
+			for {
+				jobs := h.takePending()
+				if len(jobs) == 0 {
+					return
+				}
+				for _, job := range jobs {
+					h.mgr.handleInterceptorObservation(job.station, job.obs)
+				}
+			}
+		case <-h.wake:
+			for {
+				jobs := h.takePending()
+				if len(jobs) == 0 {
+					break
+				}
+				for _, job := range jobs {
+					h.mgr.handleInterceptorObservation(job.station, job.obs)
+				}
+			}
+		}
 	}
 }
 
@@ -191,6 +262,7 @@ func (h *interceptorHub) start() error {
 	if err != nil {
 		return err
 	}
+	go h.runWorker()
 	go func() {
 		defer close(h.done)
 		err := h.server.Serve(ln)
@@ -225,6 +297,8 @@ func (h *interceptorHub) stop() {
 	defer cancel()
 	_ = h.server.Shutdown(ctx)
 	<-h.done
+	close(h.workerStop)
+	<-h.workerDone
 }
 
 func (h *interceptorHub) serve(w http.ResponseWriter, r *http.Request) {
@@ -275,7 +349,8 @@ func (h *interceptorHub) serve(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("success\n"))
 
-	go h.mgr.handleInterceptorObservation(st, obs)
+	// Latest-wins per station: at most one pending job, one hub worker.
+	h.enqueue(st, obs)
 }
 
 // PreviewInterceptorRequest parses a WU-style payload without posting (console Test).

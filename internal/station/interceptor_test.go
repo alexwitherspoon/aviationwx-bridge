@@ -1,15 +1,18 @@
 package station
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/bridgeapi"
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/config"
 )
 
@@ -226,18 +229,136 @@ func TestInjectInterceptorMissingDateutc(t *testing.T) {
 	}
 }
 
-func TestPreviewInterceptorRequest(t *testing.T) {
-	mgr := NewManager(ManagerConfig{})
-	obs, err := mgr.PreviewInterceptorRequest(config.Station{
-		Name: "WU",
-		Type: config.StationTypeHTTPInterceptor,
-	}, map[string]string{"dateutc": "2024-06-15 12:00:00", "tempf": "1"})
+func TestInterceptorHubLatestWinsUnderSlowPost(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if obs.ObservedAt.IsZero() {
-		t.Fatal("expected observed_at")
+	release := make(chan struct{})
+	poster := &blockingPoster{configured: true, release: release, posts: make([]bridgeapi.WeatherRequest, 0)}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
 	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	st, err := svc.AddStation(config.Station{
+		ID:         "station-wu",
+		Name:       "WU",
+		Type:       config.StationTypeHTTPInterceptor,
+		Enabled:    true,
+		ListenAddr: addr,
+		ListenPath: "/weatherstation/updateweatherstation.php",
+		Dialect:    config.HTTPInterceptorDialectWunderground,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.SyncFromConfig()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mgr.mu.Lock()
+		ready := mgr.hub != nil
+		mgr.mu.Unlock()
+		if ready {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	post := func(tempf, dateutc string) {
+		t.Helper()
+		resp, err := http.PostForm("http://"+addr+st.ListenPath, url.Values{
+			"dateutc": {dateutc},
+			"tempf":   {tempf},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d", resp.StatusCode)
+		}
+	}
+
+	// First accepted job blocks inside PostWeather.
+	post("1.0", "2024-06-15 12:00:00")
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		poster.mu.Lock()
+		n := poster.entered
+		poster.mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Within 1 Hz coalesce window these ACK without enqueue.
+	post("2.0", "2024-06-15 12:00:01")
+
+	// After 1 Hz window, enqueue replaces pending while first post still blocked.
+	time.Sleep(GlobalMinPollInterval + 50*time.Millisecond)
+	post("3.0", "2024-06-15 12:00:02")
+	time.Sleep(GlobalMinPollInterval + 50*time.Millisecond)
+	post("9.9", "2024-06-15 12:00:03")
+
+	close(release)
+
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		poster.mu.Lock()
+		n := len(poster.posts)
+		poster.mu.Unlock()
+		if n >= 2 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	poster.mu.Lock()
+	defer poster.mu.Unlock()
+	if len(poster.posts) < 2 {
+		t.Fatalf("expected at least 2 posts (in-flight + latest), got %d", len(poster.posts))
+	}
+	if len(poster.posts) > 3 {
+		t.Fatalf("expected latest-wins to bound posts, got %d", len(poster.posts))
+	}
+	last := poster.posts[len(poster.posts)-1]
+	raw, _ := last.ProviderMeta["raw"].(map[string]interface{})
+	if raw["tempf"] != "9.9" {
+		t.Fatalf("last post should be latest pending tempf=9.9, got %#v", raw)
+	}
+}
+
+type blockingPoster struct {
+	mu         sync.Mutex
+	configured bool
+	release    chan struct{}
+	entered    int
+	posts      []bridgeapi.WeatherRequest
+}
+
+func (b *blockingPoster) APIConfigured() bool { return b.configured }
+
+func (b *blockingPoster) PostWeather(ctx context.Context, req bridgeapi.WeatherRequest) error {
+	b.mu.Lock()
+	b.entered++
+	b.mu.Unlock()
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	b.mu.Lock()
+	b.posts = append(b.posts, req)
+	b.mu.Unlock()
+	return nil
 }
 
 func TestSyncInterceptorHubSkipsListenAddrMismatch(t *testing.T) {

@@ -135,18 +135,59 @@ func TestManagerPollAndPost(t *testing.T) {
 	}
 }
 
-func TestOutboundRingDropOldest(t *testing.T) {
+func TestOutboundRingDropsByObservedAtAge(t *testing.T) {
 	r := newOutboundRing()
-	for i := 0; i < MaxOutboundWeatherSamples+5; i++ {
-		r.Push(bridgeapi.WeatherRequest{SourceID: string(rune('a' + (i % 26)))})
+	now := time.Now().UTC()
+	r.Push(bridgeapi.WeatherRequest{
+		SourceID:   "old",
+		ObservedAt: now.Add(-OutboundWeatherMaxAge - time.Minute),
+	})
+	r.Push(bridgeapi.WeatherRequest{
+		SourceID:   "fresh",
+		ObservedAt: now.Add(-time.Minute),
+	})
+	r.Push(bridgeapi.WeatherRequest{
+		SourceID:   "zero",
+		ObservedAt: time.Time{},
+	})
+	if r.Len() != 1 {
+		t.Fatalf("len = %d, want 1 (fresh only)", r.Len())
 	}
-	if r.Len() != MaxOutboundWeatherSamples {
-		t.Fatalf("len = %d", r.Len())
+	got := r.PopAll()
+	if len(got) != 1 || got[0].SourceID != "fresh" {
+		t.Fatalf("pop = %+v", got)
+	}
+}
+
+func TestOutboundRingSoftMaxDropsOldest(t *testing.T) {
+	r := newOutboundRing()
+	now := time.Now().UTC()
+	for i := 0; i < OutboundWeatherSoftMax+5; i++ {
+		// All within the age window so SoftMax (not age) decides drops.
+		r.Push(bridgeapi.WeatherRequest{
+			SourceID:   string(rune('a' + (i % 26))),
+			ObservedAt: now.Add(-time.Duration(i) * time.Millisecond),
+		})
+	}
+	if r.Len() != OutboundWeatherSoftMax {
+		t.Fatalf("len = %d, want soft max %d", r.Len(), OutboundWeatherSoftMax)
 	}
 }
 
 func TestManagerQueuesWhenPostFails(t *testing.T) {
 	fixture, err := os.ReadFile(filepath.Join("testdata", "davis_current_conditions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fixture ts is historical; rewrite to "now" so a failed POST is still
+	// within OutboundWeatherMaxAge for ring retention.
+	var top map[string]interface{}
+	if err := json.Unmarshal(fixture, &top); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := top["data"].(map[string]interface{})
+	data["ts"] = float64(time.Now().UTC().Unix())
+	fixture, err = json.Marshal(top)
 	if err != nil {
 		t.Fatal(err)
 	}

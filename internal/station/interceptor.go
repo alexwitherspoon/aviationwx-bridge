@@ -150,6 +150,7 @@ type interceptorHub struct {
 	wake       chan struct{}
 	postCtx    context.Context
 	postCancel context.CancelFunc
+	stopOnce   sync.Once
 }
 
 func newInterceptorHub(mgr *Manager, addr string) *interceptorHub {
@@ -313,18 +314,23 @@ func (h *interceptorHub) start() error {
 }
 
 func (h *interceptorHub) stop() {
-	if h.server == nil {
-		return
-	}
-	if h.postCancel != nil {
-		h.postCancel()
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	_ = h.server.Shutdown(ctx)
-	<-h.done
-	close(h.workerStop)
-	<-h.workerDone
+	h.stopOnce.Do(func() {
+		if h.postCancel != nil {
+			h.postCancel()
+		}
+		if h.server == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := h.server.Shutdown(ctx); err != nil {
+			// Shutdown timed out or failed - force close so Serve exits and done closes.
+			_ = h.server.Close()
+		}
+		<-h.done
+		close(h.workerStop)
+		<-h.workerDone
+	})
 }
 
 func (h *interceptorHub) serve(w http.ResponseWriter, r *http.Request) {

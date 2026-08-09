@@ -170,6 +170,7 @@ func TestFlushRingPacesCatchupOnePerSecondPerSource(t *testing.T) {
 	}
 
 	mgr.postMu.Lock()
+	mgr.lastCatchupPost["src-a"] = time.Now().UTC()
 	mgr.flushRing(ctx)
 	nRing := mgr.ring.Len()
 	mgr.postMu.Unlock()

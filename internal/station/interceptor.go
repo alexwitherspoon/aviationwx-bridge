@@ -225,7 +225,8 @@ func (h *interceptorHub) runWorker() {
 	for {
 		select {
 		case <-h.workerStop:
-			// Drop pending on shutdown - do not block Stop on a slow weather POST.
+			// Drop queued pending on shutdown. An in-flight PostWeather can still
+			// delay Stop until it returns (bounded by the post timeout).
 			h.mu.Lock()
 			h.pending = make(map[string]interceptorJob)
 			h.mu.Unlock()

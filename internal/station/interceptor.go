@@ -148,9 +148,16 @@ type interceptorHub struct {
 	workerStop chan struct{}
 	workerDone chan struct{}
 	wake       chan struct{}
+	postCtx    context.Context
+	postCancel context.CancelFunc
 }
 
 func newInterceptorHub(mgr *Manager, addr string) *interceptorHub {
+	parent := context.Background()
+	if mgr != nil && mgr.runCtx != nil {
+		parent = mgr.runCtx
+	}
+	ctx, cancel := context.WithCancel(parent)
 	return &interceptorHub{
 		mgr:        mgr,
 		addr:       addr,
@@ -161,6 +168,8 @@ func newInterceptorHub(mgr *Manager, addr string) *interceptorHub {
 		workerStop: make(chan struct{}),
 		workerDone: make(chan struct{}),
 		wake:       make(chan struct{}, 1),
+		postCtx:    ctx,
+		postCancel: cancel,
 	}
 }
 
@@ -246,15 +255,15 @@ func (h *interceptorHub) runWorker() {
 						return
 					default:
 					}
-					h.mgr.handleInterceptorObservation(job.station, job.obs)
+					h.mgr.handleInterceptorObservationCtx(h.postCtx, job.station, job.obs)
 				}
 			}
 		}
 	}
 }
 
-// dropPending clears queued jobs on shutdown. In-flight PostWeather uses Manager.runCtx
-// so Stop can cancel it instead of waiting the full post timeout.
+// dropPending clears queued jobs on shutdown. In-flight posts use hub.postCtx
+// (child of Manager.runCtx) so Stop and hub reload can cancel them.
 func (h *interceptorHub) dropPending() {
 	h.mu.Lock()
 	h.pending = make(map[string]interceptorJob)
@@ -306,6 +315,9 @@ func (h *interceptorHub) start() error {
 func (h *interceptorHub) stop() {
 	if h.server == nil {
 		return
+	}
+	if h.postCancel != nil {
+		h.postCancel()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -394,11 +406,15 @@ func (m *Manager) InjectInterceptorRequest(st config.Station, values map[string]
 	if strings.TrimSpace(st.ID) == "" {
 		st.ID = "preview"
 	}
-	m.handleInterceptorObservation(st, obs)
+	m.handleInterceptorObservationCtx(m.runCtx, st, obs)
 	return obs, nil
 }
 
 func (m *Manager) handleInterceptorObservation(st config.Station, obs *Observation) {
+	m.handleInterceptorObservationCtx(m.runCtx, st, obs)
+}
+
+func (m *Manager) handleInterceptorObservationCtx(parent context.Context, st config.Station, obs *Observation) {
 	now := time.Now().UTC()
 	entry := PayloadLogEntry{
 		At:         now,
@@ -436,7 +452,10 @@ func (m *Manager) handleInterceptorObservation(st config.Station, obs *Observati
 	})
 
 	if m.poster != nil && m.poster.APIConfigured() {
-		ctx, cancel := context.WithTimeout(m.runCtx, 30*time.Second)
+		if parent == nil {
+			parent = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		postErr := m.postObservation(ctx, st, obs)
 		cancel()
 		posted := postErr == nil

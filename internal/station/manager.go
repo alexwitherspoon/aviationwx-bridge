@@ -319,13 +319,14 @@ func (m *Manager) StatusSnapshot() []StationStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]StationStatus, 0, len(m.status))
+	queued := m.ring.Len()
 	for _, st := range m.cfgService.ListStations() {
 		s, ok := m.status[st.ID]
 		if !ok {
 			s = m.statusFromConfig(st, StationStatus{})
 		}
 		// Shared ring length (same value on each station) for status consumers.
-		s.OutboundQueued = m.ring.Len()
+		s.OutboundQueued = queued
 		out = append(out, s)
 	}
 	return out

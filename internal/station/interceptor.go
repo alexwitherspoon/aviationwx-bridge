@@ -253,8 +253,8 @@ func (h *interceptorHub) runWorker() {
 	}
 }
 
-// dropPending clears queued jobs on shutdown. An in-flight PostWeather can still
-// delay Stop until it returns (bounded by the post timeout).
+// dropPending clears queued jobs on shutdown. In-flight PostWeather uses Manager.runCtx
+// so Stop can cancel it instead of waiting the full post timeout.
 func (h *interceptorHub) dropPending() {
 	h.mu.Lock()
 	h.pending = make(map[string]interceptorJob)
@@ -436,7 +436,7 @@ func (m *Manager) handleInterceptorObservation(st config.Station, obs *Observati
 	})
 
 	if m.poster != nil && m.poster.APIConfigured() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(m.runCtx, 30*time.Second)
 		postErr := m.postObservation(ctx, st, obs)
 		cancel()
 		posted := postErr == nil

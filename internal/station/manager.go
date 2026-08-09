@@ -39,6 +39,8 @@ type Manager struct {
 	catchupStop chan struct{}
 	catchupDone chan struct{}
 	stopOnce    sync.Once
+	runCtx      context.Context
+	runCancel   context.CancelFunc
 
 	// interceptorHub serves WU-style push ingest (nil when no interceptor stations).
 	hub *interceptorHub
@@ -95,6 +97,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		catchupStop:     make(chan struct{}),
 		catchupDone:     make(chan struct{}),
 	}
+	m.runCtx, m.runCancel = context.WithCancel(context.Background())
 	go m.runCatchup()
 	return m
 }
@@ -289,6 +292,7 @@ func interceptorRoutingError(msg string) bool {
 // Stop halts all poll workers, the interceptor listener, and catch-up flush.
 func (m *Manager) Stop() {
 	m.stopOnce.Do(func() {
+		m.runCancel()
 		close(m.catchupStop)
 	})
 
@@ -522,7 +526,7 @@ func (m *Manager) tickCatchup() {
 	if m.ring.Len() == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(m.runCtx, 30*time.Second)
 	defer cancel()
 	m.postMu.Lock()
 	defer m.postMu.Unlock()

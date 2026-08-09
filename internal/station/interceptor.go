@@ -416,10 +416,6 @@ func (m *Manager) InjectInterceptorRequest(st config.Station, values map[string]
 	return obs, nil
 }
 
-func (m *Manager) handleInterceptorObservation(st config.Station, obs *Observation) {
-	m.handleInterceptorObservationCtx(m.runCtx, st, obs)
-}
-
 func (m *Manager) handleInterceptorObservationCtx(parent context.Context, st config.Station, obs *Observation) {
 	now := time.Now().UTC()
 	entry := PayloadLogEntry{

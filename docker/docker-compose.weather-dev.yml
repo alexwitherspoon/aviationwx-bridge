@@ -6,8 +6,10 @@
 #   - WLL mock:  http://localhost:18080/v1/current_conditions
 #   - API mock:  https://localhost:18443/v1/bridge/weather/captured  (self-signed)
 #   - Console:   http://localhost:1229
+#   - Interceptor ingest (host): http://localhost:18090/weatherstation/updateweatherstation.php
 #
 # Station Host: wll-simulator:8080  (from bridge container) or host.docker.internal:18080
+# Interceptor listen_addr in bridge config: 0.0.0.0:8090 (published as host 18090)
 # API Advanced base URL: https://bridge-api-mock:8443
 # API key (valid shape): awxb_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKL
 # AVIATIONWX_API_TLS_INSECURE=1 is set so the bridge accepts the mock cert.
@@ -32,6 +34,8 @@ services:
     restart: unless-stopped
 
   bridge:
+    ports:
+      - "18090:8090"  # HTTP interceptor ingest (WU-style); console 1229 comes from base compose
     environment:
       - AVIATIONWX_API_TLS_INSECURE=1
     depends_on:

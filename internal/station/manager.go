@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +32,9 @@ type Manager struct {
 	status  map[string]StationStatus
 	ring    *outboundRing
 	postMu  sync.Mutex // serializes flush + PostWeather across station workers
+
+	// interceptorHub serves WU-style push ingest (nil when no interceptor stations).
+	hub *interceptorHub
 
 	// recentPayloads is an in-memory newest-first log for console (no disk).
 	recentMu       sync.Mutex
@@ -78,7 +83,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 	}
 }
 
-// SyncFromConfig starts, restarts, or stops poll workers to match config.
+// SyncFromConfig starts, restarts, or stops poll workers and interceptor listen routes.
 func (m *Manager) SyncFromConfig() {
 	stations := m.cfgService.ListStations()
 	wanted := make(map[string]config.Station, len(stations))
@@ -91,7 +96,7 @@ func (m *Manager) SyncFromConfig() {
 	m.mu.Lock()
 	for id, w := range m.workers {
 		st, ok := wanted[id]
-		if !ok || !st.Enabled || st.Txid == nil || !samePollConfig(w.cfg, st) {
+		if !ok || !st.Enabled || st.Type != config.StationTypeDavisWeatherLinkLive || st.Txid == nil || !samePollConfig(w.cfg, st) {
 			toStop = append(toStop, w)
 			delete(m.workers, id)
 		}
@@ -103,11 +108,20 @@ func (m *Manager) SyncFromConfig() {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	for id, st := range wanted {
 		m.status[id] = m.statusFromConfig(st, m.status[id])
 		if !st.Enabled {
+			continue
+		}
+		if st.Type == config.StationTypeHTTPInterceptor {
+			// Listen path is handled by syncInterceptorHub (below).
+			s := m.status[id]
+			s.WaitingForTxid = false
+			m.status[id] = s
+			continue
+		}
+		if st.Type != config.StationTypeDavisWeatherLinkLive {
 			continue
 		}
 		if st.Txid == nil {
@@ -139,9 +153,124 @@ func (m *Manager) SyncFromConfig() {
 			delete(m.status, id)
 		}
 	}
+	m.mu.Unlock()
+
+	m.syncInterceptorHub(wanted)
 }
 
-// Stop halts all poll workers.
+// syncInterceptorHub rebuilds the shared interceptor listener (own locking).
+// All enabled interceptor stations must share one listen_addr; mismatched
+// stations are skipped (not routed) so devices are never pointed at a dead bind.
+// Active bind is the listen_addr of the lexicographically smallest station id
+// so map iteration order cannot flip the bind across restarts.
+func (m *Manager) syncInterceptorHub(wanted map[string]config.Station) {
+	type candidate struct {
+		id string
+		st config.Station
+	}
+	var enabled []candidate
+	for id, st := range wanted {
+		if !st.Enabled || st.Type != config.StationTypeHTTPInterceptor {
+			continue
+		}
+		config.NormalizeStationDefaults(&st)
+		enabled = append(enabled, candidate{id: id, st: st})
+	}
+	sort.Slice(enabled, func(i, j int) bool { return enabled[i].id < enabled[j].id })
+
+	routes := make(map[string]interceptorRoute)
+	addr := ""
+	if len(enabled) > 0 {
+		addr = enabled[0].st.ListenAddr
+	}
+	for _, c := range enabled {
+		st := c.st
+		if st.ListenAddr != addr {
+			m.log.Warn("interceptor listen_addr mismatch; station not routed",
+				"station", st.ID, "want", st.ListenAddr, "using", addr)
+			m.setStatus(st.ID, func(s *StationStatus) {
+				s.Degraded = true
+				s.LANOK = false
+				s.LastPollError = fmt.Sprintf("listen_addr %q does not match active bind %q", st.ListenAddr, addr)
+			})
+			continue
+		}
+		path := st.ListenPath
+		if prev, ok := routes[path]; ok {
+			m.log.Warn("interceptor listen_path conflict; keeping first station",
+				"path", path, "keep", prev.station.ID, "skip", st.ID)
+			m.setStatus(st.ID, func(s *StationStatus) {
+				s.Degraded = true
+				s.LANOK = false
+				s.LastPollError = fmt.Sprintf("listen_path %q already used by %s", path, prev.station.ID)
+			})
+			continue
+		}
+		routes[path] = interceptorRoute{station: st}
+		// Clear stale routing/bind errors once the station is routable again.
+		// LANOK stays false until the first device ingest (no poll loop).
+		m.setStatus(st.ID, func(s *StationStatus) {
+			if interceptorRoutingError(s.LastPollError) {
+				s.Degraded = false
+				s.LastPollError = ""
+			}
+		})
+	}
+
+	m.mu.Lock()
+	old := m.hub
+	if len(routes) == 0 {
+		m.hub = nil
+		m.mu.Unlock()
+		if old != nil {
+			old.stop()
+			m.log.Info("interceptor listen stopped")
+		}
+		return
+	}
+	if old != nil && old.addr == addr && old.alive() {
+		m.mu.Unlock()
+		old.setRoutes(routes)
+		return
+	}
+	m.hub = nil
+	m.mu.Unlock()
+
+	if old != nil {
+		old.stop()
+	}
+
+	hub := newInterceptorHub(m, addr)
+	hub.setRoutes(routes)
+	if err := hub.start(); err != nil {
+		m.log.Warn("interceptor listen failed", "addr", addr, "error", err)
+		for _, route := range routes {
+			stID := route.station.ID
+			errMsg := fmt.Sprintf("interceptor listen failed on %s: %v", addr, err)
+			m.setStatus(stID, func(s *StationStatus) {
+				s.Degraded = true
+				s.LANOK = false
+				s.LastPollError = errMsg
+			})
+		}
+		return
+	}
+	m.mu.Lock()
+	m.hub = hub
+	m.mu.Unlock()
+	m.log.Info("interceptor listen started", "addr", addr, "routes", len(routes))
+}
+
+func interceptorRoutingError(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	return strings.Contains(msg, "listen_addr") ||
+		strings.Contains(msg, "listen_path") ||
+		strings.Contains(msg, "interceptor listen failed")
+}
+
+// Stop halts all poll workers and the interceptor listener.
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	toStop := make([]*stationWorker, 0, len(m.workers))
@@ -149,9 +278,14 @@ func (m *Manager) Stop() {
 		toStop = append(toStop, w)
 		delete(m.workers, id)
 	}
+	hub := m.hub
+	m.hub = nil
 	m.mu.Unlock()
 	for _, w := range toStop {
 		w.stop()
+	}
+	if hub != nil {
+		hub.stop()
 	}
 }
 
@@ -260,7 +394,9 @@ func (m *Manager) statusFromConfig(st config.Station, prev StationStatus) Statio
 	prev.Name = st.Name
 	prev.Type = st.Type
 	prev.Enabled = st.Enabled
-	prev.WaitingForTxid = st.Enabled && st.Txid == nil
+	prev.WaitingForTxid = st.Enabled &&
+		st.Type == config.StationTypeDavisWeatherLinkLive &&
+		st.Txid == nil
 	return prev
 }
 

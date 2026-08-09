@@ -993,13 +993,17 @@ func (b *Bridge) testAPIHealth() (map[string]interface{}, error) {
 	}, nil
 }
 
-// testStationPoll probes a LAN weather station once (ISS list + optional sample).
+// testStationPoll probes a LAN weather station once (Davis) or previews a
+// Weather Underground-style payload (http_interceptor).
 func (b *Bridge) testStationPoll(st config.Station) (map[string]interface{}, error) {
 	if b.stationManager == nil {
 		return nil, fmt.Errorf("station manager not available")
 	}
 	if strings.TrimSpace(st.Type) == "" {
 		st.Type = config.StationTypeDavisWeatherLinkLive
+	}
+	if st.Type == config.StationTypeHTTPInterceptor {
+		return b.testStationInterceptor(st)
 	}
 	if strings.TrimSpace(st.Host) == "" {
 		return nil, fmt.Errorf("station host is required")
@@ -1018,6 +1022,35 @@ func (b *Bridge) testStationPoll(st config.Station) (map[string]interface{}, err
 	}
 	// Missing station ts leaves ObservedAt zero; omit so the console shows
 	// "no station timestamp" instead of year-1 RFC3339.
+	if !obs.ObservedAt.IsZero() {
+		out["observed_at"] = obs.ObservedAt.UTC().Format(time.RFC3339)
+	}
+	return out, nil
+}
+
+func (b *Bridge) testStationInterceptor(st config.Station) (map[string]interface{}, error) {
+	config.NormalizeStationDefaults(&st)
+	values := map[string]string{
+		"dateutc":      "2024-06-15 12:00:00",
+		"tempf":        "72.5",
+		"humidity":     "55",
+		"winddir":      "180",
+		"windspeedmph": "5.2",
+		"ID":           "TEST",
+		"PASSWORD":     "x",
+		"action":       "updateraw",
+	}
+	obs, err := b.stationManager.PreviewInterceptorRequest(st, values)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]interface{}{
+		"provider":      obs.Provider,
+		"provider_meta": obs.ProviderMeta,
+		"listen_addr":   st.ListenAddr,
+		"listen_path":   st.ListenPath,
+		"dialect":       st.Dialect,
+	}
 	if !obs.ObservedAt.IsZero() {
 		out["observed_at"] = obs.ObservedAt.UTC().Format(time.RFC3339)
 	}

@@ -10,6 +10,7 @@ import (
 // Provider type strings (match config.Station.Type / wire provider field).
 const (
 	ProviderDavisWeatherLinkLive = config.StationTypeDavisWeatherLinkLive
+	ProviderHTTPInterceptor      = config.StationTypeHTTPInterceptor
 )
 
 // GlobalMinPollInterval is the hard ceiling: never sample faster than 1 Hz.

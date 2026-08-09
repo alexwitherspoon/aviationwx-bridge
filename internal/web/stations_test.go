@@ -169,3 +169,69 @@ func TestStationsCreateRejectsFastPoll(t *testing.T) {
 		t.Fatal("expected rejection for poll < 10s")
 	}
 }
+
+func TestStationsHTTPInterceptorCRUD(t *testing.T) {
+	server := testServerWithAuth(t, ServerConfig{})
+	pass := server.configService.GetWebPassword()
+
+	body := map[string]interface{}{
+		"name":        "WU Interceptor",
+		"type":        config.StationTypeHTTPInterceptor,
+		"enabled":     true,
+		"listen_addr": "127.0.0.1:18090",
+		"listen_path": "/weatherstation/updateweatherstation.php",
+		"dialect":     config.HTTPInterceptorDialectWunderground,
+	}
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/stations", bytes.NewReader(raw))
+	req.SetBasicAuth("admin", pass)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s", w.Code, w.Body.String())
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	id, _ := got["id"].(string)
+	if id == "" {
+		t.Fatal("missing id")
+	}
+	if got["listen_addr"] != "127.0.0.1:18090" {
+		t.Fatalf("listen_addr = %v", got["listen_addr"])
+	}
+	if _, hasHost := got["host"]; hasHost {
+		t.Fatal("interceptor response should omit davis host")
+	}
+
+	upd := map[string]interface{}{
+		"listen_path": "/custom/update.php",
+		"listen_addr": "0.0.0.0:8091",
+	}
+	raw, _ = json.Marshal(upd)
+	req = httptest.NewRequest(http.MethodPut, "/api/stations/"+id, bytes.NewReader(raw))
+	req.SetBasicAuth("admin", pass)
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update status = %d body=%s", w.Code, w.Body.String())
+	}
+	st, err := server.configService.GetStation(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.ListenPath != "/custom/update.php" || st.ListenAddr != "0.0.0.0:8091" {
+		t.Fatalf("updated = %+v", st)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/stations/"+id, nil)
+	req.SetBasicAuth("admin", pass)
+	w = httptest.NewRecorder()
+	server.GetMux().ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d", w.Code)
+	}
+}

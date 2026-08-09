@@ -43,7 +43,10 @@ func (s *Server) addStation(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(st.Type) == "" {
 		st.Type = config.StationTypeDavisWeatherLinkLive
 	}
-	if st.Type != config.StationTypeDavisWeatherLinkLive {
+	switch st.Type {
+	case config.StationTypeDavisWeatherLinkLive, config.StationTypeHTTPInterceptor:
+		// ok
+	default:
 		http.Error(w, fmt.Sprintf("unsupported station type %q", st.Type), http.StatusBadRequest)
 		return
 	}
@@ -161,6 +164,27 @@ func (s *Server) updateStation(w http.ResponseWriter, r *http.Request, stationID
 			}
 			st.Txid = txid
 		}
+		if v, ok := raw["listen_addr"]; ok {
+			var addr string
+			if err := json.Unmarshal(v, &addr); err != nil {
+				return fmt.Errorf("listen_addr: %w", err)
+			}
+			st.ListenAddr = addr
+		}
+		if v, ok := raw["listen_path"]; ok {
+			var path string
+			if err := json.Unmarshal(v, &path); err != nil {
+				return fmt.Errorf("listen_path: %w", err)
+			}
+			st.ListenPath = path
+		}
+		if v, ok := raw["dialect"]; ok {
+			var dialect string
+			if err := json.Unmarshal(v, &dialect); err != nil {
+				return fmt.Errorf("dialect: %w", err)
+			}
+			st.Dialect = dialect
+		}
 		return nil
 	})
 	if err != nil {
@@ -183,15 +207,22 @@ func (s *Server) deleteStation(w http.ResponseWriter, r *http.Request, stationID
 
 func stationToMap(st config.Station) map[string]interface{} {
 	m := map[string]interface{}{
-		"id":                    st.ID,
-		"name":                  st.Name,
-		"type":                  st.Type,
-		"enabled":               st.Enabled,
-		"host":                  st.Host,
-		"poll_interval_seconds": st.PollIntervalSeconds,
+		"id":      st.ID,
+		"name":    st.Name,
+		"type":    st.Type,
+		"enabled": st.Enabled,
 	}
-	if st.Txid != nil {
-		m["txid"] = *st.Txid
+	switch st.Type {
+	case config.StationTypeHTTPInterceptor:
+		m["listen_addr"] = st.ListenAddr
+		m["listen_path"] = st.ListenPath
+		m["dialect"] = st.Dialect
+	default:
+		m["host"] = st.Host
+		m["poll_interval_seconds"] = st.PollIntervalSeconds
+		if st.Txid != nil {
+			m["txid"] = *st.Txid
+		}
 	}
 	return m
 }

@@ -579,13 +579,66 @@ func (m *Manager) flushRing(ctx context.Context) {
 }
 
 func (m *Manager) noteWeatherPostOK(stationID string) {
-	if wasOpen := m.uplink.noteSuccess(); wasOpen {
+	wasOpen := m.uplink.noteSuccess()
+	if wasOpen {
 		m.log.Info("weather WAN recovered - draining catch-up")
+	}
+	if m.uplink.isOpen() {
+		// Invariant: a successful POST must close the breaker.
+		m.log.Warn("weather uplink still open after successful POST", "station", stationID)
 	}
 	m.setStatus(stationID, func(s *StationStatus) {
 		s.LastPostAt = time.Now().UTC()
 		s.LastPostError = ""
 	})
+	m.mu.Lock()
+	s := m.status[stationID]
+	m.mu.Unlock()
+	if s.LastPostError != "" {
+		// Invariant: successful POST must clear last_post_error for this source.
+		m.log.Warn("weather post status not cleared after successful POST",
+			"station", stationID, "last_post_error", s.LastPostError)
+	}
+}
+
+// healPostStatusAfterDrain clears stale WAN queue reasons once the ring is empty
+// and the uplink is healthy. Permanent 4xx reasons are left for operators.
+func (m *Manager) healPostStatusAfterDrain() {
+	if m.uplink.isOpen() || m.ring.Len() != 0 {
+		return
+	}
+	cleared := 0
+	for _, st := range m.cfgService.ListStations() {
+		m.mu.Lock()
+		s := m.status[st.ID]
+		m.mu.Unlock()
+		if !staleWANPostReason(s.LastPostError) {
+			continue
+		}
+		m.setStatus(st.ID, func(ss *StationStatus) {
+			if staleWANPostReason(ss.LastPostError) {
+				ss.LastPostError = ""
+			}
+		})
+		cleared++
+	}
+	if cleared > 0 {
+		m.log.Info("weather post status healed after catch-up drain", "stations", cleared)
+	}
+}
+
+func staleWANPostReason(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	if msg == "weather WAN unreachable; queued" {
+		return true
+	}
+	// Transport-class leftovers from before breaker fail-fast.
+	return strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "bridge api request:") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "i/o timeout")
 }
 
 // handleWeatherPostErr updates uplink/status for a failed POST. When push is true, req is queued.
@@ -633,13 +686,18 @@ func (m *Manager) tickCatchup() {
 		return
 	}
 	if m.ring.Len() == 0 {
+		m.healPostStatusAfterDrain()
 		return
 	}
 	ctx, cancel := context.WithTimeout(m.runCtx, weatherPostTimeout)
 	defer cancel()
 	m.postMu.Lock()
-	defer m.postMu.Unlock()
 	m.flushRing(ctx)
+	drained := m.ring.Len() == 0
+	m.postMu.Unlock()
+	if !m.uplink.isOpen() && drained {
+		m.healPostStatusAfterDrain()
+	}
 }
 
 func weatherRequestFromObs(obs *Observation) bridgeapi.WeatherRequest {

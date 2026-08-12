@@ -810,6 +810,119 @@ func TestSplitTimeoutsLiveGetsFreshBudget(t *testing.T) {
 	}
 }
 
+func TestWeatherHealthIncludesWANUplinkOpen(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txid := 1
+	if _, err := svc.AddStation(config.Station{
+		ID: "station-a", Name: "A", Type: config.StationTypeDavisWeatherLinkLive,
+		Enabled: true, Host: "127.0.0.1", Txid: &txid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{
+		configured: true,
+		failN:      2,
+		failErr:    context.DeadlineExceeded,
+	}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+	mgr.SyncFromConfig()
+
+	sub, ok := mgr.WeatherSubsystemHealth()
+	if !ok {
+		t.Fatal("expected weather subsystem")
+	}
+	if open, _ := sub.Detail["wan_uplink_open"].(bool); open {
+		t.Fatal("wan_uplink_open true before failures")
+	}
+
+	now := time.Now().UTC()
+	st := config.Station{ID: "station-a"}
+	obs := func(i int) *Observation {
+		return &Observation{
+			SourceID: "station-a", ObservedAt: now.Add(-time.Duration(i) * time.Second),
+			Provider: ProviderDavisWeatherLinkLive,
+			ProviderMeta: map[string]interface{}{"api": "test", "raw": map[string]interface{}{"i": i}},
+		}
+	}
+	_ = mgr.postObservation(context.Background(), st, obs(0))
+	_ = mgr.postObservation(context.Background(), st, obs(1))
+	if !mgr.uplink.isOpen() {
+		t.Fatal("expected breaker open")
+	}
+	sub, ok = mgr.WeatherSubsystemHealth()
+	if !ok {
+		t.Fatal("expected weather subsystem")
+	}
+	if open, _ := sub.Detail["wan_uplink_open"].(bool); !open {
+		t.Fatal("wan_uplink_open false while breaker open")
+	}
+}
+
+func TestHealPostStatusAfterDrainClearsStaleWAN(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txid := 1
+	if _, err := svc.AddStation(config.Station{
+		ID: "station-a", Name: "A", Type: config.StationTypeDavisWeatherLinkLive,
+		Enabled: true, Host: "127.0.0.1", Txid: &txid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AddStation(config.Station{
+		ID: "station-b", Name: "B", Type: config.StationTypeDavisWeatherLinkLive,
+		Enabled: true, Host: "127.0.0.1", Txid: &txid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: &fakePoster{configured: true}})
+	defer mgr.Stop()
+	mgr.SyncFromConfig()
+
+	mgr.setStatus("station-a", func(s *StationStatus) {
+		s.LastPostError = "weather WAN unreachable; queued"
+	})
+	mgr.setStatus("station-b", func(s *StationStatus) {
+		s.LastPostError = "HTTP 400: bad request"
+	})
+	mgr.healPostStatusAfterDrain()
+
+	for _, s := range mgr.StatusSnapshot() {
+		switch s.ID {
+		case "station-a":
+			if s.LastPostError != "" {
+				t.Fatalf("station-a LastPostError=%q, want cleared", s.LastPostError)
+			}
+		case "station-b":
+			if s.LastPostError != "HTTP 400: bad request" {
+				t.Fatalf("station-b LastPostError=%q, want permanent 4xx kept", s.LastPostError)
+			}
+		}
+	}
+}
+
+func TestStaleWANPostReason(t *testing.T) {
+	if !staleWANPostReason("weather WAN unreachable; queued") {
+		t.Fatal("want fail-fast queued reason")
+	}
+	if !staleWANPostReason("bridge api request: dial tcp: i/o timeout") {
+		t.Fatal("want transport wrapper")
+	}
+	if staleWANPostReason("HTTP 400: bad request") {
+		t.Fatal("permanent 4xx must not be stale WAN")
+	}
+	if staleWANPostReason("") {
+		t.Fatal("empty must not be stale")
+	}
+}
+
 type phasePoster struct {
 	configured   bool
 	catchupDelay time.Duration

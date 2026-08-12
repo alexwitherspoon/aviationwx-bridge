@@ -415,6 +415,7 @@ func (m *Manager) WeatherSubsystemHealth() (bridgeapi.SubsystemHealth, bool) {
 		"stations_enabled": enabled,
 		"waiting_for_txid": waiting,
 		"outbound_queued":  queued,
+		"wan_uplink_open":  m.uplink != nil && m.uplink.isOpen(),
 		"degraded":         degraded,
 	}
 	if m.poster != nil {

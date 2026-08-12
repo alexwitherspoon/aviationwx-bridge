@@ -1,6 +1,7 @@
 package station
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -118,9 +119,49 @@ func TestOutboundRingSoftMaxDropsOldest(t *testing.T) {
 		r.Push(bridgeapi.WeatherRequest{
 			SourceID:   string(rune('a' + (i % 26))),
 			ObservedAt: now.Add(-time.Duration(i) * time.Millisecond),
+			BridgeID:   fmt.Sprintf("%d", i),
 		})
 	}
 	if r.Len() != OutboundWeatherSoftMax {
 		t.Fatalf("len = %d, want soft max %d", r.Len(), OutboundWeatherSoftMax)
+	}
+	ready := r.PopReady(map[string]time.Time{}, now, GlobalMinPollInterval)
+	if len(ready) == 0 {
+		t.Fatal("expected SoftMax to keep newest-tail FIFO head for PopReady")
+	}
+	// SoftMax drops from the front; oldest pushes were indices 0..4 relative to overflow.
+	if ready[0].BridgeID == "0" {
+		t.Fatalf("SoftMax should have dropped oldest BridgeID=0, still present")
+	}
+}
+
+func TestOutboundRingRetainSources(t *testing.T) {
+	r := newOutboundRing()
+	now := time.Now().UTC()
+	r.Push(bridgeapi.WeatherRequest{SourceID: "keep", ObservedAt: now})
+	r.Push(bridgeapi.WeatherRequest{SourceID: "drop", ObservedAt: now})
+	r.RetainSources(map[string]struct{}{"keep": {}})
+	if r.Len() != 1 {
+		t.Fatalf("len = %d, want 1", r.Len())
+	}
+	got := r.PopReady(map[string]time.Time{}, now, GlobalMinPollInterval)
+	if len(got) != 1 || got[0].SourceID != "keep" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestOutboundRingPushFrontMidFlush(t *testing.T) {
+	r := newOutboundRing()
+	now := time.Now().UTC()
+	r.Push(bridgeapi.WeatherRequest{SourceID: "a", ObservedAt: now.Add(-2 * time.Second), BridgeID: "1"})
+	r.Push(bridgeapi.WeatherRequest{SourceID: "b", ObservedAt: now.Add(-time.Second), BridgeID: "2"})
+	ready := r.PopReady(map[string]time.Time{}, now, GlobalMinPollInterval)
+	if len(ready) != 2 {
+		t.Fatalf("ready = %d, want 2", len(ready))
+	}
+	r.PushFront(ready...)
+	again := r.PopReady(map[string]time.Time{}, now, GlobalMinPollInterval)
+	if len(again) != 2 || again[0].BridgeID != "1" || again[1].BridgeID != "2" {
+		t.Fatalf("PushFront order broken: %+v", again)
 	}
 }

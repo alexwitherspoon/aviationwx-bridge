@@ -7,26 +7,23 @@ import (
 	"github.com/alexwitherspoon/AviationWX.org-Bridge/internal/bridgeapi"
 )
 
-// OutboundWeatherMaxAge is how long failed weather POSTs may be retained for
-// catch-up after a transient API/internet outage. Evaluation uses each
-// request's ObservedAt (station time), not receive time.
+// OutboundWeatherMaxAge is how long failed weather POSTs may be retained.
+// Age is measured by ObservedAt (station time), not receive time.
 const OutboundWeatherMaxAge = 10 * time.Minute
 
 // outboundFutureSkew matches aviationwx.org BRIDGE_WEATHER_FUTURE_SKEW_SECONDS.
 // Far-future stamps are dropped - core would reject them on POST.
 const outboundFutureSkew = 60 * time.Second
 
-// OutboundWeatherSoftMax caps ring length if observation clocks stall (Pi
-// memory guard). Prefer age-based prune; this is a backstop only.
-// Sized for ~2 stations at the global ≤1 Hz emit ceiling over MaxAge.
+// OutboundWeatherSoftMax is a Pi memory backstop when ObservedAt clocks stall.
+// Prefer age prune; sized for ~2 stations at the ≤1 Hz emit ceiling over MaxAge.
 const OutboundWeatherSoftMax = int(OutboundWeatherMaxAge/GlobalMinPollInterval) * 2
 
-// outboundRing holds failed weather POSTs for retry. Retention is by
-// ObservedAt within OutboundWeatherMaxAge (drop older/far-future). SoftMax
-// drops from the front of the FIFO. In-memory only - no disk weather queue.
+// outboundRing is an in-memory FIFO of failed weather POSTs (no disk queue).
 type outboundRing struct {
-	mu    sync.Mutex
-	items []bridgeapi.WeatherRequest
+	mu            sync.Mutex
+	items         []bridgeapi.WeatherRequest
+	onSoftMaxDrop func(dropped int)
 }
 
 func newOutboundRing() *outboundRing {
@@ -53,9 +50,8 @@ func (r *outboundRing) Push(req bridgeapi.WeatherRequest) {
 }
 
 // PopReady returns at most one due catch-up request per SourceID.
-// due is last catch-up POST attempt time per SourceID (read-only here),
-// including failed attempts so a down API is not retried within minInterval.
-// Remaining items stay queued in FIFO order.
+// due is last catch-up POST *attempt* time (including failures) so a down API
+// is not retried within minInterval.
 func (r *outboundRing) PopReady(due map[string]time.Time, now time.Time, minInterval time.Duration) []bridgeapi.WeatherRequest {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -98,6 +94,20 @@ func (r *outboundRing) PushFront(reqs ...bridgeapi.WeatherRequest) {
 	r.items = combined
 	r.pruneLocked(now)
 	r.enforceSoftMaxLocked()
+}
+
+// RetainSources drops queued requests whose SourceID is not in keep.
+func (r *outboundRing) RetainSources(keep map[string]struct{}) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	dst := r.items[:0]
+	for _, req := range r.items {
+		if _, ok := keep[req.SourceID]; ok {
+			dst = append(dst, req)
+		}
+	}
+	clearRingTail(r.items, len(dst))
+	r.items = dst
 }
 
 func retainOutbound(req bridgeapi.WeatherRequest, now time.Time) bool {
@@ -143,4 +153,7 @@ func (r *outboundRing) enforceSoftMaxLocked() {
 	keep := n - drop
 	clearRingTail(r.items, keep)
 	r.items = r.items[:keep]
+	if drop > 0 && r.onSoftMaxDrop != nil {
+		r.onSoftMaxDrop(drop)
+	}
 }

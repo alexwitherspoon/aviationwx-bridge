@@ -845,7 +845,7 @@ func TestWeatherHealthIncludesWANUplinkOpen(t *testing.T) {
 	obs := func(i int) *Observation {
 		return &Observation{
 			SourceID: "station-a", ObservedAt: now.Add(-time.Duration(i) * time.Second),
-			Provider: ProviderDavisWeatherLinkLive,
+			Provider:     ProviderDavisWeatherLinkLive,
 			ProviderMeta: map[string]interface{}{"api": "test", "raw": map[string]interface{}{"i": i}},
 		}
 	}

@@ -22,14 +22,13 @@ const (
 	interceptorRedacted    = "[redacted]"
 )
 
-// parseWundergroundDateUTC parses WU dateutc ("2000-01-01 00:00:00" or
-// "now"). Empty / unparsable / "now" yield zero time (caller must skip POST).
+// parseWundergroundDateUTC parses WU dateutc. Empty / unparsable / "now" yield
+// zero time - caller must skip weather POST (no bridge-clock observed_at).
 func parseWundergroundDateUTC(raw string) time.Time {
 	s := strings.TrimSpace(raw)
 	if s == "" || strings.EqualFold(s, "now") {
 		return time.Time{}
 	}
-	// Classic WU: YYYY-MM-DD HH:MM:SS as UTC.
 	if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
 		return t.UTC()
 	}
@@ -39,8 +38,8 @@ func parseWundergroundDateUTC(raw string) time.Time {
 	return time.Time{}
 }
 
-// sensitiveInterceptorRawKey reports WU/query keys that must not leave the Pi
-// in weather POST provider_meta.raw or console payload logs.
+// sensitiveInterceptorRawKey reports keys that must not leave the Pi in
+// provider_meta.raw or console payload logs.
 func sensitiveInterceptorRawKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "password", "pass", "key", "apikey", "api_key", "token", "secret", "auth":
@@ -50,8 +49,7 @@ func sensitiveInterceptorRawKey(key string) bool {
 	}
 }
 
-// buildInterceptorObservation maps WU form/query fields into an Observation.
-// rawValues should already be flattened key -> single string (first value).
+// buildInterceptorObservation maps WU fields into an Observation.
 // Credential-like keys are redacted in provider_meta.raw.
 func buildInterceptorObservation(cfg config.Station, rawValues map[string]string) *Observation {
 	metaRaw := make(map[string]interface{}, len(rawValues))
@@ -121,7 +119,6 @@ func flattenURLValues(v url.Values) map[string]string {
 	return out
 }
 
-// interceptorRoute is one listen_path -> station binding.
 type interceptorRoute struct {
 	station config.Station
 }
@@ -131,17 +128,17 @@ type interceptorJob struct {
 	obs     *Observation
 }
 
-// interceptorHub serves Weather Underground-compatible ingest for one listen_addr.
-// Under API backpressure, pending keeps at most one job per station (latest wins)
-// and a single worker posts so Serve can ACK without spawning a goroutine per request.
+// interceptorHub serves WU-compatible ingest for one listen_addr.
+// Under API backpressure, pending keeps at most one job per station (latest
+// wins) and a single worker posts so Serve can ACK without a goroutine per request.
 type interceptorHub struct {
 	mgr  *Manager
 	addr string
 
 	mu       sync.RWMutex
-	routes   map[string]interceptorRoute // path -> station
-	lastEmit map[string]time.Time        // station id -> last accepted emit (1 Hz)
-	pending  map[string]interceptorJob   // station id -> latest job
+	routes   map[string]interceptorRoute
+	lastEmit map[string]time.Time      // ≤1 Hz coalesce
+	pending  map[string]interceptorJob // latest-wins under backpressure
 
 	server     *http.Server
 	done       chan struct{} // closed when Serve exits
@@ -230,6 +227,30 @@ func (h *interceptorHub) takePending() []interceptorJob {
 	return out
 }
 
+func (h *interceptorHub) snapshotLastEmit() map[string]time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.lastEmit) == 0 {
+		return nil
+	}
+	out := make(map[string]time.Time, len(h.lastEmit))
+	for id, t := range h.lastEmit {
+		out[id] = t
+	}
+	return out
+}
+
+func (h *interceptorHub) restoreLastEmit(last map[string]time.Time) {
+	if len(last) == 0 {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for id, t := range last {
+		h.lastEmit[id] = t
+	}
+}
+
 func (h *interceptorHub) runWorker() {
 	defer close(h.workerDone)
 	for {
@@ -263,8 +284,8 @@ func (h *interceptorHub) runWorker() {
 	}
 }
 
-// dropPending clears queued jobs on shutdown. In-flight posts use hub.postCtx
-// (child of Manager.runCtx) so Stop and hub reload can cancel them.
+// dropPending clears queued jobs on shutdown. In-flight posts are canceled via
+// hub.postCtx so teardown is not stuck on the post timeout.
 func (h *interceptorHub) dropPending() {
 	h.mu.Lock()
 	h.pending = make(map[string]interceptorJob)
@@ -324,7 +345,7 @@ func (h *interceptorHub) stop() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if err := h.server.Shutdown(ctx); err != nil {
-			// Shutdown timed out or failed - force close so Serve exits and done closes.
+			// Force Close so Serve exits and done closes after Shutdown timeout.
 			_ = h.server.Close()
 		}
 		<-h.done
@@ -362,7 +383,16 @@ func (h *interceptorHub) serve(w http.ResponseWriter, r *http.Request) {
 	obs := buildInterceptorObservation(st, vals)
 	now := time.Now().UTC()
 
-	// Global ≤1 Hz ceiling per station.
+	if obs.ObservedAt.IsZero() {
+		// ACK firmware; do not burn ≤1 Hz or enqueue - next valid sample may follow immediately.
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("success\n"))
+		h.mgr.noteMissingInterceptorDateutc(st, obs, now)
+		return
+	}
+
+	// ≤1 Hz: ACK without enqueue.
 	h.mu.Lock()
 	last := h.lastEmit[st.ID]
 	if !last.IsZero() && now.Sub(last) < GlobalMinPollInterval {
@@ -375,8 +405,7 @@ func (h *interceptorHub) serve(w http.ResponseWriter, r *http.Request) {
 	h.lastEmit[st.ID] = now
 	h.mu.Unlock()
 
-	// ACK immediately. Weather POST can block up to tens of seconds; WU-style
-	// devices retry or drop if the listener stalls on the response.
+	// ACK before enqueue so a slow aviationwx.org POST cannot stall station firmware.
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("success\n"))
@@ -404,6 +433,12 @@ func (m *Manager) PreviewInterceptorRequest(st config.Station, values map[string
 
 func (m *Manager) handleInterceptorObservation(parent context.Context, st config.Station, obs *Observation) {
 	now := time.Now().UTC()
+	if obs.ObservedAt.IsZero() {
+		// serve() normally filters these; keep as a safe fallback for handoff/tests.
+		m.noteMissingInterceptorDateutc(st, obs, now)
+		return
+	}
+
 	entry := PayloadLogEntry{
 		At:         now,
 		ObservedAt: obs.ObservedAt,
@@ -412,22 +447,6 @@ func (m *Manager) handleInterceptorObservation(parent context.Context, st config
 	}
 	if obs.ProviderMeta != nil {
 		entry.Raw = obs.ProviderMeta["raw"]
-	}
-
-	if obs.ObservedAt.IsZero() {
-		msg := "missing observation timestamp (dateutc); skipped weather POST"
-		m.setStatus(st.ID, func(s *StationStatus) {
-			s.LANOK = true
-			s.Degraded = true
-			s.WaitingForTxid = false
-			s.LastPollAt = now
-			s.LastPollError = msg
-			s.LastObservedAt = time.Time{}
-		})
-		entry.Message = msg
-		m.notePayload(entry)
-		m.log.Warn("interceptor ingest degraded", "station", st.ID, "reason", "missing_dateutc")
-		return
 	}
 
 	m.setStatus(st.ID, func(s *StationStatus) {
@@ -440,7 +459,7 @@ func (m *Manager) handleInterceptorObservation(parent context.Context, st config
 	})
 
 	if m.poster != nil && m.poster.APIConfigured() {
-		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+		ctx, cancel := context.WithTimeout(parent, weatherPostTimeout)
 		postErr := m.postObservation(ctx, st, obs)
 		cancel()
 		posted := postErr == nil
@@ -450,4 +469,27 @@ func (m *Manager) handleInterceptorObservation(parent context.Context, st config
 		}
 	}
 	m.notePayload(entry)
+}
+
+func (m *Manager) noteMissingInterceptorDateutc(st config.Station, obs *Observation, now time.Time) {
+	msg := "missing observation timestamp (dateutc); skipped weather POST"
+	m.setStatus(st.ID, func(s *StationStatus) {
+		s.LANOK = true
+		s.Degraded = true
+		s.WaitingForTxid = false
+		s.LastPollAt = now
+		s.LastPollError = msg
+		s.LastObservedAt = time.Time{}
+	})
+	entry := PayloadLogEntry{
+		At:        now,
+		StationID: st.ID,
+		LANOK:     true,
+		Message:   msg,
+	}
+	if obs != nil && obs.ProviderMeta != nil {
+		entry.Raw = obs.ProviderMeta["raw"]
+	}
+	m.notePayload(entry)
+	m.log.Info("interceptor ingest skipped POST", "station", st.ID, "reason", "missing_dateutc")
 }

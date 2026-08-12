@@ -122,8 +122,9 @@ func TestInterceptorHubReceiveAndSkipMissingDateutc(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
+	// Bad dateutc ACKs but must not burn the 1 Hz slot.
 	resp, err := http.PostForm("http://"+addr+st.ListenPath, url.Values{
-		"dateutc": {"2024-06-15 12:00:00"},
+		"dateutc": {"now"},
 		"tempf":   {"70.1"},
 	})
 	if err != nil {
@@ -132,53 +133,38 @@ func TestInterceptorHubReceiveAndSkipMissingDateutc(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "success") {
-		t.Fatalf("good post: status=%d body=%q", resp.StatusCode, body)
+		t.Fatalf("missing dateutc: status=%d body=%q", resp.StatusCode, body)
 	}
-
-	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		poster.mu.Lock()
-		n := len(poster.posts)
-		poster.mu.Unlock()
-		if n > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	time.Sleep(80 * time.Millisecond)
 	poster.mu.Lock()
-	if len(poster.posts) != 1 {
-		poster.mu.Unlock()
-		t.Fatalf("expected 1 weather POST, got %d", len(poster.posts))
+	if len(poster.posts) != 0 {
+		t.Fatalf("missing dateutc must not POST; posts=%d", len(poster.posts))
 	}
-	got := poster.posts[0]
 	poster.mu.Unlock()
-	if got.Provider != ProviderHTTPInterceptor || got.SourceID != st.ID {
-		t.Fatalf("post = %+v", got)
-	}
-	if got.Sample != nil {
-		t.Fatal("wire must omit sample")
-	}
 
-	// Coalesce within 1 Hz: still ACK the device, no second POST.
+	obsAt := time.Now().UTC().Add(-2 * time.Second).Format("2006-01-02 15:04:05")
 	resp, err = http.PostForm("http://"+addr+st.ListenPath, url.Values{
-		"dateutc": {"2024-06-15 12:00:01"},
+		"dateutc": {obsAt},
 		"tempf":   {"71"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "success") {
-		t.Fatalf("coalesced post: status=%d body=%q", resp.StatusCode, body)
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		poster.mu.Lock()
+		n := len(poster.posts)
+		poster.mu.Unlock()
+		if n == 1 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	time.Sleep(50 * time.Millisecond)
 	poster.mu.Lock()
 	n := len(poster.posts)
 	poster.mu.Unlock()
-	if n != 1 {
-		t.Fatalf("1 Hz coalesce should skip second POST; posts=%d", n)
-	}
+	t.Fatalf("valid sample after bad dateutc posts=%d, want 1", n)
 }
 
 func TestPreviewInterceptorMissingDateutc(t *testing.T) {
@@ -288,7 +274,7 @@ func TestInterceptorHubLatestWinsUnderSlowPost(t *testing.T) {
 		}
 	}
 
-	// First accepted job blocks inside PostWeather.
+	// First job blocks inside PostWeather.
 	post("1.0", "2024-06-15 12:00:00")
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -301,10 +287,10 @@ func TestInterceptorHubLatestWinsUnderSlowPost(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Within 1 Hz coalesce window these ACK without enqueue.
+	// Still inside 1 Hz window - ACK only.
 	post("2.0", "2024-06-15 12:00:01")
 
-	// After 1 Hz window, enqueue replaces pending while first post still blocked.
+	// After 1 Hz window, pending is latest-wins while the first post is blocked.
 	time.Sleep(GlobalMinPollInterval + 50*time.Millisecond)
 	post("3.0", "2024-06-15 12:00:02")
 	time.Sleep(GlobalMinPollInterval + 50*time.Millisecond)
@@ -532,4 +518,89 @@ func TestSyncInterceptorHubClearsRoutingErrorWhenRoutable(t *testing.T) {
 	if status.Degraded || status.LastPollError != "" {
 		t.Fatalf("expected routing error cleared: %+v", status)
 	}
+}
+
+func TestInterceptorHubReplaceTransfersPending(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{configured: true}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+
+	ln1, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr1 := ln1.Addr().String()
+	_ = ln1.Close()
+
+	st, err := svc.AddStation(config.Station{
+		ID:         "station-wu",
+		Name:       "WU",
+		Type:       config.StationTypeHTTPInterceptor,
+		Enabled:    true,
+		ListenAddr: addr1,
+		ListenPath: "/weatherstation/updateweatherstation.php",
+		Dialect:    config.HTTPInterceptorDialectWunderground,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.SyncFromConfig()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mgr.mu.Lock()
+		ok := mgr.hub != nil && mgr.hub.alive()
+		mgr.mu.Unlock()
+		if ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	obs := buildInterceptorObservation(st, map[string]string{
+		"dateutc": time.Now().UTC().Add(-time.Second).Format("2006-01-02 15:04:05"),
+		"tempf":   "99",
+	})
+	mgr.mu.Lock()
+	hub := mgr.hub
+	mgr.mu.Unlock()
+	if hub == nil {
+		t.Fatal("hub nil")
+	}
+	hub.enqueue(st, obs)
+
+	ln2, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr2 := ln2.Addr().String()
+	_ = ln2.Close()
+	if err := svc.UpdateStation(st.ID, func(s *config.Station) error {
+		s.ListenAddr = addr2
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.SyncFromConfig()
+
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		poster.mu.Lock()
+		posts := append([]bridgeapi.WeatherRequest(nil), poster.posts...)
+		poster.mu.Unlock()
+		for _, p := range posts {
+			raw, _ := p.ProviderMeta["raw"].(map[string]interface{})
+			if raw["tempf"] == "99" {
+				return
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	poster.mu.Lock()
+	defer poster.mu.Unlock()
+	t.Fatalf("expected handed-off pending tempf=99 in posts=%+v", poster.posts)
 }

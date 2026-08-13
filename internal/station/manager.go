@@ -94,6 +94,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		log:        log.With("component", "station"),
 		providers: map[string]Provider{
 			ProviderDavisWeatherLinkLive: NewDavis(),
+			ProviderEcowittGateway:       NewEcowitt(),
 		},
 		workers:         make(map[string]*stationWorker),
 		status:          make(map[string]StationStatus),
@@ -125,7 +126,7 @@ func (m *Manager) SyncFromConfig() {
 	m.mu.Lock()
 	for id, w := range m.workers {
 		st, ok := wanted[id]
-		if !ok || !st.Enabled || st.Type != config.StationTypeDavisWeatherLinkLive || st.Txid == nil || !samePollConfig(w.cfg, st) {
+		if !ok || !shouldRunPollWorker(st) || !samePollConfig(w.cfg, st) {
 			toStop = append(toStop, w)
 			delete(m.workers, id)
 		}
@@ -149,13 +150,7 @@ func (m *Manager) SyncFromConfig() {
 			m.status[id] = s
 			continue
 		}
-		if st.Type != config.StationTypeDavisWeatherLinkLive {
-			continue
-		}
-		if st.Txid == nil {
-			s := m.status[id]
-			s.WaitingForTxid = true
-			m.status[id] = s
+		if !shouldRunPollWorker(st) {
 			continue
 		}
 		if _, running := m.workers[id]; running {
@@ -796,8 +791,8 @@ func (w *stationWorker) tick(ctx context.Context) {
 	w.mgr.setStatus(w.cfg.ID, func(s *StationStatus) {
 		s.LANOK = true
 		s.LastPollAt = now
-		s.WaitingForTxid = w.cfg.Txid == nil
-		s.Degraded = false
+		s.WaitingForTxid = w.cfg.Type == config.StationTypeDavisWeatherLinkLive && w.cfg.Txid == nil
+		s.Degraded = obs.ObservedAt.IsZero()
 		s.LastPollError = ""
 		s.LastObservedAt = obs.ObservedAt
 	})
@@ -864,16 +859,41 @@ func (m *Manager) noteLANPollOutcome(stationID string, lanOK bool, err error) {
 func pollInterval(st config.Station) time.Duration {
 	sec := st.PollIntervalSeconds
 	if sec <= 0 {
-		sec = config.DefaultDavisPollIntervalSeconds
+		switch st.Type {
+		case config.StationTypeEcowittGateway:
+			sec = config.DefaultEcowittPollIntervalSeconds
+		default:
+			sec = config.DefaultDavisPollIntervalSeconds
+		}
 	}
 	d := time.Duration(sec) * time.Second
-	if st.Type == config.StationTypeDavisWeatherLinkLive && d < time.Duration(config.DefaultDavisPollIntervalSeconds)*time.Second {
-		d = time.Duration(config.DefaultDavisPollIntervalSeconds) * time.Second
+	minSec := config.DefaultDavisPollIntervalSeconds
+	if st.Type == config.StationTypeEcowittGateway {
+		minSec = config.DefaultEcowittPollIntervalSeconds
+	}
+	if (st.Type == config.StationTypeDavisWeatherLinkLive || st.Type == config.StationTypeEcowittGateway) &&
+		d < time.Duration(minSec)*time.Second {
+		d = time.Duration(minSec) * time.Second
 	}
 	if d < GlobalMinPollInterval {
 		d = GlobalMinPollInterval
 	}
 	return d
+}
+
+// shouldRunPollWorker reports whether SyncFromConfig should keep a poll loop.
+func shouldRunPollWorker(st config.Station) bool {
+	if !st.Enabled {
+		return false
+	}
+	switch st.Type {
+	case config.StationTypeDavisWeatherLinkLive:
+		return st.Txid != nil
+	case config.StationTypeEcowittGateway:
+		return strings.TrimSpace(st.Host) != ""
+	default:
+		return false
+	}
 }
 
 func samePollConfig(a, b config.Station) bool {

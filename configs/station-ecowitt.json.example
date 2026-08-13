@@ -1,0 +1,8 @@
+{
+  "id": "station-example-ecowitt",
+  "name": "Ecowitt GW1100",
+  "type": "ecowitt_gateway",
+  "enabled": true,
+  "host": "192.168.1.60",
+  "poll_interval_seconds": 10
+}

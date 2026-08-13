@@ -44,7 +44,7 @@ func (s *Server) addStation(w http.ResponseWriter, r *http.Request) {
 		st.Type = config.StationTypeDavisWeatherLinkLive
 	}
 	switch st.Type {
-	case config.StationTypeDavisWeatherLinkLive, config.StationTypeHTTPInterceptor:
+	case config.StationTypeDavisWeatherLinkLive, config.StationTypeHTTPInterceptor, config.StationTypeEcowittGateway:
 		// ok
 	default:
 		http.Error(w, fmt.Sprintf("unsupported station type %q", st.Type), http.StatusBadRequest)

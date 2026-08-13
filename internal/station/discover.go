@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -66,6 +67,8 @@ func DiscoverStationsStream(ctx context.Context, opts DiscoverOptions, emit Disc
 	switch opts.Type {
 	case ProviderDavisWeatherLinkLive:
 		return discoverDavisStream(ctx, opts.Subnet, emit)
+	case ProviderEcowittGateway:
+		return discoverEcowittStream(ctx, opts.Subnet, emit)
 	default:
 		return fmt.Errorf("discovery not supported for station type %q", opts.Type)
 	}
@@ -331,6 +334,210 @@ func probeDavisURL(ctx context.Context, client *http.Client, rawURL string) (Dis
 		return DiscoverCandidate{}, false
 	}
 	return DiscoverCandidate{DID: env.Data.DID}, true
+}
+
+func discoverEcowittStream(ctx context.Context, subnet string, emit DiscoverEmit) error {
+	var (
+		mu     sync.Mutex
+		emitMu sync.Mutex
+		seen   = map[string]struct{}{}
+	)
+	safeEmit := func(ev DiscoverEvent) {
+		emitMu.Lock()
+		defer emitMu.Unlock()
+		emit(ev)
+	}
+	emitCandidate := func(c DiscoverCandidate) {
+		c = normalizeCandidate(c)
+		key := candidateKey(c)
+		if key == "" {
+			return
+		}
+		mu.Lock()
+		if _, ok := seen[key]; ok {
+			mu.Unlock()
+			return
+		}
+		seen[key] = struct{}{}
+		mu.Unlock()
+		preferDNSName(ctx, &c)
+		cp := c
+		safeEmit(DiscoverEvent{Type: "candidate", Candidate: &cp})
+	}
+
+	safeEmit(DiscoverEvent{Type: "phase", Phase: "http_probe", Message: "Probing LAN for Ecowitt / Ambient gateways"})
+	safeEmit(DiscoverEvent{
+		Type:    "note",
+		Message: "Ecowitt discovery is HTTP-only (no mDNS). Manual host entry always works.",
+	})
+	targets, err := probeTargetsFromSubnet(subnet)
+	if err != nil {
+		safeEmit(DiscoverEvent{Type: "error", Message: err.Error()})
+		return err
+	}
+	if len(targets) == 0 {
+		safeEmit(DiscoverEvent{Type: "note", Message: "Enter a network CIDR (e.g. 192.168.1.0/24) to scan for Ecowitt gateways over HTTP."})
+		safeEmit(DiscoverEvent{Type: "done", Message: "0 candidate(s)"})
+		return nil
+	}
+	safeEmit(DiscoverEvent{Type: "progress", Done: 0, Total: len(targets), Message: fmt.Sprintf("0/%d", len(targets))})
+	probeCtx, probeCancel := context.WithTimeout(ctx, discoverProbeBudget)
+	discoverEcowittHTTPProbe(probeCtx, targets, emitCandidate, func(done, total int) {
+		safeEmit(DiscoverEvent{
+			Type:    "progress",
+			Done:    done,
+			Total:   total,
+			Message: fmt.Sprintf("%d/%d", done, total),
+		})
+	})
+	probeCancel()
+
+	mu.Lock()
+	count := len(seen)
+	mu.Unlock()
+	if count == 0 {
+		safeEmit(DiscoverEvent{Type: "note", Message: "No candidates found. Enter the gateway IP or hostname manually, then use Test poll."})
+	}
+	safeEmit(DiscoverEvent{Type: "done", Message: fmt.Sprintf("%d candidate(s)", count)})
+	return nil
+}
+
+func discoverEcowittHTTPProbe(ctx context.Context, targets []string, onFound func(DiscoverCandidate), onProgress func(done, total int)) {
+	if len(targets) == 0 {
+		return
+	}
+	total := len(targets)
+	client := &http.Client{Timeout: probeHTTPTimeout}
+	sem := make(chan struct{}, probeMaxConcurrency)
+	var (
+		wg       sync.WaitGroup
+		doneMu   sync.Mutex
+		done     int
+		lastEmit time.Time
+	)
+	report := func() {
+		if onProgress == nil {
+			return
+		}
+		doneMu.Lock()
+		n := done
+		now := time.Now()
+		emit := n == total || n == 1 || now.Sub(lastEmit) >= 100*time.Millisecond
+		if emit {
+			lastEmit = now
+		}
+		doneMu.Unlock()
+		if emit {
+			onProgress(n, total)
+		}
+	}
+	for _, ip := range targets {
+		if ctx.Err() != nil {
+			break
+		}
+		ip := ip
+		select {
+		case <-ctx.Done():
+			return
+		case sem <- struct{}{}:
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			defer func() {
+				doneMu.Lock()
+				done++
+				doneMu.Unlock()
+				report()
+			}()
+			if ctx.Err() != nil {
+				return
+			}
+			c, ok := probeEcowittHost(ctx, client, ip)
+			if ok {
+				onFound(c)
+			}
+		}()
+	}
+	wg.Wait()
+	if onProgress != nil {
+		doneMu.Lock()
+		n := done
+		doneMu.Unlock()
+		onProgress(n, total)
+	}
+}
+
+func probeEcowittHost(ctx context.Context, client *http.Client, ip string) (DiscoverCandidate, bool) {
+	c, ok := probeEcowittURL(ctx, client, "http://"+ip+ecowittLivedataPath)
+	if !ok {
+		return DiscoverCandidate{}, false
+	}
+	c.Host = ip
+	c.Port = 80
+	c.Method = "http_probe"
+	return c, true
+}
+
+func probeEcowittURL(ctx context.Context, client *http.Client, rawURL string) (DiscoverCandidate, bool) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return DiscoverCandidate{}, false
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return DiscoverCandidate{}, false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return DiscoverCandidate{}, false
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return DiscoverCandidate{}, false
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		return DiscoverCandidate{}, false
+	}
+	if _, ok := top["common_list"]; !ok {
+		if _, ok := top["wh25"]; !ok {
+			return DiscoverCandidate{}, false
+		}
+	}
+	name := "Ecowitt gateway"
+	if verURL, err := url.Parse(rawURL); err == nil {
+		verURL.Path = ecowittVersionPath
+		verURL.RawQuery = ""
+		if req, err := http.NewRequestWithContext(ctx, http.MethodGet, verURL.String(), nil); err == nil {
+			if resp, err := client.Do(req); err == nil {
+				func() {
+					defer func() { _ = resp.Body.Close() }()
+					if resp.StatusCode != http.StatusOK {
+						return
+					}
+					b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+					if err != nil {
+						return
+					}
+					var v struct {
+						Version  string `json:"version"`
+						Platform string `json:"platform"`
+					}
+					if json.Unmarshal(b, &v) == nil {
+						if strings.TrimSpace(v.Version) != "" {
+							name = strings.TrimSpace(v.Version)
+						} else if strings.TrimSpace(v.Platform) != "" {
+							name = strings.TrimSpace(v.Platform)
+						}
+					}
+				}()
+			}
+		}
+	}
+	return DiscoverCandidate{Name: name}, true
 }
 
 // probeTargetsFromSubnet parses an operator-supplied IPv4 CIDR (/24-/30) into host IPs.

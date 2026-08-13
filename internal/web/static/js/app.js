@@ -455,7 +455,8 @@ function updateStationsDisplay() {
             const rt = runtimeById[cfg.id] || {};
             const lanOk = Boolean(rt.lan_ok);
             const isInterceptor = cfg.type === 'http_interceptor';
-            const needsTxid = !isInterceptor && (cfg.txid == null || cfg.txid === '');
+            const isEcowitt = cfg.type === 'ecowitt_gateway';
+            const needsTxid = cfg.type === 'davis_weatherlink_live' && (cfg.txid == null || cfg.txid === '');
             let lanLabel = 'Offline';
             let lanClass = 'error';
             if (needsTxid) {
@@ -481,10 +482,12 @@ function updateStationsDisplay() {
                 ? 'Davis WeatherLink Live'
                 : (isInterceptor
                     ? 'HTTP Interceptor (WU)'
-                    : escapeHtml(cfg.type || 'Station'));
+                    : (isEcowitt ? 'Ecowitt / Ambient Gateway' : escapeHtml(cfg.type || 'Station')));
             const txidLabel = isInterceptor
                 ? (cfg.listen_path ? escapeHtml(cfg.listen_path) : 'WU path')
-                : (cfg.txid != null ? `Transmitter ${escapeHtml(String(cfg.txid))}` : 'No transmitter');
+                : (isEcowitt
+                    ? 'LAN HTTP'
+                    : (cfg.txid != null ? `Transmitter ${escapeHtml(String(cfg.txid))}` : 'No transmitter'));
             return `
             <div class="station-card" data-station-id="${escapeHtml(cfg.id)}">
                 <div class="station-card-header">
@@ -554,9 +557,15 @@ function getStationFormHtml(st = null) {
     const txid = st?.txid != null ? String(st.txid) : '';
     const typ = st?.type || 'davis_weatherlink_live';
     const isInterceptor = typ === 'http_interceptor';
+    const isEcowitt = typ === 'ecowitt_gateway';
+    const showHostPoll = !isInterceptor;
+    const showTxid = typ === 'davis_weatherlink_live';
     const listenAddr = st?.listen_addr || '0.0.0.0:8090';
     const listenPath = st?.listen_path || '/weatherstation/updateweatherstation.php';
     const dialect = st?.dialect || 'wunderground';
+    const hostHelp = isEcowitt
+        ? 'Prefer a static IP. Discover probes GET /get_livedata_info on your LAN (/24-/30). Point the wind vane true north. Missing gateway time (common_list 0x18) skips weather upload.'
+        : 'Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.';
     return `
         <form id="stationForm" onsubmit="saveStation(event, ${isEdit ? `'${st.id}'` : 'null'})">
             <div class="form-section">
@@ -575,18 +584,19 @@ function getStationFormHtml(st = null) {
                 <div class="form-group">
                     <label for="stType">Type</label>
                     <select id="stType" class="form-control" required onchange="onStationTypeChange()">
-                        <option value="davis_weatherlink_live" ${!isInterceptor ? 'selected' : ''}>Davis WeatherLink Live (LAN)</option>
-                        <option value="http_interceptor" ${isInterceptor ? 'selected' : ''}>HTTP Interceptor (Weather Underground)</option>
+                        <option value="davis_weatherlink_live" ${typ === 'davis_weatherlink_live' ? 'selected' : ''}>Davis WeatherLink Live (LAN)</option>
+                        <option value="ecowitt_gateway" ${typ === 'ecowitt_gateway' ? 'selected' : ''}>Ecowitt / Ambient Gateway (LAN)</option>
+                        <option value="http_interceptor" ${typ === 'http_interceptor' ? 'selected' : ''}>HTTP Interceptor (Weather Underground)</option>
                     </select>
                 </div>
-                <div id="stationDavisFields" ${isInterceptor ? 'hidden' : ''}>
+                <div id="stationDavisFields" ${showHostPoll ? '' : 'hidden'}>
                     <div class="form-group">
                         <label for="stHost">Host (IP or hostname)</label>
                         <input type="text" id="stHost" class="form-control"
                                value="${escapeHtml(st?.host || '')}"
-                               placeholder="192.168.1.50 or weatherlink.local"
-                               ${isInterceptor ? '' : 'required'}>
-                        <p class="form-help">Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.</p>
+                               placeholder="192.168.1.50"
+                               ${showHostPoll ? 'required' : ''}>
+                        <p class="form-help" id="stHostHelp">${hostHelp}</p>
                     </div>
                     <div class="form-group">
                         <label for="stDiscoverSubnet">Discover network (CIDR)</label>
@@ -638,7 +648,7 @@ function getStationFormHtml(st = null) {
                     </label>
                 </div>
             </div>
-            <div id="stationTxidSection" class="form-section" ${isInterceptor ? 'hidden' : ''}>
+            <div id="stationTxidSection" class="form-section" ${showTxid ? '' : 'hidden'}>
                 <div class="form-section-title">Transmitter</div>
                 <p class="form-help">Run Test poll, then choose which sensor transmitter to use. Required for ongoing readings.</p>
                 <div class="form-group">
@@ -663,20 +673,27 @@ function getStationFormHtml(st = null) {
 function onStationTypeChange() {
     const typ = document.getElementById('stType')?.value || 'davis_weatherlink_live';
     const isInterceptor = typ === 'http_interceptor';
+    const isDavis = typ === 'davis_weatherlink_live';
     const davis = document.getElementById('stationDavisFields');
     const interceptor = document.getElementById('stationInterceptorFields');
     const txid = document.getElementById('stationTxidSection');
     const testBtn = document.getElementById('stationTestBtn');
     const host = document.getElementById('stHost');
+    const hostHelp = document.getElementById('stHostHelp');
     const listenAddr = document.getElementById('stListenAddr');
     const listenPath = document.getElementById('stListenPath');
     if (davis) davis.hidden = isInterceptor;
     if (interceptor) interceptor.hidden = !isInterceptor;
-    if (txid) txid.hidden = isInterceptor;
+    if (txid) txid.hidden = !isDavis;
     if (testBtn) testBtn.textContent = isInterceptor ? 'Test receive' : 'Test poll';
     if (host) host.required = !isInterceptor;
     if (listenAddr) listenAddr.required = isInterceptor;
     if (listenPath) listenPath.required = isInterceptor;
+    if (hostHelp) {
+        hostHelp.textContent = typ === 'ecowitt_gateway'
+            ? 'Prefer a static IP. Discover probes GET /get_livedata_info on your LAN (/24-/30). Point the wind vane true north. Missing gateway time (common_list 0x18) skips weather upload.'
+            : 'Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.';
+    }
 }
 
 function buildStationConfigFromForm() {
@@ -700,11 +717,13 @@ function buildStationConfigFromForm() {
     const host = document.getElementById('stHost')?.value?.trim();
     if (!host) return null;
     const poll = parseInt(document.getElementById('stPoll')?.value, 10) || 10;
-    const txidRaw = document.getElementById('stTxid')?.value;
     body.host = host;
     body.poll_interval_seconds = poll;
-    if (txidRaw !== '' && txidRaw != null) {
-        body.txid = parseInt(txidRaw, 10);
+    if (type === 'davis_weatherlink_live') {
+        const txidRaw = document.getElementById('stTxid')?.value;
+        if (txidRaw !== '' && txidRaw != null) {
+            body.txid = parseInt(txidRaw, 10);
+        }
     }
     return body;
 }
@@ -999,7 +1018,7 @@ async function saveStation(event, existingId) {
             : 'Name and host are required');
         return;
     }
-    if (body.type !== 'http_interceptor' && body.txid == null) {
+    if (body.type === 'davis_weatherlink_live' && body.txid == null) {
         if (!confirm('No transmitter selected. Save anyway? Ongoing readings will wait until you pick one.')) {
             return;
         }

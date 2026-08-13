@@ -11,6 +11,7 @@ import (
 const (
 	ProviderDavisWeatherLinkLive = config.StationTypeDavisWeatherLinkLive
 	ProviderHTTPInterceptor      = config.StationTypeHTTPInterceptor
+	ProviderEcowittGateway       = config.StationTypeEcowittGateway
 )
 
 // GlobalMinPollInterval is the hard ceiling: never sample faster than 1 Hz.

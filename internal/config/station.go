@@ -12,10 +12,14 @@ import (
 const (
 	StationTypeDavisWeatherLinkLive = "davis_weatherlink_live"
 	StationTypeHTTPInterceptor      = "http_interceptor"
+	StationTypeEcowittGateway       = "ecowitt_gateway"
 )
 
 // DefaultDavisPollIntervalSeconds is the Davis Local API current_conditions floor.
 const DefaultDavisPollIntervalSeconds = 10
+
+// DefaultEcowittPollIntervalSeconds is the Ecowitt get_livedata_info poll floor.
+const DefaultEcowittPollIntervalSeconds = 10
 
 // DefaultHTTPInterceptorListenAddr is the shared ingest bind for interceptor stations.
 const DefaultHTTPInterceptorListenAddr = "0.0.0.0:8090"
@@ -89,6 +93,10 @@ func NormalizeStationDefaults(st *Station) {
 		if st.PollIntervalSeconds <= 0 {
 			st.PollIntervalSeconds = DefaultDavisPollIntervalSeconds
 		}
+	case StationTypeEcowittGateway:
+		if st.PollIntervalSeconds <= 0 {
+			st.PollIntervalSeconds = DefaultEcowittPollIntervalSeconds
+		}
 	case StationTypeHTTPInterceptor:
 		st.ListenAddr = strings.TrimSpace(st.ListenAddr)
 		st.ListenPath = strings.TrimSpace(st.ListenPath)
@@ -116,6 +124,8 @@ func ValidateStation(st Station) error {
 	switch st.Type {
 	case StationTypeDavisWeatherLinkLive:
 		return validateDavisStation(st)
+	case StationTypeEcowittGateway:
+		return validateEcowittStation(st)
 	case StationTypeHTTPInterceptor:
 		return validateHTTPInterceptorStation(st)
 	case "":
@@ -131,6 +141,16 @@ func validateDavisStation(st Station) error {
 	}
 	if st.PollIntervalSeconds > 0 && st.PollIntervalSeconds < DefaultDavisPollIntervalSeconds {
 		return fmt.Errorf("davis poll_interval_seconds must be >= %d", DefaultDavisPollIntervalSeconds)
+	}
+	return nil
+}
+
+func validateEcowittStation(st Station) error {
+	if strings.TrimSpace(st.Host) == "" {
+		return fmt.Errorf("station host is required")
+	}
+	if st.PollIntervalSeconds > 0 && st.PollIntervalSeconds < DefaultEcowittPollIntervalSeconds {
+		return fmt.Errorf("ecowitt poll_interval_seconds must be >= %d", DefaultEcowittPollIntervalSeconds)
 	}
 	return nil
 }

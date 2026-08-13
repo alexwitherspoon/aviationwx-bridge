@@ -148,3 +148,20 @@ func TestStationUnmarshalEnabledDefault(t *testing.T) {
 		t.Fatal("explicit false must stick")
 	}
 }
+
+func TestValidateEcowittStation(t *testing.T) {
+	st := Station{
+		ID:   "station-ecowitt",
+		Name: "Ecowitt",
+		Type: StationTypeEcowittGateway,
+		Host: "192.168.1.60",
+	}
+	NormalizeStationDefaults(&st)
+	if err := ValidateStation(st); err != nil {
+		t.Fatal(err)
+	}
+	st.PollIntervalSeconds = 5
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected poll floor error")
+	}
+}

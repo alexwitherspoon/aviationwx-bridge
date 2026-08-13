@@ -76,9 +76,30 @@ func TestProbeDavisURLAcceptsFixture(t *testing.T) {
 }
 
 func TestDiscoverStationsUnsupportedType(t *testing.T) {
-	_, err := DiscoverStations(context.Background(), DiscoverOptions{Type: "ecowitt"})
+	_, err := DiscoverStations(context.Background(), DiscoverOptions{Type: "mqtt"})
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestProbeEcowittURLAcceptsFixture(t *testing.T) {
+	fixture := []byte(`{"common_list":[{"id":"0x02","val":"1"}],"wh25":[{"intemp":"20"}]}`)
+	mux := http.NewServeMux()
+	mux.HandleFunc(ecowittLivedataPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(fixture)
+	})
+	mux.HandleFunc(ecowittVersionPath, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"version":"Version: GW1100A_V1.0","platform":"ecowitt"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c, ok := probeEcowittURL(context.Background(), srv.Client(), srv.URL+ecowittLivedataPath)
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if !strings.Contains(c.Name, "GW1100A") {
+		t.Fatalf("name = %q", c.Name)
 	}
 }
 

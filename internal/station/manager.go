@@ -3,6 +3,7 @@ package station
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -33,8 +34,21 @@ type Manager struct {
 	ring    *outboundRing
 	postMu  sync.Mutex // serializes flush + PostWeather across station workers
 
-	// interceptorHub serves WU-style push ingest (nil when no interceptor stations).
-	hub *interceptorHub
+	// lastCatchupPost paces ring flush at ≤1 Hz per SourceID (separate from live).
+	lastCatchupPost map[string]time.Time
+
+	uplink *weatherUplink
+
+	lanFailLogMu sync.Mutex
+	lanFailLogAt map[string]time.Time
+
+	catchupStop chan struct{}
+	catchupDone chan struct{}
+	stopOnce    sync.Once
+	runCtx      context.Context
+	runCancel   context.CancelFunc
+
+	hub *interceptorHub // nil when no interceptor stations
 
 	// recentPayloads is an in-memory newest-first log for console (no disk).
 	recentMu       sync.Mutex
@@ -47,14 +61,18 @@ type PayloadLogEntry struct {
 	ObservedAt time.Time   `json:"observed_at,omitempty"`
 	StationID  string      `json:"station_id"`
 	LANOK      bool        `json:"lan_ok"`
-	Posted     *bool       `json:"posted,omitempty"` // set when an API weather POST was attempted
+	Posted     *bool       `json:"posted,omitempty"` // set when a weather POST was attempted
 	Message    string      `json:"message,omitempty"`
-	Raw        interface{} `json:"raw,omitempty"` // station-native payload as received
+	Raw        interface{} `json:"raw,omitempty"`
 }
 
 const (
 	maxPayloadLog  = 40
 	maxRawLogBytes = 4096
+	// catchupTickInterval must be shorter than GlobalMinPollInterval so due
+	// samples are not skipped an extra second when the ticker phase lands just
+	// before the pace window.
+	catchupTickInterval = 200 * time.Millisecond
 )
 
 // ManagerConfig wires a Manager.
@@ -70,17 +88,28 @@ func NewManager(cfg ManagerConfig) *Manager {
 	if log == nil {
 		log = logger.Default()
 	}
-	return &Manager{
+	m := &Manager{
 		cfgService: cfg.ConfigService,
 		poster:     cfg.Poster,
 		log:        log.With("component", "station"),
 		providers: map[string]Provider{
 			ProviderDavisWeatherLinkLive: NewDavis(),
 		},
-		workers: make(map[string]*stationWorker),
-		status:  make(map[string]StationStatus),
-		ring:    newOutboundRing(),
+		workers:         make(map[string]*stationWorker),
+		status:          make(map[string]StationStatus),
+		ring:            newOutboundRing(),
+		lastCatchupPost: make(map[string]time.Time),
+		uplink:          newWeatherUplink(),
+		lanFailLogAt:    make(map[string]time.Time),
+		catchupStop:     make(chan struct{}),
+		catchupDone:     make(chan struct{}),
 	}
+	m.ring.onSoftMaxDrop = func(dropped int) {
+		m.log.Info("weather outbound ring SoftMax trimmed", "dropped", dropped, "cap", OutboundWeatherSoftMax)
+	}
+	m.runCtx, m.runCancel = context.WithCancel(context.Background())
+	go m.runCatchup()
+	return m
 }
 
 // SyncFromConfig starts, restarts, or stops poll workers and interceptor listen routes.
@@ -115,7 +144,6 @@ func (m *Manager) SyncFromConfig() {
 			continue
 		}
 		if st.Type == config.StationTypeHTTPInterceptor {
-			// Listen path is handled by syncInterceptorHub (below).
 			s := m.status[id]
 			s.WaitingForTxid = false
 			m.status[id] = s
@@ -154,6 +182,19 @@ func (m *Manager) SyncFromConfig() {
 		}
 	}
 	m.mu.Unlock()
+
+	m.postMu.Lock()
+	keep := make(map[string]struct{}, len(wanted))
+	for id := range wanted {
+		keep[id] = struct{}{}
+	}
+	m.ring.RetainSources(keep)
+	for id := range m.lastCatchupPost {
+		if _, ok := wanted[id]; !ok {
+			delete(m.lastCatchupPost, id)
+		}
+	}
+	m.postMu.Unlock()
 
 	m.syncInterceptorHub(wanted)
 }
@@ -236,12 +277,19 @@ func (m *Manager) syncInterceptorHub(wanted map[string]config.Station) {
 	m.hub = nil
 	m.mu.Unlock()
 
+	var pending []interceptorJob
+	var lastEmit map[string]time.Time
 	if old != nil {
+		pending = old.takePending()
+		lastEmit = old.snapshotLastEmit()
 		old.stop()
 	}
 
 	hub := newInterceptorHub(m, addr)
 	hub.setRoutes(routes)
+	if lastEmit != nil {
+		hub.restoreLastEmit(lastEmit)
+	}
 	if err := hub.start(); err != nil {
 		m.log.Warn("interceptor listen failed", "addr", addr, "error", err)
 		for _, route := range routes {
@@ -254,6 +302,9 @@ func (m *Manager) syncInterceptorHub(wanted map[string]config.Station) {
 			})
 		}
 		return
+	}
+	for _, job := range pending {
+		hub.enqueue(job.station, job.obs)
 	}
 	m.mu.Lock()
 	m.hub = hub
@@ -270,8 +321,13 @@ func interceptorRoutingError(msg string) bool {
 		strings.Contains(msg, "interceptor listen failed")
 }
 
-// Stop halts all poll workers and the interceptor listener.
+// Stop halts all poll workers, the interceptor listener, and catch-up flush.
 func (m *Manager) Stop() {
+	m.stopOnce.Do(func() {
+		m.runCancel()
+		close(m.catchupStop)
+	})
+
 	m.mu.Lock()
 	toStop := make([]*stationWorker, 0, len(m.workers))
 	for id, w := range m.workers {
@@ -287,6 +343,7 @@ func (m *Manager) Stop() {
 	if hub != nil {
 		hub.stop()
 	}
+	<-m.catchupDone
 }
 
 // StatusSnapshot returns per-station runtime status.
@@ -294,12 +351,14 @@ func (m *Manager) StatusSnapshot() []StationStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]StationStatus, 0, len(m.status))
+	queued := m.ring.Len()
 	for _, st := range m.cfgService.ListStations() {
 		s, ok := m.status[st.ID]
 		if !ok {
 			s = m.statusFromConfig(st, StationStatus{})
 		}
-		s.OutboundQueued = m.ring.Len()
+		// One shared ring; same depth on every station status.
+		s.OutboundQueued = queued
 		out = append(out, s)
 	}
 	return out
@@ -340,20 +399,23 @@ func (m *Manager) WeatherSubsystemHealth() (bridgeapi.SubsystemHealth, bool) {
 		}
 	}
 	status := bridgeapi.StatusOperational
-	if enabled == 0 {
-		status = bridgeapi.StatusOperational
-	} else if !lanOK {
+	if !lanOK {
 		status = bridgeapi.StatusDown
-	} else if waiting == enabled || degraded {
+	} else if enabled > 0 && (waiting == enabled || degraded) {
 		status = bridgeapi.StatusDegraded
-	} else if m.poster != nil && m.poster.APIConfigured() && !postOK {
+	} else if enabled > 0 && m.poster != nil && m.poster.APIConfigured() && !postOK {
 		status = bridgeapi.StatusDegraded
+	}
+	queued := 0
+	if len(statuses) > 0 {
+		queued = statuses[0].OutboundQueued
 	}
 	detail := map[string]interface{}{
 		"lan_ok":           lanOK,
 		"stations_enabled": enabled,
 		"waiting_for_txid": waiting,
-		"outbound_queued":  m.ring.Len(),
+		"outbound_queued":  queued,
+		"wan_uplink_open":  m.uplink != nil && m.uplink.isOpen(),
 		"degraded":         degraded,
 	}
 	if m.poster != nil {
@@ -443,32 +505,198 @@ func (m *Manager) postObservation(ctx context.Context, st config.Station, obs *O
 	req := weatherRequestFromObs(obs)
 	m.postMu.Lock()
 	defer m.postMu.Unlock()
-	m.flushRing(ctx)
-	if err := m.poster.PostWeather(ctx, req); err != nil {
+
+	flushCtx, flushCancel := context.WithTimeout(ctx, weatherPostTimeout)
+	m.flushRing(flushCtx)
+	flushCancel()
+
+	if !m.uplink.allowAttempt() {
 		m.ring.Push(req)
+		msg := "weather WAN unreachable; queued"
 		m.setStatus(st.ID, func(s *StationStatus) {
-			s.LastPostError = err.Error()
+			s.LastPostError = msg
 		})
-		m.log.Warn("weather post failed", "station", st.ID, "error", err)
-		return err
+		return errors.New(msg)
 	}
-	m.setStatus(st.ID, func(s *StationStatus) {
-		s.LastPostAt = time.Now().UTC()
-		s.LastPostError = ""
-	})
+
+	liveCtx, liveCancel := context.WithTimeout(ctx, weatherPostTimeout)
+	err := m.poster.PostWeather(liveCtx, req)
+	liveCancel()
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return err
+		}
+		return m.handleWeatherPostErr(st.ID, req, err, true)
+	}
+	m.noteWeatherPostOK(st.ID)
 	return nil
 }
 
+// flushRing posts at most one queued sample per SourceID per GlobalMinPollInterval.
+// Catch-up budget is separate from live (worst case ~2 Hz/station). Caller holds postMu.
 func (m *Manager) flushRing(ctx context.Context) {
 	if m.poster == nil || !m.poster.APIConfigured() {
 		return
 	}
-	pending := m.ring.PopAll()
-	for i, req := range pending {
-		if err := m.poster.PostWeather(ctx, req); err != nil {
-			m.ring.PushFront(pending[i:]...)
+	// Do not consume a probe slot when there is nothing due to post.
+	if !m.uplink.probeDue() {
+		return
+	}
+	now := time.Now().UTC()
+	ready := m.ring.PopReady(m.lastCatchupPost, now, GlobalMinPollInterval)
+	if len(ready) == 0 {
+		return
+	}
+	if !m.uplink.allowAttempt() {
+		m.ring.PushFront(ready...)
+		return
+	}
+	for i, req := range ready {
+		if i > 0 && !m.uplink.allowAttempt() {
+			m.ring.PushFront(ready[i:]...)
 			return
 		}
+		postCtx, cancel := context.WithTimeout(ctx, weatherPostTimeout)
+		err := m.poster.PostWeather(postCtx, req)
+		cancel()
+		// Stamp on attempt so a down API is not retried every live tick in the same second.
+		m.lastCatchupPost[req.SourceID] = time.Now().UTC()
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				m.ring.PushFront(ready[i:]...)
+				return
+			}
+			if isPermanentWeatherErr(err) {
+				_ = m.handleWeatherPostErr(req.SourceID, req, err, false)
+				continue
+			}
+			_ = m.handleWeatherPostErr(req.SourceID, req, err, false)
+			m.ring.PushFront(ready[i:]...)
+			return
+		}
+		m.noteWeatherPostOK(req.SourceID)
+	}
+}
+
+func (m *Manager) noteWeatherPostOK(stationID string) {
+	wasOpen := m.uplink.noteSuccess()
+	if wasOpen {
+		m.log.Info("weather WAN recovered - draining catch-up")
+	}
+	if m.uplink.isOpen() {
+		// Invariant: a successful POST must close the breaker.
+		m.log.Warn("weather uplink still open after successful POST", "station", stationID)
+	}
+	m.setStatus(stationID, func(s *StationStatus) {
+		s.LastPostAt = time.Now().UTC()
+		s.LastPostError = ""
+	})
+	m.mu.Lock()
+	s := m.status[stationID]
+	m.mu.Unlock()
+	if s.LastPostError != "" {
+		// Invariant: successful POST must clear last_post_error for this source.
+		m.log.Warn("weather post status not cleared after successful POST",
+			"station", stationID, "last_post_error", s.LastPostError)
+	}
+}
+
+// healPostStatusAfterDrain clears stale WAN queue reasons once the ring is empty
+// and the uplink is healthy. Permanent 4xx reasons are left for operators.
+func (m *Manager) healPostStatusAfterDrain() {
+	if m.uplink.isOpen() || m.ring.Len() != 0 {
+		return
+	}
+	cleared := 0
+	for _, st := range m.cfgService.ListStations() {
+		m.mu.Lock()
+		s := m.status[st.ID]
+		m.mu.Unlock()
+		if !staleWANPostReason(s.LastPostError) {
+			continue
+		}
+		m.setStatus(st.ID, func(ss *StationStatus) {
+			if staleWANPostReason(ss.LastPostError) {
+				ss.LastPostError = ""
+			}
+		})
+		cleared++
+	}
+	if cleared > 0 {
+		m.log.Info("weather post status healed after catch-up drain", "stations", cleared)
+	}
+}
+
+func staleWANPostReason(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	if msg == "weather WAN unreachable; queued" {
+		return true
+	}
+	// Transport-class leftovers from before breaker fail-fast.
+	return strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "bridge api request:") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "i/o timeout")
+}
+
+// handleWeatherPostErr updates uplink/status for a failed POST. When push is true, req is queued.
+func (m *Manager) handleWeatherPostErr(stationID string, req bridgeapi.WeatherRequest, err error, push bool) error {
+	if isPermanentWeatherErr(err) {
+		m.setStatus(stationID, func(s *StationStatus) {
+			s.LastPostError = err.Error()
+		})
+		m.log.Warn("weather POST rejected", "station", stationID, "error", err)
+		return err
+	}
+	if errors.Is(err, context.Canceled) {
+		return err
+	}
+	if opened := m.uplink.noteTransientFailure(); opened {
+		m.log.Info("weather WAN unreachable - queueing", "station", stationID)
+	} else {
+		m.log.Debug("weather POST deferred", "station", stationID, "error", err)
+	}
+	if push {
+		m.ring.Push(req)
+	}
+	m.setStatus(stationID, func(s *StationStatus) {
+		s.LastPostError = err.Error()
+	})
+	return err
+}
+
+func (m *Manager) runCatchup() {
+	defer close(m.catchupDone)
+	t := time.NewTicker(catchupTickInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-m.catchupStop:
+			return
+		case <-t.C:
+			m.tickCatchup()
+		}
+	}
+}
+
+func (m *Manager) tickCatchup() {
+	if m.poster == nil || !m.poster.APIConfigured() {
+		return
+	}
+	if m.ring.Len() == 0 {
+		m.healPostStatusAfterDrain()
+		return
+	}
+	ctx, cancel := context.WithTimeout(m.runCtx, weatherPostTimeout)
+	defer cancel()
+	m.postMu.Lock()
+	m.flushRing(ctx)
+	drained := m.ring.Len() == 0
+	m.postMu.Unlock()
+	if !m.uplink.isOpen() && drained {
+		m.healPostStatusAfterDrain()
 	}
 }
 
@@ -528,7 +756,7 @@ func (w *stationWorker) run() {
 }
 
 func (w *stationWorker) tick(ctx context.Context) {
-	pollCtx, cancel := context.WithTimeout(ctx, davisHTTPTimeout+2*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, LANPollTimeout+2*time.Second)
 	defer cancel()
 
 	obs, err := w.prov.Poll(pollCtx, w.cfg)
@@ -561,11 +789,7 @@ func (w *stationWorker) tick(ctx context.Context) {
 			}
 		}
 		w.mgr.notePayload(entry)
-		if lanOK {
-			w.mgr.log.Warn("station poll degraded", "station", w.cfg.ID, "error", err)
-		} else {
-			w.mgr.log.Warn("station poll failed", "station", w.cfg.ID, "error", err)
-		}
+		w.mgr.noteLANPollOutcome(w.cfg.ID, lanOK, err)
 		return
 	}
 
@@ -598,13 +822,13 @@ func (w *stationWorker) tick(ctx context.Context) {
 		})
 		entry.Message = msg
 		w.mgr.notePayload(entry)
-		w.mgr.log.Warn("station poll degraded", "station", w.cfg.ID, "reason", "missing_ts")
+		w.mgr.log.Info("station poll skipped POST", "station", w.cfg.ID, "reason", "missing_ts")
 		return
 	}
 
 	if w.cfg.Txid != nil && w.mgr.poster != nil && w.mgr.poster.APIConfigured() {
 		// Fresh timeout: pollCtx may be nearly spent after a slow Davis fetch.
-		postCtx, postCancel := context.WithTimeout(ctx, 30*time.Second)
+		postCtx, postCancel := context.WithTimeout(ctx, weatherPostTimeout)
 		postErr := w.mgr.postObservation(postCtx, w.cfg, obs)
 		postCancel()
 		posted := postErr == nil
@@ -615,6 +839,26 @@ func (w *stationWorker) tick(ctx context.Context) {
 	}
 
 	w.mgr.notePayload(entry)
+}
+
+func (m *Manager) noteLANPollOutcome(stationID string, lanOK bool, err error) {
+	if lanOK {
+		m.log.Debug("station poll degraded", "station", stationID, "error", err)
+		return
+	}
+	m.lanFailLogMu.Lock()
+	last := m.lanFailLogAt[stationID]
+	now := time.Now()
+	shouldInfo := last.IsZero() || now.Sub(last) >= time.Minute
+	if shouldInfo {
+		m.lanFailLogAt[stationID] = now
+	}
+	m.lanFailLogMu.Unlock()
+	if shouldInfo {
+		m.log.Info("station LAN unreachable", "station", stationID, "error", err)
+		return
+	}
+	m.log.Debug("station LAN unreachable", "station", stationID, "error", err)
 }
 
 func pollInterval(st config.Station) time.Duration {

@@ -222,3 +222,8 @@ func StatusCode(err error) int {
 	}
 	return 0
 }
+
+// NewStatusError returns an HTTP status error from the bridge API (tests and wrappers).
+func NewStatusError(statusCode int, body string) error {
+	return &apiError{StatusCode: statusCode, Body: body}
+}

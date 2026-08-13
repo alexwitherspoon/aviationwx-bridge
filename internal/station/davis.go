@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	davisHTTPTimeout     = 8 * time.Second
 	davisDefaultHTTPPort = "80"
 	davisPath            = "/v1/current_conditions"
 
@@ -32,7 +31,7 @@ type Davis struct {
 // NewDavis returns a Davis WLL provider.
 func NewDavis() *Davis {
 	return &Davis{
-		client: &http.Client{Timeout: davisHTTPTimeout},
+		client: NewLANClient(LANPollTimeout),
 	}
 }
 

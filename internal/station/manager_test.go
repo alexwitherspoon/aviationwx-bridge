@@ -21,6 +21,7 @@ type fakePoster struct {
 	configured bool
 	posts      []bridgeapi.WeatherRequest
 	failN      int
+	failErr    error // when failN > 0; default "post failed"
 	calls      int
 }
 
@@ -32,6 +33,9 @@ func (f *fakePoster) PostWeather(ctx context.Context, req bridgeapi.WeatherReque
 	f.calls++
 	if f.failN > 0 {
 		f.failN--
+		if f.failErr != nil {
+			return f.failErr
+		}
 		return errors.New("post failed")
 	}
 	f.posts = append(f.posts, req)
@@ -135,18 +139,160 @@ func TestManagerPollAndPost(t *testing.T) {
 	}
 }
 
-func TestOutboundRingDropOldest(t *testing.T) {
-	r := newOutboundRing()
-	for i := 0; i < MaxOutboundWeatherSamples+5; i++ {
-		r.Push(bridgeapi.WeatherRequest{SourceID: string(rune('a' + (i % 26)))})
+func TestFlushRingPacesCatchupOnePerSecondPerSource(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if r.Len() != MaxOutboundWeatherSamples {
-		t.Fatalf("len = %d", r.Len())
+	poster := &fakePoster{configured: true}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+
+	now := time.Now().UTC()
+	ctx := context.Background()
+	// Hold postMu so the catch-up ticker cannot race assertions.
+	mgr.postMu.Lock()
+	defer mgr.postMu.Unlock()
+	for i := 0; i < 3; i++ {
+		mgr.ring.Push(bridgeapi.WeatherRequest{
+			SourceID:   "src-a",
+			ObservedAt: now.Add(-time.Duration(i) * time.Second),
+			Provider:   "test",
+		})
 	}
+
+	mgr.flushRing(ctx)
+	poster.mu.Lock()
+	n := len(poster.posts)
+	poster.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("after first flush posts = %d, want 1", n)
+	}
+	if mgr.ring.Len() != 2 {
+		t.Fatalf("ring len = %d, want 2", mgr.ring.Len())
+	}
+
+	mgr.lastCatchupPost["src-a"] = time.Now().UTC()
+	mgr.flushRing(ctx)
+	poster.mu.Lock()
+	n = len(poster.posts)
+	poster.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("second flush within interval posts = %d, want still 1", n)
+	}
+	if mgr.ring.Len() != 2 {
+		t.Fatalf("ring len after paced skip = %d, want 2", mgr.ring.Len())
+	}
+
+	mgr.lastCatchupPost["src-a"] = time.Now().UTC().Add(-GlobalMinPollInterval)
+	mgr.flushRing(ctx)
+	poster.mu.Lock()
+	n = len(poster.posts)
+	poster.mu.Unlock()
+	if n != 2 {
+		t.Fatalf("after interval posts = %d, want 2", n)
+	}
+}
+
+func TestFlushRingCatchupBudgetIndependentOfLive(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{configured: true}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+
+	now := time.Now().UTC()
+	ctx := context.Background()
+	st := config.Station{ID: "station-a", Type: config.StationTypeDavisWeatherLinkLive}
+	if err := mgr.postObservation(ctx, st, &Observation{
+		SourceID:   "src-a",
+		ObservedAt: now,
+		Provider:   ProviderDavisWeatherLinkLive,
+		ProviderMeta: map[string]interface{}{
+			"api": "test",
+			"raw": map[string]interface{}{"temp": 1},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr.postMu.Lock()
+	mgr.ring.Push(bridgeapi.WeatherRequest{
+		SourceID:   "src-a",
+		ObservedAt: now.Add(-time.Second),
+		Provider:   "test",
+	})
+	mgr.flushRing(ctx)
+	mgr.postMu.Unlock()
+
+	poster.mu.Lock()
+	defer poster.mu.Unlock()
+	if len(poster.posts) != 2 {
+		t.Fatalf("posts = %d, want live + catch-up (separate budgets)", len(poster.posts))
+	}
+}
+
+func TestCatchupTickerDrainsWithoutLive(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{configured: true}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+
+	now := time.Now().UTC()
+	mgr.postMu.Lock()
+	mgr.ring.Push(bridgeapi.WeatherRequest{
+		SourceID:   "src-a",
+		ObservedAt: now.Add(-2 * time.Second),
+		Provider:   "test",
+	})
+	mgr.ring.Push(bridgeapi.WeatherRequest{
+		SourceID:   "src-a",
+		ObservedAt: now.Add(-time.Second),
+		Provider:   "test",
+	})
+	mgr.postMu.Unlock()
+
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		poster.mu.Lock()
+		n := len(poster.posts)
+		poster.mu.Unlock()
+		if n >= 2 && mgr.ring.Len() == 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	poster.mu.Lock()
+	n := len(poster.posts)
+	poster.mu.Unlock()
+	t.Fatalf("ticker drain posts=%d ring=%d, want 2 posts and empty ring", n, mgr.ring.Len())
 }
 
 func TestManagerQueuesWhenPostFails(t *testing.T) {
 	fixture, err := os.ReadFile(filepath.Join("testdata", "davis_current_conditions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fixture ts is historical; rewrite to "now" so a failed POST is still
+	// within OutboundWeatherMaxAge for ring retention.
+	var top map[string]interface{}
+	if err := json.Unmarshal(fixture, &top); err != nil {
+		t.Fatal(err)
+	}
+	data, ok := top["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("fixture data: want map, got %T", top["data"])
+	}
+	data["ts"] = float64(time.Now().UTC().Unix())
+	fixture, err = json.Marshal(top)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +502,7 @@ func TestManagerNoPostWithoutAPI(t *testing.T) {
 	}
 	statuses := mgr.StatusSnapshot()
 	if len(statuses) != 1 || !statuses[0].LANOK {
-		// May still be racing first poll
+		// First poll may still be in flight.
 		deadline := time.Now().Add(2 * time.Second)
 		for time.Now().Before(deadline) {
 			statuses = mgr.StatusSnapshot()
@@ -366,5 +512,442 @@ func TestManagerNoPostWithoutAPI(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 		t.Fatalf("status = %+v", statuses)
+	}
+}
+
+func TestCatchupSuccessClearsLastPostError(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txid := 1
+	if _, err := svc.AddStation(config.Station{
+		ID:      "station-a",
+		Name:    "A",
+		Type:    config.StationTypeDavisWeatherLinkLive,
+		Enabled: true,
+		Host:    "127.0.0.1",
+		Txid:    &txid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{configured: true, failN: 1}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+	mgr.SyncFromConfig()
+
+	now := time.Now().UTC()
+	_ = mgr.postObservation(context.Background(), config.Station{ID: "station-a"}, &Observation{
+		SourceID:     "station-a",
+		ObservedAt:   now,
+		Provider:     ProviderDavisWeatherLinkLive,
+		ProviderMeta: map[string]interface{}{"api": "test", "raw": map[string]interface{}{"t": 1}},
+	})
+	var found *StationStatus
+	for _, s := range mgr.StatusSnapshot() {
+		if s.ID == "station-a" {
+			found = &s
+			break
+		}
+	}
+	if found == nil || found.LastPostError == "" {
+		t.Fatalf("setup: want LastPostError, got %+v", found)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if mgr.ring.Len() == 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if mgr.ring.Len() != 0 {
+		t.Fatalf("ring len = %d, want drained", mgr.ring.Len())
+	}
+	for _, s := range mgr.StatusSnapshot() {
+		if s.ID != "station-a" {
+			continue
+		}
+		if s.LastPostError != "" {
+			t.Fatalf("LastPostError still %q after catch-up", s.LastPostError)
+		}
+		if s.LastPostAt.IsZero() {
+			t.Fatal("LastPostAt still zero after catch-up")
+		}
+		return
+	}
+	t.Fatal("station-a missing")
+}
+
+func TestUplinkBreakerFailFastQueuesWithoutDial(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{
+		configured: true,
+		failN:      2,
+		failErr:    context.DeadlineExceeded,
+	}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+
+	now := time.Now().UTC()
+	st := config.Station{ID: "station-a"}
+	obs := func(i int) *Observation {
+		return &Observation{
+			SourceID:     "station-a",
+			ObservedAt:   now.Add(-time.Duration(i) * time.Second),
+			Provider:     ProviderDavisWeatherLinkLive,
+			ProviderMeta: map[string]interface{}{"api": "test", "raw": map[string]interface{}{"i": i}},
+		}
+	}
+	_ = mgr.postObservation(context.Background(), st, obs(0))
+	_ = mgr.postObservation(context.Background(), st, obs(1))
+	if !mgr.uplink.isOpen() {
+		t.Fatal("expected uplink breaker open after consecutive transport failures")
+	}
+	poster.mu.Lock()
+	callsAfterOpen := poster.calls
+	poster.mu.Unlock()
+
+	_ = mgr.postObservation(context.Background(), st, obs(2))
+	poster.mu.Lock()
+	calls := poster.calls
+	poster.mu.Unlock()
+	if calls != callsAfterOpen {
+		t.Fatalf("breaker open still dialed: calls %d -> %d", callsAfterOpen, calls)
+	}
+	if mgr.ring.Len() < 1 {
+		t.Fatalf("ring len = %d, want queued samples", mgr.ring.Len())
+	}
+}
+
+func TestPermanent4xxNotRequeued(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{
+		configured: true,
+		failN:      1,
+		failErr:    bridgeapi.NewStatusError(400, "bad request"),
+	}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+
+	err = mgr.postObservation(context.Background(), config.Station{ID: "station-a"}, &Observation{
+		SourceID:     "station-a",
+		ObservedAt:   time.Now().UTC(),
+		Provider:     ProviderDavisWeatherLinkLive,
+		ProviderMeta: map[string]interface{}{"api": "test", "raw": map[string]interface{}{"t": 1}},
+	})
+	if err == nil {
+		t.Fatal("expected 400 error")
+	}
+	if mgr.ring.Len() != 0 {
+		t.Fatalf("ring len = %d, want 0 for permanent 4xx", mgr.ring.Len())
+	}
+	if mgr.uplink.isOpen() {
+		t.Fatal("4xx must not open WAN breaker")
+	}
+}
+
+func TestRemovedStationDropsRing(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txid := 1
+	if _, err := svc.AddStation(config.Station{
+		ID: "gone", Name: "Gone", Type: config.StationTypeDavisWeatherLinkLive,
+		Enabled: true, Host: "127.0.0.1", Txid: &txid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{configured: true}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+	mgr.SyncFromConfig()
+
+	mgr.postMu.Lock()
+	mgr.ring.Push(bridgeapi.WeatherRequest{
+		SourceID: "gone", ObservedAt: time.Now().UTC(), Provider: "test",
+	})
+	mgr.postMu.Unlock()
+
+	if err := svc.DeleteStation("gone"); err != nil {
+		t.Fatal(err)
+	}
+	mgr.SyncFromConfig()
+	if mgr.ring.Len() != 0 {
+		t.Fatalf("ring len = %d after delete, want 0", mgr.ring.Len())
+	}
+}
+
+func TestFlushRingPushFrontRestoresFIFO(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{configured: true, failN: 1}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+
+	now := time.Now().UTC()
+	mgr.postMu.Lock()
+	mgr.ring.Push(bridgeapi.WeatherRequest{SourceID: "a", ObservedAt: now.Add(-2 * time.Second), BridgeID: "first"})
+	mgr.ring.Push(bridgeapi.WeatherRequest{SourceID: "b", ObservedAt: now.Add(-time.Second), BridgeID: "second"})
+	mgr.flushRing(context.Background())
+	if mgr.ring.Len() != 2 {
+		t.Fatalf("ring len = %d after mid-flush fail, want 2", mgr.ring.Len())
+	}
+	mgr.lastCatchupPost = map[string]time.Time{}
+	poster.failN = 0
+	mgr.flushRing(context.Background())
+	mgr.postMu.Unlock()
+
+	poster.mu.Lock()
+	defer poster.mu.Unlock()
+	if len(poster.posts) < 1 {
+		t.Fatal("expected restored catch-up POST")
+	}
+	if poster.posts[0].BridgeID != "first" {
+		t.Fatalf("FIFO restore broken: first post BridgeID=%q", poster.posts[0].BridgeID)
+	}
+}
+
+func TestFlushRingEmptyDoesNotConsumeProbe(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{
+		configured: true,
+		failN:      2,
+		failErr:    context.DeadlineExceeded,
+	}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+
+	now := time.Now().UTC()
+	st := config.Station{ID: "station-a"}
+	obs := &Observation{
+		SourceID:     "station-a",
+		ObservedAt:   now,
+		Provider:     ProviderDavisWeatherLinkLive,
+		ProviderMeta: map[string]interface{}{"api": "test", "raw": map[string]interface{}{"t": 1}},
+	}
+	_ = mgr.postObservation(context.Background(), st, obs)
+	_ = mgr.postObservation(context.Background(), st, obs)
+	if !mgr.uplink.isOpen() {
+		t.Fatal("expected breaker open")
+	}
+
+	// Force probe due with an empty due-set (all items still pacing).
+	mgr.postMu.Lock()
+	mgr.uplink.mu.Lock()
+	mgr.uplink.openUntil = time.Now().Add(-time.Millisecond)
+	mgr.uplink.mu.Unlock()
+	for id := range mgr.lastCatchupPost {
+		mgr.lastCatchupPost[id] = time.Now().UTC()
+	}
+	callsBefore := poster.calls
+	// Drain ring so flush has nothing ready... actually ring has items but paced.
+	// Empty PopReady path: clear ring.
+	mgr.ring = newOutboundRing()
+	mgr.flushRing(context.Background())
+	mgr.postMu.Unlock()
+
+	poster.mu.Lock()
+	calls := poster.calls
+	poster.mu.Unlock()
+	if calls != callsBefore {
+		t.Fatalf("empty flush dialed poster: %d -> %d", callsBefore, calls)
+	}
+	if !mgr.uplink.probeDue() {
+		t.Fatal("empty flush must not consume probe slot")
+	}
+}
+
+func TestSplitTimeoutsLiveGetsFreshBudget(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slow := &phasePoster{configured: true, catchupDelay: 200 * time.Millisecond}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: slow})
+	defer mgr.Stop()
+
+	now := time.Now().UTC()
+	mgr.postMu.Lock()
+	mgr.ring.Push(bridgeapi.WeatherRequest{SourceID: "src-a", ObservedAt: now.Add(-time.Second), Provider: "test"})
+	mgr.postMu.Unlock()
+
+	// Parent still has budget after a slow flush phase because live uses its own timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err = mgr.postObservation(ctx, config.Station{ID: "live"}, &Observation{
+		SourceID:     "src-live",
+		ObservedAt:   now,
+		Provider:     ProviderDavisWeatherLinkLive,
+		ProviderMeta: map[string]interface{}{"api": "test", "raw": map[string]interface{}{"t": 1}},
+	})
+	if err != nil {
+		t.Fatalf("live post: %v", err)
+	}
+	slow.mu.Lock()
+	defer slow.mu.Unlock()
+	if slow.liveOK != 1 {
+		t.Fatalf("liveOK = %d, want 1", slow.liveOK)
+	}
+}
+
+func TestWeatherHealthIncludesWANUplinkOpen(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txid := 1
+	if _, err := svc.AddStation(config.Station{
+		ID: "station-a", Name: "A", Type: config.StationTypeDavisWeatherLinkLive,
+		Enabled: true, Host: "127.0.0.1", Txid: &txid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{
+		configured: true,
+		failN:      2,
+		failErr:    context.DeadlineExceeded,
+	}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	defer mgr.Stop()
+	mgr.SyncFromConfig()
+
+	sub, ok := mgr.WeatherSubsystemHealth()
+	if !ok {
+		t.Fatal("expected weather subsystem")
+	}
+	if open, _ := sub.Detail["wan_uplink_open"].(bool); open {
+		t.Fatal("wan_uplink_open true before failures")
+	}
+
+	now := time.Now().UTC()
+	st := config.Station{ID: "station-a"}
+	obs := func(i int) *Observation {
+		return &Observation{
+			SourceID: "station-a", ObservedAt: now.Add(-time.Duration(i) * time.Second),
+			Provider:     ProviderDavisWeatherLinkLive,
+			ProviderMeta: map[string]interface{}{"api": "test", "raw": map[string]interface{}{"i": i}},
+		}
+	}
+	_ = mgr.postObservation(context.Background(), st, obs(0))
+	_ = mgr.postObservation(context.Background(), st, obs(1))
+	if !mgr.uplink.isOpen() {
+		t.Fatal("expected breaker open")
+	}
+	sub, ok = mgr.WeatherSubsystemHealth()
+	if !ok {
+		t.Fatal("expected weather subsystem")
+	}
+	if open, _ := sub.Detail["wan_uplink_open"].(bool); !open {
+		t.Fatal("wan_uplink_open false while breaker open")
+	}
+}
+
+func TestHealPostStatusAfterDrainClearsStaleWAN(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txid := 1
+	if _, err := svc.AddStation(config.Station{
+		ID: "station-a", Name: "A", Type: config.StationTypeDavisWeatherLinkLive,
+		Enabled: true, Host: "127.0.0.1", Txid: &txid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AddStation(config.Station{
+		ID: "station-b", Name: "B", Type: config.StationTypeDavisWeatherLinkLive,
+		Enabled: true, Host: "127.0.0.1", Txid: &txid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: &fakePoster{configured: true}})
+	defer mgr.Stop()
+	mgr.SyncFromConfig()
+
+	mgr.setStatus("station-a", func(s *StationStatus) {
+		s.LastPostError = "weather WAN unreachable; queued"
+	})
+	mgr.setStatus("station-b", func(s *StationStatus) {
+		s.LastPostError = "HTTP 400: bad request"
+	})
+	mgr.healPostStatusAfterDrain()
+
+	for _, s := range mgr.StatusSnapshot() {
+		switch s.ID {
+		case "station-a":
+			if s.LastPostError != "" {
+				t.Fatalf("station-a LastPostError=%q, want cleared", s.LastPostError)
+			}
+		case "station-b":
+			if s.LastPostError != "HTTP 400: bad request" {
+				t.Fatalf("station-b LastPostError=%q, want permanent 4xx kept", s.LastPostError)
+			}
+		}
+	}
+}
+
+func TestStaleWANPostReason(t *testing.T) {
+	if !staleWANPostReason("weather WAN unreachable; queued") {
+		t.Fatal("want fail-fast queued reason")
+	}
+	if !staleWANPostReason("bridge api request: dial tcp: i/o timeout") {
+		t.Fatal("want transport wrapper")
+	}
+	if staleWANPostReason("HTTP 400: bad request") {
+		t.Fatal("permanent 4xx must not be stale WAN")
+	}
+	if staleWANPostReason("") {
+		t.Fatal("empty must not be stale")
+	}
+}
+
+type phasePoster struct {
+	configured   bool
+	catchupDelay time.Duration
+	mu           sync.Mutex
+	liveOK       int
+}
+
+func (p *phasePoster) APIConfigured() bool { return p.configured }
+
+func (p *phasePoster) PostWeather(ctx context.Context, req bridgeapi.WeatherRequest) error {
+	if req.SourceID == "src-live" {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			p.mu.Lock()
+			p.liveOK++
+			p.mu.Unlock()
+			return nil
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(p.catchupDelay):
+		return nil
 	}
 }

@@ -1,6 +1,6 @@
 # Multi-stage build for AviationWX.org Bridge
 # Stage 1: Build Go binary
-FROM golang:1.26.5-alpine3.23 AS builder
+FROM golang:1.26.6-alpine3.23 AS builder
 
 # Build arguments for multi-arch support
 # These are automatically set by Docker buildx when building multi-platform images

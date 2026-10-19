@@ -50,6 +50,7 @@ type Manager struct {
 
 	hub *interceptorHub // nil when no interceptor stations
 
+	syncMu       sync.Mutex // serializes whole SyncFromConfig passes
 	mqttSources  map[string]*MQTTSource
 	mqttLastEmit map[string]time.Time // guarded by mu; paces MQTT at ≤1 Hz per station
 
@@ -118,8 +119,14 @@ func NewManager(cfg ManagerConfig) *Manager {
 	return m
 }
 
-// SyncFromConfig starts, restarts, or stops poll workers and interceptor listen routes.
+// SyncFromConfig starts, restarts, or stops poll workers, interceptor listen
+// routes, and MQTT subscriptions. Serialized with syncMu so concurrent config
+// notifications cannot interleave and let a stale snapshot resurrect a removed
+// station.
 func (m *Manager) SyncFromConfig() {
+	m.syncMu.Lock()
+	defer m.syncMu.Unlock()
+
 	stations := m.cfgService.ListStations()
 	wanted := make(map[string]config.Station, len(stations))
 	for _, st := range stations {

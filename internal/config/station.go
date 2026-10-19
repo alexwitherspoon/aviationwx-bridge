@@ -214,11 +214,12 @@ func normalizeMQTTBrokerURL(raw string) string {
 }
 
 // redactURLUserInfo strips userinfo from a URL so validation errors never
-// echo a credential-bearing broker_url.
+// echo a credential-bearing broker_url. An unparseable URL is not echoed at
+// all: it could still carry embedded credentials.
 func redactURLUserInfo(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return raw
+		return "(unparseable url)"
 	}
 	u.User = nil
 	return u.String()

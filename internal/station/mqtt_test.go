@@ -76,8 +76,9 @@ func TestMQTTClientOptions(t *testing.T) {
 	if got := opts.Servers[0].Host; got != "broker.local:1883" {
 		t.Errorf("host = %q", got)
 	}
-	if opts.ClientID != "aviationwx-bridge-station-mqtt" {
-		t.Errorf("client id = %q", opts.ClientID)
+	const clientIDPrefix = mqttClientIDPrefix + "station-mqtt-"
+	if !strings.HasPrefix(opts.ClientID, clientIDPrefix) || len(opts.ClientID) <= len(clientIDPrefix) {
+		t.Errorf("client id = %q, want prefix %q plus a random suffix", opts.ClientID, clientIDPrefix)
 	}
 	if opts.Username != "user" || opts.Password != "secret" {
 		t.Errorf("creds = %q/%q", opts.Username, opts.Password)

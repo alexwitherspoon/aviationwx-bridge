@@ -2,6 +2,8 @@ package station
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -20,6 +22,17 @@ const mqttQoS = 1
 
 // mqttClientIDPrefix keeps bridge client ids recognizable on the broker.
 const mqttClientIDPrefix = "aviationwx-bridge-"
+
+// newMQTTClientID builds a collision-resistant client id from a station id. A
+// random suffix keeps two bridges (or two tests) that share a station id from
+// kicking each other off a shared broker.
+func newMQTTClientID(id string) string {
+	raw := make([]byte, 4)
+	if _, err := rand.Read(raw); err != nil {
+		return mqttClientIDPrefix + id + "-" + fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return mqttClientIDPrefix + id + "-" + hex.EncodeToString(raw)
+}
 
 // mqttDisconnectQuiesceMs is the graceful disconnect quiesce window.
 const mqttDisconnectQuiesceMs = 250
@@ -83,7 +96,7 @@ func buildMQTTObservation(cfg config.Station, topic string, payload []byte, rece
 func mqttClientOptions(cfg config.Station) *paho.ClientOptions {
 	opts := paho.NewClientOptions()
 	opts.AddBroker(cfg.BrokerURL)
-	opts.SetClientID(mqttClientIDPrefix + cfg.ID)
+	opts.SetClientID(newMQTTClientID(cfg.ID))
 	opts.SetCleanSession(true)
 	opts.SetAutoReconnect(true)
 	opts.SetConnectRetry(true)
@@ -222,6 +235,7 @@ func (m *Manager) TestMQTTSubscribe(ctx context.Context, st config.Station) (*Ob
 	opts := mqttClientOptions(st)
 	// Test is a single bounded attempt, not the retrying live source.
 	opts.SetConnectRetry(false)
+	opts.SetAutoReconnect(false)
 	opts.SetConnectTimeout(mqttTestConnectTimeout)
 	opts.SetDefaultPublishHandler(func(_ paho.Client, msg paho.Message) {
 		if msg.Retained() {
@@ -330,30 +344,31 @@ func (m *Manager) mqttSourceStatus(st config.Station) func(lanOK bool, msg strin
 // thins to the global emit ceiling and forwards each fresh publish.
 func (m *Manager) mqttHandler(st config.Station) func(topic string, payload []byte, receivedAt time.Time) {
 	return func(topic string, payload []byte, receivedAt time.Time) {
-		now := receivedAt.UTC()
-
-		// Thin to ≤1 Hz per station: a misbehaving publisher must not flood the
-		// bridge or the core.
-		m.mu.Lock()
-		if last, ok := m.mqttLastEmit[st.ID]; ok && now.Sub(last) < GlobalMinPollInterval {
-			m.mu.Unlock()
-			return
-		}
-		m.mqttLastEmit[st.ID] = now
-		m.mu.Unlock()
-
+		// Validate before consuming the emit budget so a malformed publish does
+		// not throttle the following valid one.
 		obs, err := buildMQTTObservation(st, topic, payload, receivedAt)
 		if err != nil {
 			m.setStatus(st.ID, func(s *StationStatus) {
 				s.LANOK = true
 				s.Degraded = true
-				s.LastPollAt = now
+				s.LastPollAt = receivedAt.UTC()
 				s.LastPollError = err.Error()
 			})
 			m.log.Warn("mqtt payload rejected", "station", st.ID, "error", err)
 			return
 		}
-		m.deliverMQTTObservation(st, obs, now)
+
+		// Thin to ≤1 Hz per station on the monotonic receive time; the wall
+		// clock can step backward on an NTP correction and would stall the gate.
+		m.mu.Lock()
+		if last, ok := m.mqttLastEmit[st.ID]; ok && receivedAt.Sub(last) < GlobalMinPollInterval {
+			m.mu.Unlock()
+			return
+		}
+		m.mqttLastEmit[st.ID] = receivedAt
+		m.mu.Unlock()
+
+		m.deliverMQTTObservation(st, obs, receivedAt.UTC())
 	}
 }
 

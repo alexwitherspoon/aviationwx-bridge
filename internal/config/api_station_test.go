@@ -165,3 +165,34 @@ func TestValidateEcowittStation(t *testing.T) {
 		t.Fatal("expected poll floor error")
 	}
 }
+
+func TestValidateMQTTStation(t *testing.T) {
+	st := Station{
+		ID:        "station-mqtt",
+		Name:      "MQTT",
+		Type:      StationTypeMQTT,
+		BrokerURL: "tcp://localhost:1883",
+		Topic:     "weather/station",
+	}
+	NormalizeStationDefaults(&st)
+	if err := ValidateStation(st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Username != "" || st.Password != "" {
+		t.Fatal("unexpected creds from defaults")
+	}
+
+	st.BrokerURL = ""
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected broker_url required error")
+	}
+	st.BrokerURL = "ssl://localhost:8883"
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected unsupported scheme error")
+	}
+	st.BrokerURL = "tcp://localhost"
+	st.Topic = ""
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected topic required error")
+	}
+}

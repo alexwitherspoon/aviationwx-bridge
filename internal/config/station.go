@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -13,6 +14,7 @@ const (
 	StationTypeDavisWeatherLinkLive = "davis_weatherlink_live"
 	StationTypeHTTPInterceptor      = "http_interceptor"
 	StationTypeEcowittGateway       = "ecowitt_gateway"
+	StationTypeMQTT                 = "mqtt"
 )
 
 // DefaultDavisPollIntervalSeconds is the Davis Local API current_conditions floor.
@@ -47,6 +49,12 @@ type Station struct {
 	ListenAddr string `json:"listen_addr,omitempty"`
 	ListenPath string `json:"listen_path,omitempty"`
 	Dialect    string `json:"dialect,omitempty"`
+
+	// MQTT subscriber fields.
+	BrokerURL string `json:"broker_url,omitempty"` // tcp://host[:port]; default port 1883
+	Topic     string `json:"topic,omitempty"`
+	Username  string `json:"username,omitempty"`
+	Password  string `json:"password,omitempty"`
 }
 
 // UnmarshalJSON defaults enabled to true when the field is omitted (CONFIG_SCHEMA).
@@ -62,6 +70,10 @@ func (st *Station) UnmarshalJSON(data []byte) error {
 		ListenAddr          string `json:"listen_addr,omitempty"`
 		ListenPath          string `json:"listen_path,omitempty"`
 		Dialect             string `json:"dialect,omitempty"`
+		BrokerURL           string `json:"broker_url,omitempty"`
+		Topic               string `json:"topic,omitempty"`
+		Username            string `json:"username,omitempty"`
+		Password            string `json:"password,omitempty"`
 	}{}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -75,6 +87,10 @@ func (st *Station) UnmarshalJSON(data []byte) error {
 	st.ListenAddr = aux.ListenAddr
 	st.ListenPath = aux.ListenPath
 	st.Dialect = aux.Dialect
+	st.BrokerURL = aux.BrokerURL
+	st.Topic = aux.Topic
+	st.Username = aux.Username
+	st.Password = aux.Password
 	if aux.Enabled == nil {
 		st.Enabled = true
 	} else {
@@ -110,6 +126,11 @@ func NormalizeStationDefaults(st *Station) {
 		if st.Dialect == "" {
 			st.Dialect = HTTPInterceptorDialectWunderground
 		}
+	case StationTypeMQTT:
+		st.BrokerURL = strings.TrimSpace(st.BrokerURL)
+		st.Topic = strings.TrimSpace(st.Topic)
+		st.Username = strings.TrimSpace(st.Username)
+		// Password is left untrimmed: it is an opaque secret.
 	}
 }
 
@@ -128,6 +149,8 @@ func ValidateStation(st Station) error {
 		return validateEcowittStation(st)
 	case StationTypeHTTPInterceptor:
 		return validateHTTPInterceptorStation(st)
+	case StationTypeMQTT:
+		return validateMQTTStation(st)
 	case "":
 		return fmt.Errorf("station type is required")
 	default:
@@ -151,6 +174,21 @@ func validateEcowittStation(st Station) error {
 	}
 	if st.PollIntervalSeconds > 0 && st.PollIntervalSeconds < DefaultEcowittPollIntervalSeconds {
 		return fmt.Errorf("ecowitt poll_interval_seconds must be >= %d", DefaultEcowittPollIntervalSeconds)
+	}
+	return nil
+}
+
+func validateMQTTStation(st Station) error {
+	broker := strings.TrimSpace(st.BrokerURL)
+	if broker == "" {
+		return fmt.Errorf("broker_url is required")
+	}
+	u, err := url.Parse(broker)
+	if err != nil || u.Scheme != "tcp" || u.Host == "" {
+		return fmt.Errorf("broker_url must be a tcp:// URL with a host (got %q)", st.BrokerURL)
+	}
+	if strings.TrimSpace(st.Topic) == "" {
+		return fmt.Errorf("topic is required")
 	}
 	return nil
 }

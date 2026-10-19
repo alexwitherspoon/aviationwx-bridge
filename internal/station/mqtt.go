@@ -33,6 +33,10 @@ const mqttTestConnectTimeout = 5 * time.Second
 // mqttTestCaptureTimeout bounds how long the console Test waits for a message.
 const mqttTestCaptureTimeout = 3 * time.Second
 
+// mqttTestClientID is the identity console Test uses so it never collides with
+// a live subscriber's client id on the broker.
+const mqttTestClientID = "mqtt-test"
+
 // buildMQTTObservation maps a received MQTT publish into an Observation.
 //
 // observed_at is the message arrival time, not a payload field: MQTT is a
@@ -128,6 +132,9 @@ func (m *Manager) TestMQTTSubscribe(ctx context.Context, st config.Station) (*Ob
 	if st.Type != config.StationTypeMQTT {
 		return nil, fmt.Errorf("station type is not mqtt")
 	}
+	// Run the diagnostic under a distinct identity so its client id can never
+	// collide with a live subscriber on the same broker (kicking it off).
+	st.ID = mqttTestClientID
 	if err := config.ValidateStation(st); err != nil {
 		return nil, err
 	}

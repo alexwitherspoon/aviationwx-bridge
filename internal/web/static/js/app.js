@@ -760,7 +760,7 @@ function buildStationConfigFromForm() {
         body.broker_url = brokerUrl;
         body.topic = topic;
         const username = document.getElementById('stUsername')?.value?.trim();
-        if (username) body.username = username;
+        body.username = username;
         const password = document.getElementById('stPassword')?.value;
         if (password) body.password = password;
         return body;

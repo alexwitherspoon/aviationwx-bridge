@@ -96,10 +96,20 @@ type MQTTSource struct {
 	// an untracked subscription after removal.
 	stopped bool
 	handle  func(topic string, payload []byte, receivedAt time.Time)
+	// status reports broker connectivity health to the manager; false marks
+	// the station degraded.
+	status func(lanOK bool, msg string)
 }
 
-func newMQTTSource(cfg config.Station, handle func(topic string, payload []byte, receivedAt time.Time)) *MQTTSource {
-	return &MQTTSource{cfg: cfg, handle: handle}
+func newMQTTSource(cfg config.Station, handle func(topic string, payload []byte, receivedAt time.Time), status func(lanOK bool, msg string)) *MQTTSource {
+	return &MQTTSource{cfg: cfg, handle: handle, status: status}
+}
+
+// reportStatus invokes the status callback if one is wired.
+func (s *MQTTSource) reportStatus(lanOK bool, msg string) {
+	if s.status != nil {
+		s.status(lanOK, msg)
+	}
 }
 
 // Start connects and subscribes. paho re-subscribes on reconnect via the
@@ -108,7 +118,14 @@ func (s *MQTTSource) Start() error {
 	opts := mqttClientOptions(s.cfg)
 	opts.SetOnConnectHandler(func(c paho.Client) {
 		// Subscribe on every connect, including reconnect after a drop.
-		c.Subscribe(s.cfg.Topic, mqttQoS, nil)
+		tok := c.Subscribe(s.cfg.Topic, mqttQoS, nil)
+		if !mqttSubscribeOK(tok) {
+			s.reportStatus(false, "broker rejected subscription to topic")
+			return
+		}
+	})
+	opts.SetConnectionLostHandler(func(_ paho.Client, err error) {
+		s.reportStatus(false, "broker connection lost")
 	})
 	opts.SetDefaultPublishHandler(func(_ paho.Client, m paho.Message) {
 		if m.Retained() {
@@ -153,6 +170,24 @@ func (s *MQTTSource) Stop() {
 	}
 }
 
+// mqttSubscribeOK waits for a SUBACK and reports whether the subscription was
+// granted. A denied grant surfaces as a 0x80 result byte, not a token error, so
+// both are checked.
+func mqttSubscribeOK(tok paho.Token) bool {
+	tok.Wait()
+	if tok.Error() != nil {
+		return false
+	}
+	if st, ok := tok.(*paho.SubscribeToken); ok {
+		for _, granted := range st.Result() {
+			if granted == 0x80 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // TestMQTTSubscribe connects to the configured broker, subscribes, and returns
 // the first received observation, or an error if none arrives before the
 // capture timeout. It is a one-shot console Test, not a live source.
@@ -194,8 +229,8 @@ func (m *Manager) TestMQTTSubscribe(ctx context.Context, st config.Station) (*Ob
 		return nil, fmt.Errorf("mqtt connect: %w", tok.Error())
 	}
 	defer client.Disconnect(mqttDisconnectQuiesceMs)
-	if tok := client.Subscribe(st.Topic, mqttQoS, nil); tok.Wait() && tok.Error() != nil {
-		return nil, fmt.Errorf("mqtt subscribe: %w", tok.Error())
+	if tok := client.Subscribe(st.Topic, mqttQoS, nil); !mqttSubscribeOK(tok) {
+		return nil, fmt.Errorf("mqtt subscribe: broker rejected topic %q", st.Topic)
 	}
 
 	select {
@@ -248,7 +283,7 @@ func (m *Manager) syncMQTTSources(wanted map[string]config.Station) {
 		if _, running := m.mqttSources[id]; running {
 			continue
 		}
-		src := newMQTTSource(st, m.mqttHandler(st))
+		src := newMQTTSource(st, m.mqttHandler(st), m.mqttSourceStatus(st))
 		m.mqttSources[id] = src
 		go func(id string, src *MQTTSource) {
 			if err := src.Start(); err != nil {
@@ -261,6 +296,23 @@ func (m *Manager) syncMQTTSources(wanted map[string]config.Station) {
 
 	for _, src := range toStop {
 		src.Stop()
+	}
+}
+
+// mqttSourceStatus returns the health callback for a station's subscription.
+// Connection and subscription failures degrade the station; delivery restores
+// it (via deliverMQTTObservation).
+func (m *Manager) mqttSourceStatus(st config.Station) func(lanOK bool, msg string) {
+	return func(lanOK bool, msg string) {
+		m.setStatus(st.ID, func(s *StationStatus) {
+			s.LANOK = lanOK
+			if msg != "" {
+				s.LastPollError = "mqtt: " + msg
+			}
+			if !lanOK {
+				s.Degraded = true
+			}
+		})
 	}
 }
 

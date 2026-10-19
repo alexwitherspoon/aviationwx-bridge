@@ -77,7 +77,7 @@ Optional weather stations. One JSON file per station. Inventory is advertised in
 |-------|------|----------|---------|-------------|
 | `id` | string | Yes | - | Unique ID (alphanumeric, hyphens) |
 | `name` | string | Yes | - | Display name |
-| `type` | string | Yes | - | `davis_weatherlink_live`, `ecowitt_gateway`, or `http_interceptor` (more types in epic #103) |
+| `type` | string | Yes | - | `davis_weatherlink_live`, `ecowitt_gateway`, `mqtt`, or `http_interceptor` (more types in epic #103) |
 | `enabled` | boolean | No | `true` | Enable/disable station |
 | `host` | string | Cond. | - | Davis / Ecowitt: IP (IPv4 or IPv6) or hostname. IPv6 may be bare or bracketed; with a non-default port use `[addr]:port`. Discover scans IPv4 CIDRs only. |
 | `poll_interval_seconds` | integer | No | `10` | Poll floor is 10s for Davis and Ecowitt; must be >= 10 |
@@ -85,14 +85,19 @@ Optional weather stations. One JSON file per station. Inventory is advertised in
 | `listen_addr` | string | Cond. | `0.0.0.0:8090` | Interceptor: bind address for WU-style ingest (`host:port`) |
 | `listen_path` | string | Cond. | `/weatherstation/updateweatherstation.php` | Interceptor: exact URL path devices POST/GET to |
 | `dialect` | string | Cond. | `wunderground` | Interceptor: payload dialect (`wunderground` only in this release) |
+| `broker_url` | string | Cond. | - | MQTT: broker URL `tcp://host[:port]` (default port 1883) |
+| `topic` | string | Cond. | - | MQTT: topic filter the station publishes JSON weather to |
+| `username` | string | No | - | MQTT: broker username (optional) |
+| `password` | string | No | - | MQTT: broker password (optional; write-only, never returned by the API) |
 
 Runtime (epic #102 / #103 / aviationwx#274):
 
 - **Davis / LAN poll providers:** enabled Davis stations with a `txid`, and enabled Ecowitt gateways with a `host`, are polled over LAN on a fixed interval (Davis `/v1/current_conditions`; Ecowitt `/get_livedata_info`). Shared LAN HTTP client: short dial (~3s) + ~8s overall bound; context-aware requests. Temporary sensor/console unreachable is an expected gap (`lan_ok` false until the next successful poll) - not a hard fault and not covered by the WAN retry ring. No archive backfill; never invent `observed_at`. Discover is operator-initiated only (SSE; CIDR /24-/30; Davis also mDNS; Ecowitt HTTP probe only).
 - **HTTP interceptor:** enabled stations share one listen server on `listen_addr`; routes by exact `listen_path`. All interceptor stations must use the same `listen_addr` (active bind is the lexicographically smallest station id when they differ); a mismatched address is not routed (status degraded). Devices push Weather Underground-compatible GET/POST fields. Invalid/missing/`now` `dateutc` still ACKs the device but does not consume the ≤1 Hz emit budget and does not enqueue a weather POST. Discovery is not applicable (stations push to the bridge). Firewall the listen port on the LAN.
+- **MQTT:** enabled stations subscribe to one `topic` on the configured `broker_url`, with plain-tcp transport and optional username/password auth. Payloads must be JSON objects, forwarded verbatim in `provider_meta.raw`; `observed_at` is the message arrival time (MQTT is a low-latency push, so arrival bounds observation age - the deliberate exception to the no-bridge-clock rule for push providers). Emits are thinned to ≤1 Hz per station. Non-object payloads mark the station degraded and are not posted. Discovery is not applicable (no standard broker probe); enter the broker URL and topic manually. Weather topics must not set the MQTT retain flag (retained delivery would stale-stamp on subscribe).
 - Weather POST carries `provider`, `source_id`, and station-native detail in `provider_meta.raw` only - no bridge-normalized `sample`. Wind is always treated as true north. Core owns unit conversion and weather semantics.
-- Missing station time skips weather POST (Davis missing `ts`; Ecowitt missing/unparsable `common_list` id `0x18`; interceptor missing/unparsable `dateutc`) - no bridge-clock `observed_at`. Emit ceiling ≤1 Hz. Failed weather POSTs (transport/5xx/429) stay in an in-memory retry ring for up to **10 minutes** by station `observed_at` (FIFO; catch-up paced at ≤1 Hz per `source_id`, separate from live - worst case ~2 POSTs/s/station when WAN is healthy; far-future stamps beyond core skew are dropped; SoftMax is a Pi memory backstop that can drop older in-window samples if clocks stall or many stations emit near 1 Hz for the full window); no disk weather queue. Permanent **4xx** rejects (except 429) are not requeued. Flaky/down site WAN uses a weather uplink circuit breaker (fail-fast queue + backoff probe) - expected at airport edge; Info on enter/exit. Health detail includes `wan_uplink_open` and `outbound_queued`. Removing a station drops its queued catch-up samples. This is observation catch-up, not camera image replay - stale webcam frames still must never upload. Multi-hour ISP outages only recover the newest in-window samples after reconnect.
-- Console: Test poll (Davis / Ecowitt) / Test receive sample parse (interceptor; live ingest is last-receive in status). Local WLL + weather POST capture: `docker/wll-simulator/README.md` and golden wire sample `internal/bridgeapi/testdata/weather_post_davis_wll.example.json`.
+- Missing station time skips weather POST (Davis missing `ts`; Ecowitt missing/unparsable `common_list` id `0x18`; interceptor missing/unparsable `dateutc`) - no bridge-clock `observed_at`. MQTT is the exception: it uses message arrival time (see MQTT above). Emit ceiling ≤1 Hz. Failed weather POSTs (transport/5xx/429) stay in an in-memory retry ring for up to **10 minutes** by station `observed_at` (FIFO; catch-up paced at ≤1 Hz per `source_id`, separate from live - worst case ~2 POSTs/s/station when WAN is healthy; far-future stamps beyond core skew are dropped; SoftMax is a Pi memory backstop that can drop older in-window samples if clocks stall or many stations emit near 1 Hz for the full window); no disk weather queue. Permanent **4xx** rejects (except 429) are not requeued. Flaky/down site WAN uses a weather uplink circuit breaker (fail-fast queue + backoff probe) - expected at airport edge; Info on enter/exit. Health detail includes `wan_uplink_open` and `outbound_queued`. Removing a station drops its queued catch-up samples. This is observation catch-up, not camera image replay - stale webcam frames still must never upload. Multi-hour ISP outages only recover the newest in-window samples after reconnect.
+- Console: Test poll (Davis / Ecowitt) / Test subscription capture (MQTT) / Test receive sample parse (interceptor; live ingest is last-receive in status). Local WLL + weather POST capture: `docker/wll-simulator/README.md` and golden wire sample `internal/bridgeapi/testdata/weather_post_davis_wll.example.json`.
 
 Davis example:
 
@@ -132,6 +137,21 @@ Interceptor example:
   "listen_addr": "0.0.0.0:8090",
   "listen_path": "/weatherstation/updateweatherstation.php",
   "dialect": "wunderground"
+}
+```
+
+MQTT example:
+
+```json
+{
+  "id": "station-field-mqtt",
+  "name": "Weather MQTT",
+  "type": "mqtt",
+  "enabled": true,
+  "broker_url": "tcp://192.168.1.50:1883",
+  "topic": "weather/station1",
+  "username": "station",
+  "password": "secret"
 }
 ```
 

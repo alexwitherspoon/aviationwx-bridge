@@ -1,8 +1,10 @@
 package station
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/config"
@@ -20,6 +22,10 @@ const mqttClientIDPrefix = "aviationwx-bridge-"
 
 // mqttDisconnectQuiesceMs is the graceful disconnect quiesce window.
 const mqttDisconnectQuiesceMs = 250
+
+// mqttConnectRetryInterval paces background reconnects when the broker is not
+// yet reachable at startup.
+const mqttConnectRetryInterval = 5 * time.Second
 
 // buildMQTTObservation maps a received MQTT publish into an Observation.
 //
@@ -56,6 +62,8 @@ func mqttClientOptions(cfg config.Station) *paho.ClientOptions {
 	opts.SetClientID(mqttClientIDPrefix + cfg.ID)
 	opts.SetCleanSession(true)
 	opts.SetAutoReconnect(true)
+	opts.SetConnectRetry(true)
+	opts.SetConnectRetryInterval(mqttConnectRetryInterval)
 	if cfg.Username != "" {
 		opts.SetUsername(cfg.Username)
 		opts.SetPassword(cfg.Password)
@@ -98,4 +106,126 @@ func (s *MQTTSource) Stop() {
 	if s.client != nil && s.client.IsConnected() {
 		s.client.Disconnect(mqttDisconnectQuiesceMs)
 	}
+}
+
+// shouldRunMQTTStation reports whether SyncFromConfig should keep an MQTT
+// subscription for st.
+func shouldRunMQTTStation(st config.Station) bool {
+	if !st.Enabled || st.Type != config.StationTypeMQTT {
+		return false
+	}
+	return strings.TrimSpace(st.BrokerURL) != "" && strings.TrimSpace(st.Topic) != ""
+}
+
+// sameMQTTConfig reports whether two station configs need no reconnect.
+func sameMQTTConfig(a, b config.Station) bool {
+	return a.BrokerURL == b.BrokerURL &&
+		a.Topic == b.Topic &&
+		a.Username == b.Username &&
+		a.Password == b.Password
+}
+
+// syncMQTTSources starts, restarts, or stops MQTT broker subscriptions in step
+// with the configured stations. Start runs in a goroutine so an unreachable
+// broker never blocks config sync; paho retries in the background and
+// re-subscribes on every connect.
+func (m *Manager) syncMQTTSources(wanted map[string]config.Station) {
+	var toStop []*MQTTSource
+
+	m.mu.Lock()
+	for id, src := range m.mqttSources {
+		st, ok := wanted[id]
+		if !ok || !shouldRunMQTTStation(st) || !sameMQTTConfig(src.cfg, st) {
+			toStop = append(toStop, src)
+			delete(m.mqttSources, id)
+			delete(m.mqttLastEmit, id)
+		}
+	}
+	for id, st := range wanted {
+		if !shouldRunMQTTStation(st) {
+			continue
+		}
+		if _, running := m.mqttSources[id]; running {
+			continue
+		}
+		src := newMQTTSource(st, m.mqttHandler(st))
+		m.mqttSources[id] = src
+		go func(id string, src *MQTTSource) {
+			if err := src.Start(); err != nil {
+				m.log.Warn("mqtt connect failed", "station", id, "error", err)
+			}
+		}(id, src)
+		m.log.Info("mqtt subscribed", "station", id, "broker", st.BrokerURL, "topic", st.Topic)
+	}
+	m.mu.Unlock()
+
+	for _, src := range toStop {
+		src.Stop()
+	}
+}
+
+// mqttHandler returns the deliver callback for a station's subscription. It
+// thins to the global emit ceiling and forwards each fresh publish.
+func (m *Manager) mqttHandler(st config.Station) func(topic string, payload []byte, receivedAt time.Time) {
+	return func(topic string, payload []byte, receivedAt time.Time) {
+		now := receivedAt.UTC()
+
+		// Thin to ≤1 Hz per station: a misbehaving publisher must not flood the
+		// bridge or the core.
+		m.mu.Lock()
+		if last, ok := m.mqttLastEmit[st.ID]; ok && now.Sub(last) < GlobalMinPollInterval {
+			m.mu.Unlock()
+			return
+		}
+		m.mqttLastEmit[st.ID] = now
+		m.mu.Unlock()
+
+		obs, err := buildMQTTObservation(st, topic, payload, receivedAt)
+		if err != nil {
+			m.setStatus(st.ID, func(s *StationStatus) {
+				s.LANOK = true
+				s.Degraded = true
+				s.LastPollAt = now
+				s.LastPollError = err.Error()
+			})
+			m.log.Warn("mqtt payload rejected", "station", st.ID, "error", err)
+			return
+		}
+		m.deliverMQTTObservation(st, obs, now)
+	}
+}
+
+// deliverMQTTObservation records status and posts a received observation,
+// mirroring the interceptor live-ingest path.
+func (m *Manager) deliverMQTTObservation(st config.Station, obs *Observation, now time.Time) {
+	entry := PayloadLogEntry{
+		At:         now,
+		ObservedAt: obs.ObservedAt,
+		StationID:  st.ID,
+		LANOK:      true,
+	}
+	if obs.ProviderMeta != nil {
+		entry.Raw = obs.ProviderMeta["raw"]
+	}
+
+	m.setStatus(st.ID, func(s *StationStatus) {
+		s.LANOK = true
+		s.Degraded = false
+		s.WaitingForTxid = false
+		s.LastPollAt = now
+		s.LastPollError = ""
+		s.LastObservedAt = obs.ObservedAt
+	})
+
+	if m.poster != nil && m.poster.APIConfigured() {
+		ctx, cancel := context.WithTimeout(context.Background(), weatherPostTimeout)
+		postErr := m.postObservation(ctx, st, obs)
+		cancel()
+		posted := postErr == nil
+		entry.Posted = &posted
+		if postErr != nil {
+			entry.Message = postErr.Error()
+		}
+	}
+	m.notePayload(entry)
 }

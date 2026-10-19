@@ -38,6 +38,11 @@ const mqttTestCaptureTimeout = 3 * time.Second
 // a live subscriber's client id on the broker.
 const mqttTestClientID = "mqtt-test"
 
+// mqttMaxPayloadBytes caps a single MQTT publish before decode. It sizes the
+// retry ring's worst-case memory: the ring caps entry count, not bytes, and a
+// low-memory Pi must not retain many oversized raw objects during an outage.
+const mqttMaxPayloadBytes = 64 << 10
+
 // buildMQTTObservation maps a received MQTT publish into an Observation.
 //
 // observed_at is the message arrival time, not a payload field: MQTT is a
@@ -49,7 +54,12 @@ const mqttTestClientID = "mqtt-test"
 // station-native data and is rejected. Retained-message delivery is handled at
 // subscribe time (see the subscriber), not here.
 func buildMQTTObservation(cfg config.Station, topic string, payload []byte, receivedAt time.Time) (*Observation, error) {
-	var raw map[string]interface{}
+	if len(payload) > mqttMaxPayloadBytes {
+		return nil, fmt.Errorf("mqtt payload too large (%d bytes, limit %d)", len(payload), mqttMaxPayloadBytes)
+	}
+	// Decode into RawMessage so native numbers and identifiers are preserved
+	// verbatim (interface{} would coerce them to float64 and lose precision).
+	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return nil, fmt.Errorf("mqtt payload is not a JSON object: %w", err)
 	}

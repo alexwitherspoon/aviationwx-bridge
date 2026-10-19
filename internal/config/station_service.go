@@ -146,7 +146,7 @@ func (s *Service) saveStationFile(st Station) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write station config: %w", err)
 	}
 

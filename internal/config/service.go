@@ -535,7 +535,7 @@ func copyFile(src, dst string) error {
 		}
 	}()
 
-	destFile, err := os.Create(dst)
+	destFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("create destination: %w", err)
 	}

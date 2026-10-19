@@ -720,6 +720,8 @@ function onStationTypeChange() {
     const hostHelp = document.getElementById('stHostHelp');
     const listenAddr = document.getElementById('stListenAddr');
     const listenPath = document.getElementById('stListenPath');
+    const brokerUrl = document.getElementById('stBrokerUrl');
+    const topic = document.getElementById('stTopic');
     if (davis) davis.hidden = isInterceptor || isMqtt;
     if (interceptor) interceptor.hidden = !isInterceptor;
     if (mqtt) mqtt.hidden = !isMqtt;
@@ -728,6 +730,8 @@ function onStationTypeChange() {
     if (host) host.required = !isInterceptor && !isMqtt;
     if (listenAddr) listenAddr.required = isInterceptor;
     if (listenPath) listenPath.required = isInterceptor;
+    if (brokerUrl) brokerUrl.required = isMqtt;
+    if (topic) topic.required = isMqtt;
     if (hostHelp) {
         hostHelp.textContent = typ === 'ecowitt_gateway'
             ? 'Prefer a static IP. Discover probes GET /get_livedata_info on your LAN (/24-/30). Point the wind vane true north. Missing gateway time (common_list 0x18) skips weather upload.'

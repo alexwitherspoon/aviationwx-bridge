@@ -1,6 +1,8 @@
 package station
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,5 +92,33 @@ func TestMQTTClientOptions(t *testing.T) {
 	opts = mqttClientOptions(config.Station{ID: "s2", BrokerURL: "tcp://b:1883", Topic: "t"})
 	if opts.Username != "" || opts.Password != "" {
 		t.Errorf("expected empty creds, got %q/%q", opts.Username, opts.Password)
+	}
+}
+
+func TestBuildMQTTObservationPreservesNumberPrecision(t *testing.T) {
+	cfg := config.Station{ID: "s", Type: config.StationTypeMQTT}
+	obs, err := buildMQTTObservation(cfg, "t", []byte(`{"device_id":9007199254740993}`), time.Unix(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(obs.ProviderMeta["raw"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "9007199254740993") {
+		t.Fatalf("raw lost integer precision: %s", b)
+	}
+}
+
+func TestBuildMQTTObservationRejectsOversizedPayload(t *testing.T) {
+	cfg := config.Station{ID: "s", Type: config.StationTypeMQTT}
+	big := make([]byte, mqttMaxPayloadBytes+1)
+	for i := range big {
+		big[i] = ' '
+	}
+	big[0] = '{'
+	big[len(big)-1] = '}'
+	if _, err := buildMQTTObservation(cfg, "t", big, time.Unix(0, 0)); err == nil {
+		t.Fatal("expected oversized payload error")
 	}
 }

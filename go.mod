@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	github.com/beevik/ntp v1.6.0
+	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/hashicorp/mdns v1.0.7
 	github.com/korylprince/go-onvif v0.1.5
 	github.com/pkg/sftp v1.13.12
@@ -13,6 +14,7 @@ require (
 
 require (
 	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/icholy/digest v1.2.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/miekg/dns v1.1.72 // indirect

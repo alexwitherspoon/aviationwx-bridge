@@ -53,3 +53,41 @@ func TestBuildMQTTObservation(t *testing.T) {
 		})
 	}
 }
+
+func TestMQTTClientOptions(t *testing.T) {
+	cfg := config.Station{
+		ID:        "station-mqtt",
+		Type:      config.StationTypeMQTT,
+		BrokerURL: "tcp://broker.local:1883",
+		Topic:     "weather/station",
+		Username:  "user",
+		Password:  "secret",
+	}
+	opts := mqttClientOptions(cfg)
+	if len(opts.Servers) != 1 {
+		t.Fatalf("servers = %v", opts.Servers)
+	}
+	if got := opts.Servers[0].Scheme; got != "tcp" {
+		t.Errorf("scheme = %q", got)
+	}
+	if got := opts.Servers[0].Host; got != "broker.local:1883" {
+		t.Errorf("host = %q", got)
+	}
+	if opts.ClientID != "aviationwx-bridge-station-mqtt" {
+		t.Errorf("client id = %q", opts.ClientID)
+	}
+	if opts.Username != "user" || opts.Password != "secret" {
+		t.Errorf("creds = %q/%q", opts.Username, opts.Password)
+	}
+	if !opts.CleanSession {
+		t.Error("expected clean session")
+	}
+	if !opts.AutoReconnect {
+		t.Error("expected auto reconnect")
+	}
+
+	opts = mqttClientOptions(config.Station{ID: "s2", BrokerURL: "tcp://b:1883", Topic: "t"})
+	if opts.Username != "" || opts.Password != "" {
+		t.Errorf("expected empty creds, got %q/%q", opts.Username, opts.Password)
+	}
+}

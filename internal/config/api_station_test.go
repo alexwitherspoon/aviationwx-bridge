@@ -195,4 +195,30 @@ func TestValidateMQTTStation(t *testing.T) {
 	if err := ValidateStation(st); err == nil {
 		t.Fatal("expected topic required error")
 	}
+	st.Topic = "weather/station"
+	st.BrokerURL = "tcp://user:secret@localhost:1883"
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected broker_url credentials rejected")
+	}
+}
+
+func TestNormalizeMQTTBrokerURL(t *testing.T) {
+	st := Station{
+		ID:        "s",
+		Name:      "n",
+		Type:      StationTypeMQTT,
+		BrokerURL: "tcp://broker.local",
+		Topic:     "t",
+	}
+	NormalizeStationDefaults(&st)
+	if st.BrokerURL != "tcp://broker.local:1883" {
+		t.Fatalf("broker_url = %q, want default port appended", st.BrokerURL)
+	}
+
+	// Port present is left untouched.
+	st.BrokerURL = "tcp://broker.local:1884"
+	NormalizeStationDefaults(&st)
+	if st.BrokerURL != "tcp://broker.local:1884" {
+		t.Fatalf("broker_url = %q, want port preserved", st.BrokerURL)
+	}
 }

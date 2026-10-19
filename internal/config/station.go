@@ -127,7 +127,7 @@ func NormalizeStationDefaults(st *Station) {
 			st.Dialect = HTTPInterceptorDialectWunderground
 		}
 	case StationTypeMQTT:
-		st.BrokerURL = strings.TrimSpace(st.BrokerURL)
+		st.BrokerURL = normalizeMQTTBrokerURL(strings.TrimSpace(st.BrokerURL))
 		st.Topic = strings.TrimSpace(st.Topic)
 		st.Username = strings.TrimSpace(st.Username)
 		// Password is left untrimmed: it is an opaque secret.
@@ -185,12 +185,43 @@ func validateMQTTStation(st Station) error {
 	}
 	u, err := url.Parse(broker)
 	if err != nil || u.Scheme != "tcp" || u.Host == "" {
-		return fmt.Errorf("broker_url must be a tcp:// URL with a host (got %q)", st.BrokerURL)
+		return fmt.Errorf("broker_url must be a tcp:// URL with a host (got %q)", redactURLUserInfo(st.BrokerURL))
+	}
+	if u.User != nil {
+		return fmt.Errorf("broker_url must not contain credentials; use the username and password fields")
 	}
 	if strings.TrimSpace(st.Topic) == "" {
 		return fmt.Errorf("topic is required")
 	}
 	return nil
+}
+
+// normalizeMQTTBrokerURL appends the default port 1883 to a portless tcp://
+// URL. paho dials the URL host verbatim, so a missing port would fail to
+// connect.
+func normalizeMQTTBrokerURL(raw string) string {
+	if !strings.HasPrefix(raw, "tcp://") {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	if u.Port() == "" {
+		u.Host = net.JoinHostPort(u.Hostname(), "1883")
+	}
+	return u.String()
+}
+
+// redactURLUserInfo strips userinfo from a URL so validation errors never
+// echo a credential-bearing broker_url.
+func redactURLUserInfo(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	u.User = nil
+	return u.String()
 }
 
 func validateHTTPInterceptorStation(st Station) error {

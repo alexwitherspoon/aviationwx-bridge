@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/config"
@@ -89,8 +90,12 @@ func mqttClientOptions(cfg config.Station) *paho.ClientOptions {
 // those in through handle.
 type MQTTSource struct {
 	cfg    config.Station
+	mu     sync.Mutex
 	client paho.Client
-	handle func(topic string, payload []byte, receivedAt time.Time)
+	// stopped is set once by Stop and prevents a delayed Start from connecting
+	// an untracked subscription after removal.
+	stopped bool
+	handle  func(topic string, payload []byte, receivedAt time.Time)
 }
 
 func newMQTTSource(cfg config.Station, handle func(topic string, payload []byte, receivedAt time.Time)) *MQTTSource {
@@ -111,16 +116,40 @@ func (s *MQTTSource) Start() error {
 		}
 		s.handle(m.Topic(), m.Payload(), time.Now())
 	})
-	s.client = paho.NewClient(opts)
-	tok := s.client.Connect()
+
+	client := paho.NewClient(opts)
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return nil
+	}
+	s.client = client
+	s.mu.Unlock()
+
+	tok := client.Connect()
 	tok.Wait()
+
+	// Stop may have run while connect was in flight; disconnect rather than
+	// leave a live subscription on a removed station.
+	s.mu.Lock()
+	stopped := s.stopped
+	s.mu.Unlock()
+	if stopped {
+		client.Disconnect(mqttDisconnectQuiesceMs)
+		return nil
+	}
 	return tok.Error()
 }
 
-// Stop disconnects gracefully. Safe to call on a source that never connected.
+// Stop disconnects and marks the source stopped so a delayed Start cannot
+// create an untracked subscription. Safe to call before Start completes.
 func (s *MQTTSource) Stop() {
-	if s.client != nil && s.client.IsConnected() {
-		s.client.Disconnect(mqttDisconnectQuiesceMs)
+	s.mu.Lock()
+	s.stopped = true
+	c := s.client
+	s.mu.Unlock()
+	if c != nil {
+		c.Disconnect(mqttDisconnectQuiesceMs)
 	}
 }
 

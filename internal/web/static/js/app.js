@@ -456,6 +456,7 @@ function updateStationsDisplay() {
             const lanOk = Boolean(rt.lan_ok);
             const isInterceptor = cfg.type === 'http_interceptor';
             const isEcowitt = cfg.type === 'ecowitt_gateway';
+            const isMqtt = cfg.type === 'mqtt';
             const needsTxid = cfg.type === 'davis_weatherlink_live' && (cfg.txid == null || cfg.txid === '');
             let lanLabel = 'Offline';
             let lanClass = 'error';
@@ -477,17 +478,19 @@ function updateStationsDisplay() {
             const err = rt.last_poll_error ? `<div class="station-error">${escapeHtml(rt.last_poll_error)}</div>` : '';
             const host = cfg.host
                 ? escapeHtml(cfg.host)
-                : (cfg.listen_addr ? `bind ${escapeHtml(cfg.listen_addr)}` : '—');
+                : (cfg.listen_addr ? `bind ${escapeHtml(cfg.listen_addr)}` : (isMqtt ? escapeHtml(cfg.broker_url || '—') : '—'));
             const typeLabel = cfg.type === 'davis_weatherlink_live'
                 ? 'Davis WeatherLink Live'
                 : (isInterceptor
                     ? 'HTTP Interceptor (WU)'
-                    : (isEcowitt ? 'Ecowitt / Ambient Gateway' : escapeHtml(cfg.type || 'Station')));
+                    : (isEcowitt ? 'Ecowitt / Ambient Gateway' : (isMqtt ? 'MQTT Subscriber' : escapeHtml(cfg.type || 'Station'))));
             const txidLabel = isInterceptor
                 ? (cfg.listen_path ? escapeHtml(cfg.listen_path) : 'WU path')
                 : (isEcowitt
                     ? 'LAN HTTP'
-                    : (cfg.txid != null ? `Transmitter ${escapeHtml(String(cfg.txid))}` : 'No transmitter'));
+                    : (isMqtt
+                        ? (cfg.topic ? `topic ${escapeHtml(cfg.topic)}` : 'no topic')
+                        : (cfg.txid != null ? `Transmitter ${escapeHtml(String(cfg.txid))}` : 'No transmitter')));
             return `
             <div class="station-card" data-station-id="${escapeHtml(cfg.id)}">
                 <div class="station-card-header">
@@ -558,11 +561,16 @@ function getStationFormHtml(st = null) {
     const typ = st?.type || 'davis_weatherlink_live';
     const isInterceptor = typ === 'http_interceptor';
     const isEcowitt = typ === 'ecowitt_gateway';
-    const showHostPoll = !isInterceptor;
+    const isMqtt = typ === 'mqtt';
+    const showHostPoll = !isInterceptor && !isMqtt;
     const showTxid = typ === 'davis_weatherlink_live';
     const listenAddr = st?.listen_addr || '0.0.0.0:8090';
     const listenPath = st?.listen_path || '/weatherstation/updateweatherstation.php';
     const dialect = st?.dialect || 'wunderground';
+    const brokerUrl = st?.broker_url || '';
+    const topic = st?.topic || '';
+    const username = st?.username || '';
+    const passwordSet = Boolean(st?.password_set);
     const hostHelp = isEcowitt
         ? 'Prefer a static IP. Discover probes GET /get_livedata_info on your LAN (/24-/30). Point the wind vane true north. Missing gateway time (common_list 0x18) skips weather upload.'
         : 'Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.';
@@ -586,6 +594,7 @@ function getStationFormHtml(st = null) {
                     <select id="stType" class="form-control" required onchange="onStationTypeChange()">
                         <option value="davis_weatherlink_live" ${typ === 'davis_weatherlink_live' ? 'selected' : ''}>Davis WeatherLink Live (LAN)</option>
                         <option value="ecowitt_gateway" ${typ === 'ecowitt_gateway' ? 'selected' : ''}>Ecowitt / Ambient Gateway (LAN)</option>
+                        <option value="mqtt" ${typ === 'mqtt' ? 'selected' : ''}>MQTT Subscriber (LAN)</option>
                         <option value="http_interceptor" ${typ === 'http_interceptor' ? 'selected' : ''}>HTTP Interceptor (Weather Underground)</option>
                     </select>
                 </div>
@@ -615,6 +624,33 @@ function getStationFormHtml(st = null) {
                         <label for="stPoll">Poll interval (seconds)</label>
                         <input type="number" id="stPoll" class="form-control" min="10" max="3600" value="${poll}">
                         <p class="form-help">How often to read the station. Minimum 10 seconds.</p>
+                    </div>
+                </div>
+                <div id="stationMqttFields" ${isMqtt ? '' : 'hidden'}>
+                    <div class="form-group">
+                        <label for="stBrokerUrl">Broker URL</label>
+                        <input type="text" id="stBrokerUrl" class="form-control"
+                               value="${escapeHtml(brokerUrl)}"
+                               placeholder="tcp://192.168.1.50:1883"
+                               ${isMqtt ? 'required' : ''}>
+                        <p class="form-help">LAN MQTT broker (tcp://host:port; default port 1883).</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="stTopic">Topic</label>
+                        <input type="text" id="stTopic" class="form-control"
+                               value="${escapeHtml(topic)}"
+                               placeholder="weather/station1"
+                               ${isMqtt ? 'required' : ''}>
+                        <p class="form-help">Topic filter the station publishes JSON weather to.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="stUsername">Username (optional)</label>
+                        <input type="text" id="stUsername" class="form-control" value="${escapeHtml(username)}">
+                    </div>
+                    <div class="form-group">
+                        <label for="stPassword">Password (optional)</label>
+                        <input type="password" id="stPassword" class="form-control" placeholder="${passwordSet ? 'set' : ''}">
+                        <p class="form-help">Leave blank to keep the current password. Not shown after saving.</p>
                     </div>
                 </div>
                 <div id="stationInterceptorFields" ${isInterceptor ? '' : 'hidden'}>
@@ -674,19 +710,22 @@ function onStationTypeChange() {
     const typ = document.getElementById('stType')?.value || 'davis_weatherlink_live';
     const isInterceptor = typ === 'http_interceptor';
     const isDavis = typ === 'davis_weatherlink_live';
+    const isMqtt = typ === 'mqtt';
     const davis = document.getElementById('stationDavisFields');
     const interceptor = document.getElementById('stationInterceptorFields');
+    const mqtt = document.getElementById('stationMqttFields');
     const txid = document.getElementById('stationTxidSection');
     const testBtn = document.getElementById('stationTestBtn');
     const host = document.getElementById('stHost');
     const hostHelp = document.getElementById('stHostHelp');
     const listenAddr = document.getElementById('stListenAddr');
     const listenPath = document.getElementById('stListenPath');
-    if (davis) davis.hidden = isInterceptor;
+    if (davis) davis.hidden = isInterceptor || isMqtt;
     if (interceptor) interceptor.hidden = !isInterceptor;
+    if (mqtt) mqtt.hidden = !isMqtt;
     if (txid) txid.hidden = !isDavis;
-    if (testBtn) testBtn.textContent = isInterceptor ? 'Test receive' : 'Test poll';
-    if (host) host.required = !isInterceptor;
+    if (testBtn) testBtn.textContent = isInterceptor ? 'Test receive' : (isMqtt ? 'Test subscription' : 'Test poll');
+    if (host) host.required = !isInterceptor && !isMqtt;
     if (listenAddr) listenAddr.required = isInterceptor;
     if (listenPath) listenPath.required = isInterceptor;
     if (hostHelp) {
@@ -712,6 +751,18 @@ function buildStationConfigFromForm() {
         body.listen_addr = listenAddr;
         body.listen_path = listenPath;
         body.dialect = document.getElementById('stDialect')?.value || 'wunderground';
+        return body;
+    }
+    if (type === 'mqtt') {
+        const brokerUrl = document.getElementById('stBrokerUrl')?.value?.trim();
+        const topic = document.getElementById('stTopic')?.value?.trim();
+        if (!brokerUrl || !topic) return null;
+        body.broker_url = brokerUrl;
+        body.topic = topic;
+        const username = document.getElementById('stUsername')?.value?.trim();
+        if (username) body.username = username;
+        const password = document.getElementById('stPassword')?.value;
+        if (password) body.password = password;
         return body;
     }
     const host = document.getElementById('stHost')?.value?.trim();

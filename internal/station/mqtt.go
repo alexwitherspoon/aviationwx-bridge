@@ -27,6 +27,12 @@ const mqttDisconnectQuiesceMs = 250
 // yet reachable at startup.
 const mqttConnectRetryInterval = 5 * time.Second
 
+// mqttTestConnectTimeout bounds the console Test broker connect attempt.
+const mqttTestConnectTimeout = 5 * time.Second
+
+// mqttTestCaptureTimeout bounds how long the console Test waits for a message.
+const mqttTestCaptureTimeout = 3 * time.Second
+
 // buildMQTTObservation maps a received MQTT publish into an Observation.
 //
 // observed_at is the message arrival time, not a payload field: MQTT is a
@@ -105,6 +111,55 @@ func (s *MQTTSource) Start() error {
 func (s *MQTTSource) Stop() {
 	if s.client != nil && s.client.IsConnected() {
 		s.client.Disconnect(mqttDisconnectQuiesceMs)
+	}
+}
+
+// TestMQTTSubscribe connects to the configured broker, subscribes, and returns
+// the first received observation, or an error if none arrives before the
+// capture timeout. It is a one-shot console Test, not a live source.
+func (m *Manager) TestMQTTSubscribe(ctx context.Context, st config.Station) (*Observation, error) {
+	config.NormalizeStationDefaults(&st)
+	if st.Type != config.StationTypeMQTT {
+		return nil, fmt.Errorf("station type is not mqtt")
+	}
+	if err := config.ValidateStation(st); err != nil {
+		return nil, err
+	}
+
+	type result struct {
+		obs *Observation
+		err error
+	}
+	ch := make(chan result, 1)
+
+	opts := mqttClientOptions(st)
+	// Test is a single bounded attempt, not the retrying live source.
+	opts.SetConnectRetry(false)
+	opts.SetConnectTimeout(mqttTestConnectTimeout)
+	opts.SetDefaultPublishHandler(func(_ paho.Client, msg paho.Message) {
+		obs, err := buildMQTTObservation(st, msg.Topic(), msg.Payload(), time.Now())
+		select {
+		case ch <- result{obs, err}:
+		default:
+		}
+	})
+
+	client := paho.NewClient(opts)
+	if tok := client.Connect(); tok.Wait() && tok.Error() != nil {
+		return nil, fmt.Errorf("mqtt connect: %w", tok.Error())
+	}
+	defer client.Disconnect(mqttDisconnectQuiesceMs)
+	if tok := client.Subscribe(st.Topic, mqttQoS, nil); tok.Wait() && tok.Error() != nil {
+		return nil, fmt.Errorf("mqtt subscribe: %w", tok.Error())
+	}
+
+	select {
+	case r := <-ch:
+		return r.obs, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(mqttTestCaptureTimeout):
+		return nil, fmt.Errorf("no message received on %q within %s (is the station publishing?)", st.Topic, mqttTestCaptureTimeout)
 	}
 }
 

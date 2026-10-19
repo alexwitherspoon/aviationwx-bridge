@@ -19,6 +19,7 @@ func TestBuildMQTTObservation(t *testing.T) {
 	}{
 		{name: "json object", topic: "weather/station", payload: []byte(`{"temp":72.5,"humidity":40}`)},
 		{name: "empty object", topic: "w/s", payload: []byte(`{}`)},
+		{name: "null rejected", topic: "w/s", payload: []byte(`null`), wantErr: true},
 		{name: "array rejected", topic: "w/s", payload: []byte(`[1,2]`), wantErr: true},
 		{name: "scalar rejected", topic: "w/s", payload: []byte(`72.5`), wantErr: true},
 		{name: "non-json rejected", topic: "w/s", payload: []byte(`temp=72.5`), wantErr: true},

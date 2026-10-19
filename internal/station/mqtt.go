@@ -48,6 +48,9 @@ func buildMQTTObservation(cfg config.Station, topic string, payload []byte, rece
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return nil, fmt.Errorf("mqtt payload is not a JSON object: %w", err)
 	}
+	if raw == nil {
+		return nil, fmt.Errorf("mqtt payload is JSON null, want an object")
+	}
 	return &Observation{
 		SourceID:   cfg.ID,
 		Provider:   ProviderMQTT,
@@ -99,6 +102,9 @@ func (s *MQTTSource) Start() error {
 		c.Subscribe(s.cfg.Topic, mqttQoS, nil)
 	})
 	opts.SetDefaultPublishHandler(func(_ paho.Client, m paho.Message) {
+		if m.Retained() {
+			return
+		}
 		s.handle(m.Topic(), m.Payload(), time.Now())
 	})
 	s.client = paho.NewClient(opts)
@@ -137,6 +143,9 @@ func (m *Manager) TestMQTTSubscribe(ctx context.Context, st config.Station) (*Ob
 	opts.SetConnectRetry(false)
 	opts.SetConnectTimeout(mqttTestConnectTimeout)
 	opts.SetDefaultPublishHandler(func(_ paho.Client, msg paho.Message) {
+		if msg.Retained() {
+			return
+		}
 		obs, err := buildMQTTObservation(st, msg.Topic(), msg.Payload(), time.Now())
 		select {
 		case ch <- result{obs, err}:

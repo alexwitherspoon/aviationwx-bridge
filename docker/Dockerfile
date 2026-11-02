@@ -1,6 +1,6 @@
 # Multi-stage build for AviationWX.org Bridge
 # Stage 1: Build Go binary
-FROM golang:1.27.2-alpine3.23 AS builder
+FROM golang:1.27.3-alpine3.23 AS builder
 
 # Build arguments for multi-arch support
 # These are automatically set by Docker buildx when building multi-platform images
@@ -32,7 +32,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     ./cmd/bridge
 
 # Stage 2: Runtime
-FROM alpine:3.24.2
+FROM alpine:3.24.3
 
 # Install runtime dependencies
 # - ffmpeg: RTSP capture

@@ -29,6 +29,10 @@ updates:
       - dependencies
       - ci
     open-pull-requests-limit: 10
+    groups:
+      codeql:
+        patterns:
+          - "github/codeql-action/*"
 
   # npm (package.json / package-lock.json — dev tooling e.g. Bats)
   - package-ecosystem: npm

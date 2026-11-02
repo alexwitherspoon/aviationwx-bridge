@@ -1,12 +1,12 @@
 module github.com/alexwitherspoon/aviationwx-bridge
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/beevik/ntp v1.6.0
 	github.com/hashicorp/mdns v1.0.7
 	github.com/korylprince/go-onvif v0.1.5
-	github.com/pkg/sftp v1.13.11
+	github.com/pkg/sftp v1.13.12
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0
 )

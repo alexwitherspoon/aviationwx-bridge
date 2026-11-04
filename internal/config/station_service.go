@@ -146,8 +146,13 @@ func (s *Service) saveStationFile(st Station) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write station config: %w", err)
+	}
+	// WriteFile applies the mode only on create; tighten a pre-existing file
+	// that predates the 0600 default.
+	if err := os.Chmod(path, 0600); err != nil {
+		return fmt.Errorf("set station config permissions: %w", err)
 	}
 
 	stationsDir := filepath.Join(s.baseDir, "stations")

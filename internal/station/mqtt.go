@@ -1,0 +1,517 @@
+package station
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/alexwitherspoon/aviationwx-bridge/internal/config"
+	paho "github.com/eclipse/paho.mqtt.golang"
+)
+
+const mqttAPIMeta = "mqtt_v1"
+
+// mqttQoS is the subscription QoS ceiling. Weather feeds tolerate re-delivery
+// but not loss, so we accept up to at-least-once.
+const mqttQoS = 1
+
+// mqttClientIDPrefix keeps bridge client ids recognizable on the broker.
+const mqttClientIDPrefix = "aviationwx-bridge-"
+
+// newMQTTClientID builds a collision-resistant client id from a station id. A
+// random suffix keeps two bridges (or two tests) that share a station id from
+// kicking each other off a shared broker.
+func newMQTTClientID(id string) string {
+	raw := make([]byte, 4)
+	if _, err := rand.Read(raw); err != nil {
+		return mqttClientIDPrefix + id + "-" + fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return mqttClientIDPrefix + id + "-" + hex.EncodeToString(raw)
+}
+
+// mqttDisconnectQuiesceMs is the graceful disconnect quiesce window.
+const mqttDisconnectQuiesceMs = 250
+
+// mqttConnectRetryInterval paces background reconnects when the broker is not
+// yet reachable at startup.
+const mqttConnectRetryInterval = 5 * time.Second
+
+// mqttTestConnectTimeout bounds the console Test broker connect attempt.
+const mqttTestConnectTimeout = 5 * time.Second
+
+// mqttTestCaptureTimeout bounds how long the console Test waits for a message.
+const mqttTestCaptureTimeout = 3 * time.Second
+
+// mqttTestClientID is the identity console Test uses so it never collides with
+// a live subscriber's client id on the broker.
+const mqttTestClientID = "mqtt-test"
+
+// mqttMaxPayloadBytes caps a single MQTT publish before decode. It sizes the
+// retry ring's worst-case memory: the ring caps entry count, not bytes, and a
+// low-memory Pi must not retain many oversized raw objects during an outage.
+const mqttMaxPayloadBytes = 64 << 10
+
+// buildMQTTObservation maps a received MQTT publish into an Observation.
+//
+// observed_at is the message arrival time, not a payload field: MQTT is a
+// low-latency push, so arrival is a tight upper bound on observation age. This
+// is the deliberate exception to the "no bridge-clock time" rule that applies
+// only to push providers, not the poll models (Davis/Ecowitt).
+//
+// The payload must be a JSON object; anything else is not forwardable
+// station-native data and is rejected. Retained-message delivery is handled at
+// subscribe time (see the subscriber), not here.
+func buildMQTTObservation(cfg config.Station, topic string, payload []byte, receivedAt time.Time) (*Observation, error) {
+	if len(payload) > mqttMaxPayloadBytes {
+		return nil, fmt.Errorf("mqtt payload too large (%d bytes, limit %d)", len(payload), mqttMaxPayloadBytes)
+	}
+	// Decode into RawMessage so native numbers and identifiers are preserved
+	// verbatim (interface{} would coerce them to float64 and lose precision).
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return nil, fmt.Errorf("mqtt payload is not a JSON object: %w", err)
+	}
+	if raw == nil {
+		return nil, fmt.Errorf("mqtt payload is JSON null, want an object")
+	}
+	return &Observation{
+		SourceID:   cfg.ID,
+		Provider:   ProviderMQTT,
+		ObservedAt: receivedAt.UTC(),
+		ProviderMeta: map[string]interface{}{
+			"api":   mqttAPIMeta,
+			"topic": topic,
+			"raw":   raw,
+		},
+	}, nil
+}
+
+// mqttClientOptions builds paho options from a station config. Isolated so the
+// wiring (broker, credentials, client id) is testable without a live broker.
+func mqttClientOptions(cfg config.Station) *paho.ClientOptions {
+	opts := paho.NewClientOptions()
+	opts.AddBroker(cfg.BrokerURL)
+	opts.SetClientID(newMQTTClientID(cfg.ID))
+	opts.SetCleanSession(true)
+	opts.SetAutoReconnect(true)
+	opts.SetConnectRetry(true)
+	opts.SetConnectRetryInterval(mqttConnectRetryInterval)
+	if cfg.Username != "" {
+		opts.SetUsername(cfg.Username)
+		opts.SetPassword(cfg.Password)
+	}
+	return opts
+}
+
+// MQTTSource holds an MQTT subscription to one broker topic and forwards raw
+// publishes to handle. It owns no observation or POST logic; the manager wires
+// those in through handle.
+type MQTTSource struct {
+	cfg    config.Station
+	mu     sync.Mutex
+	client paho.Client
+	// stopped is set once by Stop and prevents a delayed Start from connecting
+	// an untracked subscription after removal.
+	stopped bool
+	// status reports broker connectivity health to the manager; false marks
+	// the station degraded.
+	status func(lanOK bool, msg string)
+
+	// msgCh is a single-slot latest-wins queue between the paho callback and
+	// the delivery worker, so a slow POST never blocks MQTT dispatch and the
+	// arrival timestamp records when the message actually arrived.
+	msgCh      chan mqttMessage
+	handle     func(topic string, payload []byte, receivedAt time.Time)
+	stopOnce   sync.Once
+	done       chan struct{}
+	workerDone chan struct{}
+}
+
+// mqttMessage is one received publish handed to the delivery worker.
+type mqttMessage struct {
+	topic      string
+	payload    []byte
+	receivedAt time.Time
+}
+
+func newMQTTSource(cfg config.Station, handle func(topic string, payload []byte, receivedAt time.Time), status func(lanOK bool, msg string)) *MQTTSource {
+	s := &MQTTSource{
+		cfg:        cfg,
+		handle:     handle,
+		status:     status,
+		msgCh:      make(chan mqttMessage, 1),
+		done:       make(chan struct{}),
+		workerDone: make(chan struct{}),
+	}
+	go s.deliverLoop()
+	return s
+}
+
+// reportStatus invokes the status callback if one is wired.
+func (s *MQTTSource) reportStatus(lanOK bool, msg string) {
+	if s.status != nil {
+		s.status(lanOK, msg)
+	}
+}
+
+// enqueue hands a message to the delivery worker without blocking the paho
+// callback. The single slot keeps the newest message when the worker is busy.
+func (s *MQTTSource) enqueue(m mqttMessage) {
+	select {
+	case <-s.done:
+		return
+	default:
+	}
+	select {
+	case s.msgCh <- m:
+	default:
+		// Full of an older message: drop it in favor of the newest.
+		select {
+		case <-s.msgCh:
+		default:
+		}
+		select {
+		case s.msgCh <- m:
+		default:
+		}
+	}
+}
+
+// deliverLoop drains queued messages and runs the manager's deliver handler,
+// keeping POST work off paho's ordered dispatch goroutine.
+func (s *MQTTSource) deliverLoop() {
+	defer close(s.workerDone)
+	for {
+		select {
+		case <-s.done:
+			return
+		case m := <-s.msgCh:
+			s.handle(m.topic, m.payload, m.receivedAt)
+		}
+	}
+}
+
+// Start connects and subscribes. paho re-subscribes on reconnect via the
+// OnConnect handler, so Start is safe to call when the broker is not yet up.
+func (s *MQTTSource) Start() error {
+	opts := mqttClientOptions(s.cfg)
+	opts.SetOnConnectHandler(func(c paho.Client) {
+		// Subscribe on every connect, including reconnect after a drop.
+		tok := c.Subscribe(s.cfg.Topic, mqttQoS, nil)
+		if !mqttSubscribeOK(tok) {
+			s.reportStatus(false, "broker rejected subscription to topic")
+			return
+		}
+		s.reportStatus(true, "")
+	})
+	opts.SetConnectionLostHandler(func(_ paho.Client, err error) {
+		s.reportStatus(false, "broker connection lost")
+	})
+	opts.SetDefaultPublishHandler(func(_ paho.Client, m paho.Message) {
+		if m.Retained() {
+			return
+		}
+		s.enqueue(mqttMessage{
+			topic:      m.Topic(),
+			payload:    m.Payload(),
+			receivedAt: time.Now(),
+		})
+	})
+
+	client := paho.NewClient(opts)
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return nil
+	}
+	s.client = client
+	s.mu.Unlock()
+
+	tok := client.Connect()
+	tok.Wait()
+
+	// Stop may have run while connect was in flight; disconnect rather than
+	// leave a live subscription on a removed station.
+	s.mu.Lock()
+	stopped := s.stopped
+	s.mu.Unlock()
+	if stopped {
+		client.Disconnect(mqttDisconnectQuiesceMs)
+		return nil
+	}
+	return tok.Error()
+}
+
+// Stop disconnects and marks the source stopped so a delayed Start cannot
+// create an untracked subscription. Safe to call before Start completes.
+func (s *MQTTSource) Stop() {
+	s.stopOnce.Do(func() {
+		s.mu.Lock()
+		s.stopped = true
+		c := s.client
+		s.mu.Unlock()
+		if c != nil {
+			c.Disconnect(mqttDisconnectQuiesceMs)
+		}
+		close(s.done)
+		<-s.workerDone
+	})
+}
+
+// mqttSubscribeOK waits for a SUBACK and reports whether the subscription was
+// granted. A denied grant surfaces as a 0x80 result byte, not a token error, so
+// both are checked.
+func mqttSubscribeOK(tok paho.Token) bool {
+	tok.Wait()
+	if tok.Error() != nil {
+		return false
+	}
+	return subscriptionGranted(tok)
+}
+
+// subscriptionGranted reports whether a completed SUBACK granted the topic.
+// paho surfaces a denial as a 0x80 result byte, not a token error.
+func subscriptionGranted(tok paho.Token) bool {
+	st, ok := tok.(*paho.SubscribeToken)
+	if !ok {
+		return true
+	}
+	for _, granted := range st.Result() {
+		if granted == 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// waitToken blocks until a paho token completes or ctx is canceled, so a
+// broker that never completes a handshake cannot outlive the caller's deadline.
+func waitToken(ctx context.Context, tok paho.Token) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-tok.Done():
+		return tok.Error()
+	}
+}
+
+// TestMQTTSubscribe connects to the configured broker, subscribes, and returns
+// the first received observation, or an error if none arrives before the
+// capture timeout. It is a one-shot console Test, not a live source.
+func (m *Manager) TestMQTTSubscribe(ctx context.Context, st config.Station) (*Observation, error) {
+	config.NormalizeStationDefaults(&st)
+	if st.Type != config.StationTypeMQTT {
+		return nil, fmt.Errorf("station type is not mqtt")
+	}
+	// The console form never returns a stored password, so resolve it from the
+	// saved station when the request carries an id and omits the secret.
+	if st.ID != "" && st.Password == "" {
+		if saved, err := m.cfgService.GetStation(st.ID); err == nil {
+			st.Password = saved.Password
+		}
+	}
+	// Run the diagnostic under a distinct identity so its client id can never
+	// collide with a live subscriber on the same broker (kicking it off).
+	st.ID = mqttTestClientID
+	if err := config.ValidateStation(st); err != nil {
+		return nil, err
+	}
+
+	type result struct {
+		obs *Observation
+		err error
+	}
+	ch := make(chan result, 1)
+
+	opts := mqttClientOptions(st)
+	// Test is a single bounded attempt, not the retrying live source.
+	opts.SetConnectRetry(false)
+	opts.SetAutoReconnect(false)
+	opts.SetConnectTimeout(mqttTestConnectTimeout)
+	opts.SetDefaultPublishHandler(func(_ paho.Client, msg paho.Message) {
+		if msg.Retained() {
+			return
+		}
+		obs, err := buildMQTTObservation(st, msg.Topic(), msg.Payload(), time.Now())
+		select {
+		case ch <- result{obs, err}:
+		default:
+		}
+	})
+
+	client := paho.NewClient(opts)
+	if err := waitToken(ctx, client.Connect()); err != nil {
+		client.Disconnect(mqttDisconnectQuiesceMs)
+		return nil, fmt.Errorf("mqtt connect: %w", err)
+	}
+	defer client.Disconnect(mqttDisconnectQuiesceMs)
+
+	sub := client.Subscribe(st.Topic, mqttQoS, nil)
+	if err := waitToken(ctx, sub); err != nil {
+		return nil, fmt.Errorf("mqtt subscribe: %w", err)
+	}
+	if !subscriptionGranted(sub) {
+		return nil, fmt.Errorf("mqtt subscribe: broker rejected topic %q", st.Topic)
+	}
+
+	select {
+	case r := <-ch:
+		return r.obs, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(mqttTestCaptureTimeout):
+		return nil, fmt.Errorf("no message received on %q within %s (is the station publishing?)", st.Topic, mqttTestCaptureTimeout)
+	}
+}
+
+// shouldRunMQTTStation reports whether SyncFromConfig should keep an MQTT
+// subscription for st.
+func shouldRunMQTTStation(st config.Station) bool {
+	if !st.Enabled || st.Type != config.StationTypeMQTT {
+		return false
+	}
+	return strings.TrimSpace(st.BrokerURL) != "" && strings.TrimSpace(st.Topic) != ""
+}
+
+// sameMQTTConfig reports whether two station configs need no reconnect.
+func sameMQTTConfig(a, b config.Station) bool {
+	return a.BrokerURL == b.BrokerURL &&
+		a.Topic == b.Topic &&
+		a.Username == b.Username &&
+		a.Password == b.Password
+}
+
+// syncMQTTSources starts, restarts, or stops MQTT broker subscriptions in step
+// with the configured stations. Start runs in a goroutine so an unreachable
+// broker never blocks config sync; paho retries in the background and
+// re-subscribes on every connect.
+func (m *Manager) syncMQTTSources(wanted map[string]config.Station) {
+	var toStop []*MQTTSource
+
+	m.mu.Lock()
+	for id, src := range m.mqttSources {
+		st, ok := wanted[id]
+		if !ok || !shouldRunMQTTStation(st) || !sameMQTTConfig(src.cfg, st) {
+			toStop = append(toStop, src)
+			delete(m.mqttSources, id)
+			delete(m.mqttLastEmit, id)
+		}
+	}
+	for id, st := range wanted {
+		if !shouldRunMQTTStation(st) {
+			continue
+		}
+		if _, running := m.mqttSources[id]; running {
+			continue
+		}
+		src := newMQTTSource(st, m.mqttHandler(st), m.mqttSourceStatus(st))
+		m.mqttSources[id] = src
+		go func(id string, src *MQTTSource) {
+			if err := src.Start(); err != nil {
+				m.log.Warn("mqtt connect failed", "station", id, "error", err)
+			}
+		}(id, src)
+		m.log.Info("mqtt subscribed", "station", id, "broker", st.BrokerURL, "topic", st.Topic)
+	}
+	m.mu.Unlock()
+
+	for _, src := range toStop {
+		src.Stop()
+	}
+}
+
+// mqttSourceStatus returns the health callback for a station's subscription.
+// Connection and subscription failures degrade the station; delivery restores
+// it (via deliverMQTTObservation).
+func (m *Manager) mqttSourceStatus(st config.Station) func(lanOK bool, msg string) {
+	return func(lanOK bool, msg string) {
+		m.setStatus(st.ID, func(s *StationStatus) {
+			s.LANOK = lanOK
+			if lanOK {
+				// Back online: clear only the connectivity error we set; payload
+				// errors stay until the next good delivery.
+				if strings.HasPrefix(s.LastPollError, "mqtt: ") {
+					s.LastPollError = ""
+				}
+				s.Degraded = false
+				return
+			}
+			s.Degraded = true
+			if msg != "" {
+				s.LastPollError = "mqtt: " + msg
+			}
+		})
+	}
+}
+
+// mqttHandler returns the deliver callback for a station's subscription. It
+// thins to the global emit ceiling and forwards each fresh publish.
+func (m *Manager) mqttHandler(st config.Station) func(topic string, payload []byte, receivedAt time.Time) {
+	return func(topic string, payload []byte, receivedAt time.Time) {
+		// Validate before consuming the emit budget so a malformed publish does
+		// not throttle the following valid one.
+		obs, err := buildMQTTObservation(st, topic, payload, receivedAt)
+		if err != nil {
+			m.setStatus(st.ID, func(s *StationStatus) {
+				s.LANOK = true
+				s.Degraded = true
+				s.LastPollAt = receivedAt.UTC()
+				s.LastPollError = err.Error()
+			})
+			m.log.Warn("mqtt payload rejected", "station", st.ID, "error", err)
+			return
+		}
+
+		// Thin to ≤1 Hz per station on the monotonic receive time; the wall
+		// clock can step backward on an NTP correction and would stall the gate.
+		m.mu.Lock()
+		if last, ok := m.mqttLastEmit[st.ID]; ok && receivedAt.Sub(last) < GlobalMinPollInterval {
+			m.mu.Unlock()
+			return
+		}
+		m.mqttLastEmit[st.ID] = receivedAt
+		m.mu.Unlock()
+
+		m.deliverMQTTObservation(st, obs, receivedAt.UTC())
+	}
+}
+
+// deliverMQTTObservation records status and posts a received observation,
+// mirroring the interceptor live-ingest path.
+func (m *Manager) deliverMQTTObservation(st config.Station, obs *Observation, now time.Time) {
+	entry := PayloadLogEntry{
+		At:         now,
+		ObservedAt: obs.ObservedAt,
+		StationID:  st.ID,
+		LANOK:      true,
+	}
+	if obs.ProviderMeta != nil {
+		entry.Raw = obs.ProviderMeta["raw"]
+	}
+
+	m.setStatus(st.ID, func(s *StationStatus) {
+		s.LANOK = true
+		s.Degraded = false
+		s.WaitingForTxid = false
+		s.LastPollAt = now
+		s.LastPollError = ""
+		s.LastObservedAt = obs.ObservedAt
+	})
+
+	if m.poster != nil && m.poster.APIConfigured() {
+		ctx, cancel := context.WithTimeout(context.Background(), weatherPostTimeout)
+		postErr := m.postObservation(ctx, st, obs)
+		cancel()
+		posted := postErr == nil
+		entry.Posted = &posted
+		if postErr != nil {
+			entry.Message = postErr.Error()
+		}
+	}
+	m.notePayload(entry)
+}

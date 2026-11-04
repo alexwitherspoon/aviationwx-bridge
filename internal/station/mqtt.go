@@ -118,20 +118,81 @@ type MQTTSource struct {
 	// stopped is set once by Stop and prevents a delayed Start from connecting
 	// an untracked subscription after removal.
 	stopped bool
-	handle  func(topic string, payload []byte, receivedAt time.Time)
 	// status reports broker connectivity health to the manager; false marks
 	// the station degraded.
 	status func(lanOK bool, msg string)
+
+	// msgCh is a single-slot latest-wins queue between the paho callback and
+	// the delivery worker, so a slow POST never blocks MQTT dispatch and the
+	// arrival timestamp records when the message actually arrived.
+	msgCh      chan mqttMessage
+	handle     func(topic string, payload []byte, receivedAt time.Time)
+	stopOnce   sync.Once
+	done       chan struct{}
+	workerDone chan struct{}
+}
+
+// mqttMessage is one received publish handed to the delivery worker.
+type mqttMessage struct {
+	topic      string
+	payload    []byte
+	receivedAt time.Time
 }
 
 func newMQTTSource(cfg config.Station, handle func(topic string, payload []byte, receivedAt time.Time), status func(lanOK bool, msg string)) *MQTTSource {
-	return &MQTTSource{cfg: cfg, handle: handle, status: status}
+	s := &MQTTSource{
+		cfg:        cfg,
+		handle:     handle,
+		status:     status,
+		msgCh:      make(chan mqttMessage, 1),
+		done:       make(chan struct{}),
+		workerDone: make(chan struct{}),
+	}
+	go s.deliverLoop()
+	return s
 }
 
 // reportStatus invokes the status callback if one is wired.
 func (s *MQTTSource) reportStatus(lanOK bool, msg string) {
 	if s.status != nil {
 		s.status(lanOK, msg)
+	}
+}
+
+// enqueue hands a message to the delivery worker without blocking the paho
+// callback. The single slot keeps the newest message when the worker is busy.
+func (s *MQTTSource) enqueue(m mqttMessage) {
+	select {
+	case <-s.done:
+		return
+	default:
+	}
+	select {
+	case s.msgCh <- m:
+	default:
+		// Full of an older message: drop it in favor of the newest.
+		select {
+		case <-s.msgCh:
+		default:
+		}
+		select {
+		case s.msgCh <- m:
+		default:
+		}
+	}
+}
+
+// deliverLoop drains queued messages and runs the manager's deliver handler,
+// keeping POST work off paho's ordered dispatch goroutine.
+func (s *MQTTSource) deliverLoop() {
+	defer close(s.workerDone)
+	for {
+		select {
+		case <-s.done:
+			return
+		case m := <-s.msgCh:
+			s.handle(m.topic, m.payload, m.receivedAt)
+		}
 	}
 }
 
@@ -155,7 +216,11 @@ func (s *MQTTSource) Start() error {
 		if m.Retained() {
 			return
 		}
-		s.handle(m.Topic(), m.Payload(), time.Now())
+		s.enqueue(mqttMessage{
+			topic:      m.Topic(),
+			payload:    m.Payload(),
+			receivedAt: time.Now(),
+		})
 	})
 
 	client := paho.NewClient(opts)
@@ -185,13 +250,17 @@ func (s *MQTTSource) Start() error {
 // Stop disconnects and marks the source stopped so a delayed Start cannot
 // create an untracked subscription. Safe to call before Start completes.
 func (s *MQTTSource) Stop() {
-	s.mu.Lock()
-	s.stopped = true
-	c := s.client
-	s.mu.Unlock()
-	if c != nil {
-		c.Disconnect(mqttDisconnectQuiesceMs)
-	}
+	s.stopOnce.Do(func() {
+		s.mu.Lock()
+		s.stopped = true
+		c := s.client
+		s.mu.Unlock()
+		if c != nil {
+			c.Disconnect(mqttDisconnectQuiesceMs)
+		}
+		close(s.done)
+		<-s.workerDone
+	})
 }
 
 // mqttSubscribeOK waits for a SUBACK and reports whether the subscription was
@@ -202,14 +271,33 @@ func mqttSubscribeOK(tok paho.Token) bool {
 	if tok.Error() != nil {
 		return false
 	}
-	if st, ok := tok.(*paho.SubscribeToken); ok {
-		for _, granted := range st.Result() {
-			if granted == 0x80 {
-				return false
-			}
+	return subscriptionGranted(tok)
+}
+
+// subscriptionGranted reports whether a completed SUBACK granted the topic.
+// paho surfaces a denial as a 0x80 result byte, not a token error.
+func subscriptionGranted(tok paho.Token) bool {
+	st, ok := tok.(*paho.SubscribeToken)
+	if !ok {
+		return true
+	}
+	for _, granted := range st.Result() {
+		if granted == 0x80 {
+			return false
 		}
 	}
 	return true
+}
+
+// waitToken blocks until a paho token completes or ctx is canceled, so a
+// broker that never completes a handshake cannot outlive the caller's deadline.
+func waitToken(ctx context.Context, tok paho.Token) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-tok.Done():
+		return tok.Error()
+	}
 }
 
 // TestMQTTSubscribe connects to the configured broker, subscribes, and returns
@@ -257,11 +345,17 @@ func (m *Manager) TestMQTTSubscribe(ctx context.Context, st config.Station) (*Ob
 	})
 
 	client := paho.NewClient(opts)
-	if tok := client.Connect(); tok.Wait() && tok.Error() != nil {
-		return nil, fmt.Errorf("mqtt connect: %w", tok.Error())
+	if err := waitToken(ctx, client.Connect()); err != nil {
+		client.Disconnect(mqttDisconnectQuiesceMs)
+		return nil, fmt.Errorf("mqtt connect: %w", err)
 	}
 	defer client.Disconnect(mqttDisconnectQuiesceMs)
-	if tok := client.Subscribe(st.Topic, mqttQoS, nil); !mqttSubscribeOK(tok) {
+
+	sub := client.Subscribe(st.Topic, mqttQoS, nil)
+	if err := waitToken(ctx, sub); err != nil {
+		return nil, fmt.Errorf("mqtt subscribe: %w", err)
+	}
+	if !subscriptionGranted(sub) {
 		return nil, fmt.Errorf("mqtt subscribe: broker rejected topic %q", st.Topic)
 	}
 

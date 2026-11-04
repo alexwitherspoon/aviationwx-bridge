@@ -146,6 +146,7 @@ func (s *MQTTSource) Start() error {
 			s.reportStatus(false, "broker rejected subscription to topic")
 			return
 		}
+		s.reportStatus(true, "")
 	})
 	opts.SetConnectionLostHandler(func(_ paho.Client, err error) {
 		s.reportStatus(false, "broker connection lost")
@@ -330,11 +331,18 @@ func (m *Manager) mqttSourceStatus(st config.Station) func(lanOK bool, msg strin
 	return func(lanOK bool, msg string) {
 		m.setStatus(st.ID, func(s *StationStatus) {
 			s.LANOK = lanOK
+			if lanOK {
+				// Back online: clear only the connectivity error we set; payload
+				// errors stay until the next good delivery.
+				if strings.HasPrefix(s.LastPollError, "mqtt: ") {
+					s.LastPollError = ""
+				}
+				s.Degraded = false
+				return
+			}
+			s.Degraded = true
 			if msg != "" {
 				s.LastPollError = "mqtt: " + msg
-			}
-			if !lanOK {
-				s.Degraded = true
 			}
 		})
 	}

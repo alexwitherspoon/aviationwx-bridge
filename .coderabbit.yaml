@@ -1,0 +1,104 @@
+# CodeRabbit configuration for aviationwx-bridge (the Go bridge daemon)
+# Public repo. Free (OSS) tier.
+#
+# Intent: the bridge is a safety-critical Go daemon on low-memory single-board
+# computers. Reviews should weight correctness and reliability (context
+# cancellation, error wrapping, per-camera degradation, memory) over style.
+# Only run linters that match the repo's own tooling.
+
+language: en-US
+enable_free_tier: true
+
+tone_instructions: "Plain, direct technical English. Lead with safety and correctness: timing, error handling, context cancellation, memory and credential hygiene. Cite file and line. Skip filler praise and pure-style nitpicks. No em dashes."
+
+reviews:
+  profile: chill
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  abort_on_close: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+
+  auto_approvals:
+    enabled: false
+
+  path_filters:
+    - "!node_modules/**"
+    - "!bin/**"
+    - "!coverage.out"
+
+  # Point, don't duplicate: the context-cancellation/error-wrapping/degradation/
+  # dependency rules live in copilot-instructions.md and docs/CONFIG_SCHEMA.md,
+  # referenced below. path_instructions only carry what those docs do not say.
+  path_instructions:
+    - path: "internal/config/**,configs/**"
+      instructions: |
+        Keep example configs in sync with docs/CONFIG_SCHEMA.md. Migration code must
+        handle older config versions.
+    - path: "scripts/**"
+      instructions: |
+        install.sh and watchdog run on user hardware. Verify idempotency, quoting, and
+        no secrets in the tree.
+    - path: ".github/workflows/**"
+      instructions: |
+        CI/CD. Pin action SHAs with version comments and minimal permissions blocks, and
+        keep release.yml version resolution and multi-arch image tags correct.
+
+  tools:
+    golangci-lint: { enabled: true }
+    shellcheck: { enabled: true }
+    hadolint: { enabled: true }
+    actionlint: { enabled: true }
+    zizmor: { enabled: true }
+    gitleaks: { enabled: true }
+    # Disabled: redundancy or no matching config in this repo.
+    semgrep: { enabled: false }
+    opengrep: { enabled: false }
+    trufflehog: { enabled: false }
+    checkov: { enabled: false }
+    trivy: { enabled: false }
+    osvScanner: { enabled: false }
+    markdownlint: { enabled: false }
+    languagetool: { enabled: false }
+    biome: { enabled: false }
+    oxc: { enabled: false }
+    stylelint: { enabled: false }
+    htmlhint: { enabled: false }
+    eslint: { enabled: false }
+    vale: { enabled: false }
+    yamllint: { enabled: false }
+    ruff: { enabled: false }
+    flake8: { enabled: false }
+    pylint: { enabled: false }
+    phpstan: { enabled: false }
+    phpcs: { enabled: false }
+    phpmd: { enabled: false }
+    clang: { enabled: false }
+    cppcheck: { enabled: false }
+
+chat:
+  auto_reply: true
+  art: true
+
+knowledge_base:
+  linked_repositories:
+    - repository: "alexwitherspoon/aviationwx"
+      instructions: "The main aviationwx.org application this daemon uploads to. Changes there define the upload endpoints and SFTP host keys the bridge must match."
+    - repository: "alexwitherspoon/aviationwx-archiver"
+      instructions: "Python archiver that downloads aviationwx.org webcam images. Changes to image formats or quality here flow downstream to it."
+  code_guidelines:
+    # Review rules are pointed at, not restated.
+    filePatterns:
+      - "**/CODE_STYLE.md"
+      - "**/CONTRIBUTING.md"
+      - ".github/copilot-instructions.md"
+      - files: "docs/CONFIG_SCHEMA.md"
+        applyTo: "configs/**,internal/config/**"
+      - "docs/DEVELOPMENT.md"

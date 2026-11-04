@@ -456,6 +456,7 @@ function updateStationsDisplay() {
             const lanOk = Boolean(rt.lan_ok);
             const isInterceptor = cfg.type === 'http_interceptor';
             const isEcowitt = cfg.type === 'ecowitt_gateway';
+            const isTempest = cfg.type === 'tempest_udp';
             const needsTxid = cfg.type === 'davis_weatherlink_live' && (cfg.txid == null || cfg.txid === '');
             let lanLabel = 'Offline';
             let lanClass = 'error';
@@ -482,12 +483,14 @@ function updateStationsDisplay() {
                 ? 'Davis WeatherLink Live'
                 : (isInterceptor
                     ? 'HTTP Interceptor (WU)'
-                    : (isEcowitt ? 'Ecowitt / Ambient Gateway' : escapeHtml(cfg.type || 'Station')));
+                    : (isEcowitt ? 'Ecowitt / Ambient Gateway' : (isTempest ? 'Tempest UDP' : escapeHtml(cfg.type || 'Station'))));
             const txidLabel = isInterceptor
                 ? (cfg.listen_path ? escapeHtml(cfg.listen_path) : 'WU path')
                 : (isEcowitt
                     ? 'LAN HTTP'
-                    : (cfg.txid != null ? `Transmitter ${escapeHtml(String(cfg.txid))}` : 'No transmitter'));
+                    : (isTempest
+                        ? (cfg.serial_number ? `device ${escapeHtml(cfg.serial_number)}` : 'all devices')
+                        : (cfg.txid != null ? `Transmitter ${escapeHtml(String(cfg.txid))}` : 'No transmitter')));
             return `
             <div class="station-card" data-station-id="${escapeHtml(cfg.id)}">
                 <div class="station-card-header">
@@ -558,11 +561,14 @@ function getStationFormHtml(st = null) {
     const typ = st?.type || 'davis_weatherlink_live';
     const isInterceptor = typ === 'http_interceptor';
     const isEcowitt = typ === 'ecowitt_gateway';
-    const showHostPoll = !isInterceptor;
+    const isTempest = typ === 'tempest_udp';
+    const showHostPoll = !isInterceptor && !isTempest;
     const showTxid = typ === 'davis_weatherlink_live';
     const listenAddr = st?.listen_addr || '0.0.0.0:8090';
     const listenPath = st?.listen_path || '/weatherstation/updateweatherstation.php';
     const dialect = st?.dialect || 'wunderground';
+    const tempestListenAddr = st?.listen_addr || '0.0.0.0:50222';
+    const serialNumber = st?.serial_number || '';
     const hostHelp = isEcowitt
         ? 'Prefer a static IP. Discover probes GET /get_livedata_info on your LAN (/24-/30). Point the wind vane true north. Missing gateway time (common_list 0x18) skips weather upload.'
         : 'Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.';
@@ -586,6 +592,7 @@ function getStationFormHtml(st = null) {
                     <select id="stType" class="form-control" required onchange="onStationTypeChange()">
                         <option value="davis_weatherlink_live" ${typ === 'davis_weatherlink_live' ? 'selected' : ''}>Davis WeatherLink Live (LAN)</option>
                         <option value="ecowitt_gateway" ${typ === 'ecowitt_gateway' ? 'selected' : ''}>Ecowitt / Ambient Gateway (LAN)</option>
+                        <option value="tempest_udp" ${typ === 'tempest_udp' ? 'selected' : ''}>WeatherFlow Tempest (UDP)</option>
                         <option value="http_interceptor" ${typ === 'http_interceptor' ? 'selected' : ''}>HTTP Interceptor (Weather Underground)</option>
                     </select>
                 </div>
@@ -641,6 +648,23 @@ function getStationFormHtml(st = null) {
                         </select>
                     </div>
                 </div>
+                <div id="stationTempestFields" ${isTempest ? '' : 'hidden'}>
+                    <div class="form-group">
+                        <label for="stTempestListenAddr">Listen address (UDP)</label>
+                        <input type="text" id="stTempestListenAddr" class="form-control"
+                               value="${escapeHtml(tempestListenAddr)}"
+                               placeholder="0.0.0.0:50222"
+                               ${isTempest ? 'required' : ''}>
+                        <p class="form-help">UDP bind host:port the Tempest hub broadcasts to (default 50222). Firewall this port to the LAN.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="stSerialNumber">Serial number (optional)</label>
+                        <input type="text" id="stSerialNumber" class="form-control"
+                               value="${escapeHtml(serialNumber)}"
+                               placeholder="ST-00000512">
+                        <p class="form-help">Leave blank to accept all devices on this bind; set a device serial to filter one station to one device.</p>
+                    </div>
+                </div>
                 <div class="form-group">
                     <label>
                         <input type="checkbox" id="stEnabled" ${st?.enabled !== false ? 'checked' : ''}>
@@ -674,19 +698,22 @@ function onStationTypeChange() {
     const typ = document.getElementById('stType')?.value || 'davis_weatherlink_live';
     const isInterceptor = typ === 'http_interceptor';
     const isDavis = typ === 'davis_weatherlink_live';
+    const isTempest = typ === 'tempest_udp';
     const davis = document.getElementById('stationDavisFields');
     const interceptor = document.getElementById('stationInterceptorFields');
+    const tempest = document.getElementById('stationTempestFields');
     const txid = document.getElementById('stationTxidSection');
     const testBtn = document.getElementById('stationTestBtn');
     const host = document.getElementById('stHost');
     const hostHelp = document.getElementById('stHostHelp');
     const listenAddr = document.getElementById('stListenAddr');
     const listenPath = document.getElementById('stListenPath');
-    if (davis) davis.hidden = isInterceptor;
+    if (davis) davis.hidden = isInterceptor || isTempest;
     if (interceptor) interceptor.hidden = !isInterceptor;
+    if (tempest) tempest.hidden = !isTempest;
     if (txid) txid.hidden = !isDavis;
-    if (testBtn) testBtn.textContent = isInterceptor ? 'Test receive' : 'Test poll';
-    if (host) host.required = !isInterceptor;
+    if (testBtn) testBtn.textContent = isInterceptor ? 'Test receive' : (isTempest ? 'Test listen' : 'Test poll');
+    if (host) host.required = !isInterceptor && !isTempest;
     if (listenAddr) listenAddr.required = isInterceptor;
     if (listenPath) listenPath.required = isInterceptor;
     if (hostHelp) {
@@ -712,6 +739,14 @@ function buildStationConfigFromForm() {
         body.listen_addr = listenAddr;
         body.listen_path = listenPath;
         body.dialect = document.getElementById('stDialect')?.value || 'wunderground';
+        return body;
+    }
+    if (type === 'tempest_udp') {
+        const listenAddr = document.getElementById('stTempestListenAddr')?.value?.trim();
+        if (!listenAddr) return null;
+        body.listen_addr = listenAddr;
+        const serial = document.getElementById('stSerialNumber')?.value?.trim();
+        if (serial) body.serial_number = serial;
         return body;
     }
     const host = document.getElementById('stHost')?.value?.trim();

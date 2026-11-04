@@ -269,3 +269,55 @@ func (m *Manager) handleTempestObservation(st config.Station, obs *Observation) 
 	}
 	m.notePayload(entry)
 }
+
+// tempestTestCaptureTimeout bounds how long the console Test listens for a
+// datagram.
+const tempestTestCaptureTimeout = 5 * time.Second
+
+// TestTempestListen binds a temporary UDP socket and returns the first received
+// observation, or an error if none arrives within the capture timeout. It is a
+// one-shot console Test, not a live listener.
+func (m *Manager) TestTempestListen(ctx context.Context, st config.Station) (*Observation, error) {
+	config.NormalizeStationDefaults(&st)
+	if st.Type != config.StationTypeTempestUDP {
+		return nil, fmt.Errorf("station type is not tempest_udp")
+	}
+	if err := config.ValidateStation(st); err != nil {
+		return nil, err
+	}
+
+	udpAddr, err := net.ResolveUDPAddr("udp", st.ListenAddr)
+	if err != nil {
+		return nil, fmt.Errorf("tempest resolve listen addr: %w", err)
+	}
+	conn, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		return nil, fmt.Errorf("tempest test listen: %w", err)
+	}
+	defer conn.Close()
+
+	type result struct {
+		obs *Observation
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		buf := make([]byte, tempestMaxDatagram)
+		n, _, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			ch <- result{nil, err}
+			return
+		}
+		obs, err := buildTempestObservation(st, buf[:n])
+		ch <- result{obs, err}
+	}()
+
+	select {
+	case r := <-ch:
+		return r.obs, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(tempestTestCaptureTimeout):
+		return nil, fmt.Errorf("no datagram received on %s within %s (is the hub broadcasting?)", st.ListenAddr, tempestTestCaptureTimeout)
+	}
+}

@@ -165,3 +165,22 @@ func TestValidateEcowittStation(t *testing.T) {
 		t.Fatal("expected poll floor error")
 	}
 }
+
+func TestValidateTempestUDPStation(t *testing.T) {
+	st := Station{
+		ID:   "station-tempest",
+		Name: "Tempest",
+		Type: StationTypeTempestUDP,
+	}
+	NormalizeStationDefaults(&st)
+	if st.ListenAddr != DefaultTempestUDPListenAddr {
+		t.Fatalf("listen_addr = %q, want default %q", st.ListenAddr, DefaultTempestUDPListenAddr)
+	}
+	if err := ValidateStation(st); err != nil {
+		t.Fatal(err)
+	}
+	st.ListenAddr = "not-an-addr"
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected invalid listen_addr error")
+	}
+}

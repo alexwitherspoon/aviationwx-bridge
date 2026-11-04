@@ -13,6 +13,7 @@ const (
 	StationTypeDavisWeatherLinkLive = "davis_weatherlink_live"
 	StationTypeHTTPInterceptor      = "http_interceptor"
 	StationTypeEcowittGateway       = "ecowitt_gateway"
+	StationTypeTempestUDP           = "tempest_udp"
 )
 
 // DefaultDavisPollIntervalSeconds is the Davis Local API current_conditions floor.
@@ -29,6 +30,9 @@ const DefaultHTTPInterceptorListenPath = "/weatherstation/updateweatherstation.p
 
 // HTTPInterceptorDialectWunderground is the first supported interceptor dialect.
 const HTTPInterceptorDialectWunderground = "wunderground"
+
+// DefaultTempestUDPListenAddr is the shared UDP ingest bind for tempest stations.
+const DefaultTempestUDPListenAddr = "0.0.0.0:50222"
 
 // Station is a LAN weather station configuration (file-per-station under stations/).
 // Wind is assumed true-north install; there is no magnetic mode.
@@ -47,6 +51,9 @@ type Station struct {
 	ListenAddr string `json:"listen_addr,omitempty"`
 	ListenPath string `json:"listen_path,omitempty"`
 	Dialect    string `json:"dialect,omitempty"`
+
+	// Tempest UDP (listen) fields.
+	SerialNumber string `json:"serial_number,omitempty"`
 }
 
 // UnmarshalJSON defaults enabled to true when the field is omitted (CONFIG_SCHEMA).
@@ -62,6 +69,7 @@ func (st *Station) UnmarshalJSON(data []byte) error {
 		ListenAddr          string `json:"listen_addr,omitempty"`
 		ListenPath          string `json:"listen_path,omitempty"`
 		Dialect             string `json:"dialect,omitempty"`
+		SerialNumber        string `json:"serial_number,omitempty"`
 	}{}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -75,6 +83,7 @@ func (st *Station) UnmarshalJSON(data []byte) error {
 	st.ListenAddr = aux.ListenAddr
 	st.ListenPath = aux.ListenPath
 	st.Dialect = aux.Dialect
+	st.SerialNumber = aux.SerialNumber
 	if aux.Enabled == nil {
 		st.Enabled = true
 	} else {
@@ -110,6 +119,12 @@ func NormalizeStationDefaults(st *Station) {
 		if st.Dialect == "" {
 			st.Dialect = HTTPInterceptorDialectWunderground
 		}
+	case StationTypeTempestUDP:
+		st.ListenAddr = strings.TrimSpace(st.ListenAddr)
+		st.SerialNumber = strings.TrimSpace(st.SerialNumber)
+		if st.ListenAddr == "" {
+			st.ListenAddr = DefaultTempestUDPListenAddr
+		}
 	}
 }
 
@@ -128,6 +143,8 @@ func ValidateStation(st Station) error {
 		return validateEcowittStation(st)
 	case StationTypeHTTPInterceptor:
 		return validateHTTPInterceptorStation(st)
+	case StationTypeTempestUDP:
+		return validateTempestUDPStation(st)
 	case "":
 		return fmt.Errorf("station type is required")
 	default:
@@ -151,6 +168,17 @@ func validateEcowittStation(st Station) error {
 	}
 	if st.PollIntervalSeconds > 0 && st.PollIntervalSeconds < DefaultEcowittPollIntervalSeconds {
 		return fmt.Errorf("ecowitt poll_interval_seconds must be >= %d", DefaultEcowittPollIntervalSeconds)
+	}
+	return nil
+}
+
+func validateTempestUDPStation(st Station) error {
+	addr := strings.TrimSpace(st.ListenAddr)
+	if addr == "" {
+		addr = DefaultTempestUDPListenAddr
+	}
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		return fmt.Errorf("listen_addr must be host:port (got %q)", st.ListenAddr)
 	}
 	return nil
 }

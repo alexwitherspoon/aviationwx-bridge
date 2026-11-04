@@ -127,6 +127,14 @@ func (m *Manager) SyncFromConfig() {
 	m.syncMu.Lock()
 	defer m.syncMu.Unlock()
 
+	// Shutdown has begun: do not reconcile, which could add a worker or MQTT
+	// source after Stop has snapshotted them.
+	select {
+	case <-m.catchupStop:
+		return
+	default:
+	}
+
 	stations := m.cfgService.ListStations()
 	wanted := make(map[string]config.Station, len(stations))
 	for _, st := range stations {
@@ -337,6 +345,9 @@ func (m *Manager) Stop() {
 		close(m.catchupStop)
 	})
 
+	// Serialize the snapshot with SyncFromConfig so no worker or MQTT source is
+	// added after shutdown begins.
+	m.syncMu.Lock()
 	m.mu.Lock()
 	toStop := make([]*stationWorker, 0, len(m.workers))
 	for id, w := range m.workers {
@@ -351,6 +362,7 @@ func (m *Manager) Stop() {
 		delete(m.mqttSources, id)
 	}
 	m.mu.Unlock()
+	m.syncMu.Unlock()
 	for _, w := range toStop {
 		w.stop()
 	}

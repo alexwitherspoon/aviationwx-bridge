@@ -50,6 +50,8 @@ type Manager struct {
 
 	hub *interceptorHub // nil when no interceptor stations
 
+	tempestHub *TempestHub // nil when no tempest stations
+
 	// recentPayloads is an in-memory newest-first log for console (no disk).
 	recentMu       sync.Mutex
 	recentPayloads []PayloadLogEntry
@@ -192,6 +194,7 @@ func (m *Manager) SyncFromConfig() {
 	m.postMu.Unlock()
 
 	m.syncInterceptorHub(wanted)
+	m.syncTempestHub(wanted)
 }
 
 // syncInterceptorHub rebuilds the shared interceptor listener (own locking).
@@ -307,6 +310,86 @@ func (m *Manager) syncInterceptorHub(wanted map[string]config.Station) {
 	m.log.Info("interceptor listen started", "addr", addr, "routes", len(routes))
 }
 
+// syncTempestHub rebuilds the shared Tempest UDP listener. Enabled stations
+// must share one listen_addr (active bind is the lexicographically smallest
+// station id); mismatched stations are not routed, so devices are never pointed
+// at a dead bind.
+func (m *Manager) syncTempestHub(wanted map[string]config.Station) {
+	type candidate struct {
+		id string
+		st config.Station
+	}
+	var enabled []candidate
+	for id, st := range wanted {
+		if !st.Enabled || st.Type != config.StationTypeTempestUDP {
+			continue
+		}
+		config.NormalizeStationDefaults(&st)
+		enabled = append(enabled, candidate{id: id, st: st})
+	}
+	sort.Slice(enabled, func(i, j int) bool { return enabled[i].id < enabled[j].id })
+
+	var routed []config.Station
+	addr := ""
+	if len(enabled) > 0 {
+		addr = enabled[0].st.ListenAddr
+	}
+	for _, c := range enabled {
+		st := c.st
+		if st.ListenAddr != addr {
+			m.log.Warn("tempest listen_addr mismatch; station not routed",
+				"station", st.ID, "want", st.ListenAddr, "using", addr)
+			m.setStatus(st.ID, func(s *StationStatus) {
+				s.Degraded = true
+				s.LANOK = false
+				s.LastPollError = fmt.Sprintf("listen_addr %q does not match active bind %q", st.ListenAddr, addr)
+			})
+			continue
+		}
+		routed = append(routed, st)
+	}
+
+	m.mu.Lock()
+	old := m.tempestHub
+	if len(routed) == 0 {
+		m.tempestHub = nil
+		m.mu.Unlock()
+		if old != nil {
+			old.stop()
+			m.log.Info("tempest listen stopped")
+		}
+		return
+	}
+	if old != nil && old.addr == addr {
+		m.mu.Unlock()
+		old.setRoutes(routed)
+		return
+	}
+	m.tempestHub = nil
+	m.mu.Unlock()
+	if old != nil {
+		old.stop()
+	}
+
+	hub := newTempestHub(m)
+	hub.setRoutes(routed)
+	if err := hub.start(addr); err != nil {
+		m.log.Warn("tempest listen failed", "addr", addr, "error", err)
+		for _, st := range routed {
+			m.setStatus(st.ID, func(s *StationStatus) {
+				s.Degraded = true
+				s.LANOK = false
+				s.LastPollError = fmt.Sprintf("tempest listen failed on %s: %v", addr, err)
+			})
+		}
+		return
+	}
+	m.mu.Lock()
+	m.tempestHub = hub
+	m.mu.Unlock()
+	m.log.Info("tempest listen started", "addr", addr, "stations", len(routed))
+}
+
 func interceptorRoutingError(msg string) bool {
 	if msg == "" {
 		return false
@@ -331,12 +414,17 @@ func (m *Manager) Stop() {
 	}
 	hub := m.hub
 	m.hub = nil
+	tempestHub := m.tempestHub
+	m.tempestHub = nil
 	m.mu.Unlock()
 	for _, w := range toStop {
 		w.stop()
 	}
 	if hub != nil {
 		hub.stop()
+	}
+	if tempestHub != nil {
+		tempestHub.stop()
 	}
 	<-m.catchupDone
 }

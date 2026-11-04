@@ -545,6 +545,11 @@ func copyFile(src, dst string) error {
 		}
 	}()
 
+	// OpenFile applies the mode only on create; tighten a pre-existing backup.
+	if err := os.Chmod(dst, 0600); err != nil {
+		return fmt.Errorf("set destination permissions: %w", err)
+	}
+
 	if _, err := io.Copy(destFile, sourceFile); err != nil {
 		return fmt.Errorf("copy data: %w", err)
 	}

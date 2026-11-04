@@ -220,6 +220,13 @@ func (m *Manager) TestMQTTSubscribe(ctx context.Context, st config.Station) (*Ob
 	if st.Type != config.StationTypeMQTT {
 		return nil, fmt.Errorf("station type is not mqtt")
 	}
+	// The console form never returns a stored password, so resolve it from the
+	// saved station when the request carries an id and omits the secret.
+	if st.ID != "" && st.Password == "" {
+		if saved, err := m.cfgService.GetStation(st.ID); err == nil {
+			st.Password = saved.Password
+		}
+	}
 	// Run the diagnostic under a distinct identity so its client id can never
 	// collide with a live subscriber on the same broker (kicking it off).
 	st.ID = mqttTestClientID

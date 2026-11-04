@@ -1,6 +1,7 @@
 package station
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -160,4 +161,68 @@ func TestMQTTSubscriberRejectsNonJSON(t *testing.T) {
 	if len(poster.posts) != 0 {
 		t.Fatalf("expected no POST for non-JSON payload, got %d", len(poster.posts))
 	}
+}
+
+func TestMQTTSubscribeCapture(t *testing.T) {
+	brokerURL := startTestMQTTBroker(t)
+
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Saved station carries a broker password; the console Test omits it and
+	// the manager resolves it from the saved config.
+	if _, err := svc.AddStation(config.Station{
+		ID:        "station-mqtt",
+		Name:      "MQTT",
+		Type:      config.StationTypeMQTT,
+		Enabled:   true,
+		BrokerURL: brokerURL,
+		Topic:     "weather/station",
+		Password:  "secret",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: &fakePoster{configured: true}})
+	defer mgr.Stop()
+
+	type result struct {
+		obs *Observation
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		obs, err := mgr.TestMQTTSubscribe(context.Background(), config.Station{
+			ID:        "station-mqtt",
+			Name:      "MQTT",
+			Type:      config.StationTypeMQTT,
+			BrokerURL: brokerURL,
+			Topic:     "weather/station",
+		})
+		ch <- result{obs, err}
+	}()
+
+	pub := connectPublisher(t, brokerURL)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		pub.Publish("weather/station", 0, false, `{"temp":72.5}`)
+		select {
+		case r := <-ch:
+			if r.err != nil {
+				t.Fatalf("TestMQTTSubscribe: %v", r.err)
+			}
+			if r.obs == nil || r.obs.Provider != ProviderMQTT {
+				t.Fatalf("obs = %+v", r.obs)
+			}
+			if r.obs.ObservedAt.IsZero() {
+				t.Error("expected arrival-time observed_at")
+			}
+			return
+		default:
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("TestMQTTSubscribe timed out without capturing a message")
 }

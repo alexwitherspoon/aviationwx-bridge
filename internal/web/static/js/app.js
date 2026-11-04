@@ -576,6 +576,7 @@ function getStationFormHtml(st = null) {
         : 'Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.';
     return `
         <form id="stationForm" onsubmit="saveStation(event, ${isEdit ? `'${st.id}'` : 'null'})">
+            <input type="hidden" id="stId" value="${escapeHtml(st?.id || '')}">
             <div class="form-section">
                 <div class="form-section-title">Station</div>
                 <div class="form-group">
@@ -748,6 +749,8 @@ function buildStationConfigFromForm() {
         type,
         enabled: document.getElementById('stEnabled')?.checked === true,
     };
+    const id = document.getElementById('stId')?.value?.trim();
+    if (id) body.id = id;
     if (type === 'http_interceptor') {
         const listenAddr = document.getElementById('stListenAddr')?.value?.trim();
         const listenPath = document.getElementById('stListenPath')?.value?.trim();

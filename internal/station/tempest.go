@@ -230,7 +230,7 @@ func (h *TempestHub) stop() {
 	conn := h.conn
 	h.mu.Unlock()
 	if conn != nil {
-		conn.Close()
+		_ = conn.Close()
 	}
 	<-h.workerDone
 }
@@ -294,7 +294,7 @@ func (m *Manager) TestTempestListen(ctx context.Context, st config.Station) (*Ob
 	if err != nil {
 		return nil, fmt.Errorf("tempest test listen: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	type result struct {
 		obs *Observation

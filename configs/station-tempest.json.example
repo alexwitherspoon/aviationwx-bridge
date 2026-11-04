@@ -1,0 +1,8 @@
+{
+  "id": "station-example-tempest",
+  "name": "WeatherFlow Tempest",
+  "type": "tempest_udp",
+  "enabled": true,
+  "listen_addr": "0.0.0.0:50222",
+  "serial_number": ""
+}

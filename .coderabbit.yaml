@@ -19,12 +19,10 @@ reviews:
   collapse_walkthrough: true
   abort_on_close: true
 
+  # Draft PRs are the only hold. Everything else gets reviewed.
   auto_review:
     enabled: true
     drafts: false
-    ignore_title_keywords:
-      - "WIP"
-      - "DO NOT MERGE"
 
   auto_approvals:
     enabled: false
@@ -38,10 +36,13 @@ reviews:
   # dependency rules live in copilot-instructions.md and docs/CONFIG_SCHEMA.md,
   # referenced below. path_instructions only carry what those docs do not say.
   path_instructions:
-    - path: "internal/config/**,configs/**"
+    - path: "internal/config/**"
       instructions: |
-        Keep example configs in sync with docs/CONFIG_SCHEMA.md. Migration code must
-        handle older config versions.
+        Migration code must handle older config versions and stay in sync with
+        docs/CONFIG_SCHEMA.md.
+    - path: "configs/**"
+      instructions: |
+        Example configs must stay valid JSON and match docs/CONFIG_SCHEMA.md.
     - path: "scripts/**"
       instructions: |
         install.sh and watchdog run on user hardware. Verify idempotency, quoting, and
@@ -59,6 +60,8 @@ reviews:
     zizmor: { enabled: true }
     gitleaks: { enabled: true }
     # Disabled: redundancy or no matching config in this repo.
+    ast-grep: { enabled: false }
+    checkmake: { enabled: false }
     semgrep: { enabled: false }
     opengrep: { enabled: false }
     trufflehog: { enabled: false }
@@ -96,9 +99,7 @@ knowledge_base:
   code_guidelines:
     # Review rules are pointed at, not restated.
     filePatterns:
-      - "**/CODE_STYLE.md"
-      - "**/CONTRIBUTING.md"
-      - ".github/copilot-instructions.md"
+      - files: "CODE_STYLE.md,CONTRIBUTING.md,.github/copilot-instructions.md,docs/DEVELOPMENT.md"
+        applyTo: "**"
       - files: "docs/CONFIG_SCHEMA.md"
         applyTo: "configs/**,internal/config/**"
-      - "docs/DEVELOPMENT.md"

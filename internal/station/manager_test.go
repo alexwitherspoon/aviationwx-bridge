@@ -681,29 +681,22 @@ func TestCatchupSuccessClearsLastPostError(t *testing.T) {
 		t.Fatalf("setup: want LastPostError, got %+v", found)
 	}
 
+	// The ring empties the instant the queued request is popped, before the
+	// re-POST completes and clears LastPostError, so ring length is not a
+	// reliable completion signal. Poll for the healed status instead.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if mgr.ring.Len() == 0 {
-			break
+		for _, s := range mgr.StatusSnapshot() {
+			if s.ID != "station-a" {
+				continue
+			}
+			if s.LastPostError == "" && !s.LastPostAt.IsZero() {
+				return // healed
+			}
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if mgr.ring.Len() != 0 {
-		t.Fatalf("ring len = %d, want drained", mgr.ring.Len())
-	}
-	for _, s := range mgr.StatusSnapshot() {
-		if s.ID != "station-a" {
-			continue
-		}
-		if s.LastPostError != "" {
-			t.Fatalf("LastPostError still %q after catch-up", s.LastPostError)
-		}
-		if s.LastPostAt.IsZero() {
-			t.Fatal("LastPostAt still zero after catch-up")
-		}
-		return
-	}
-	t.Fatal("station-a missing")
+	t.Fatal("LastPostError not cleared after catch-up (timed out)")
 }
 
 func TestUplinkBreakerFailFastQueuesWithoutDial(t *testing.T) {

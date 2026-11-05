@@ -95,6 +95,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		providers: map[string]Provider{
 			ProviderDavisWeatherLinkLive: NewDavis(),
 			ProviderEcowittGateway:       NewEcowitt(),
+			ProviderWeatherLinkIP:        NewWeatherLinkIP(),
 		},
 		workers:         make(map[string]*stationWorker),
 		status:          make(map[string]StationStatus),
@@ -862,6 +863,8 @@ func pollInterval(st config.Station) time.Duration {
 		switch st.Type {
 		case config.StationTypeEcowittGateway:
 			sec = config.DefaultEcowittPollIntervalSeconds
+		case config.StationTypeWeatherLinkIP:
+			sec = config.DefaultWeatherLinkIPPollIntervalSeconds
 		default:
 			sec = config.DefaultDavisPollIntervalSeconds
 		}
@@ -871,7 +874,10 @@ func pollInterval(st config.Station) time.Duration {
 	if st.Type == config.StationTypeEcowittGateway {
 		minSec = config.DefaultEcowittPollIntervalSeconds
 	}
-	if (st.Type == config.StationTypeDavisWeatherLinkLive || st.Type == config.StationTypeEcowittGateway) &&
+	if st.Type == config.StationTypeWeatherLinkIP {
+		minSec = config.DefaultWeatherLinkIPPollIntervalSeconds
+	}
+	if (st.Type == config.StationTypeDavisWeatherLinkLive || st.Type == config.StationTypeEcowittGateway || st.Type == config.StationTypeWeatherLinkIP) &&
 		d < time.Duration(minSec)*time.Second {
 		d = time.Duration(minSec) * time.Second
 	}
@@ -889,7 +895,7 @@ func shouldRunPollWorker(st config.Station) bool {
 	switch st.Type {
 	case config.StationTypeDavisWeatherLinkLive:
 		return st.Txid != nil
-	case config.StationTypeEcowittGateway:
+	case config.StationTypeEcowittGateway, config.StationTypeWeatherLinkIP:
 		return strings.TrimSpace(st.Host) != ""
 	default:
 		return false

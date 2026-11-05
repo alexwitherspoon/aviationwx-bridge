@@ -13,6 +13,7 @@ const (
 	StationTypeDavisWeatherLinkLive = "davis_weatherlink_live"
 	StationTypeHTTPInterceptor      = "http_interceptor"
 	StationTypeEcowittGateway       = "ecowitt_gateway"
+	StationTypeWeatherLinkIP        = "davis_weatherlink_ip"
 )
 
 // DefaultDavisPollIntervalSeconds is the Davis Local API current_conditions floor.
@@ -20,6 +21,11 @@ const DefaultDavisPollIntervalSeconds = 10
 
 // DefaultEcowittPollIntervalSeconds is the Ecowitt get_livedata_info poll floor.
 const DefaultEcowittPollIntervalSeconds = 10
+
+// DefaultWeatherLinkIPPollIntervalSeconds is the legacy Davis IP logger floor.
+// Each poll is a fresh TCP connect + wake + GETTIME + LOOP, so it is slower
+// than the HTTP poll providers.
+const DefaultWeatherLinkIPPollIntervalSeconds = 60
 
 // DefaultHTTPInterceptorListenAddr is the shared ingest bind for interceptor stations.
 const DefaultHTTPInterceptorListenAddr = "0.0.0.0:8090"
@@ -97,6 +103,10 @@ func NormalizeStationDefaults(st *Station) {
 		if st.PollIntervalSeconds <= 0 {
 			st.PollIntervalSeconds = DefaultEcowittPollIntervalSeconds
 		}
+	case StationTypeWeatherLinkIP:
+		if st.PollIntervalSeconds <= 0 {
+			st.PollIntervalSeconds = DefaultWeatherLinkIPPollIntervalSeconds
+		}
 	case StationTypeHTTPInterceptor:
 		st.ListenAddr = strings.TrimSpace(st.ListenAddr)
 		st.ListenPath = strings.TrimSpace(st.ListenPath)
@@ -126,6 +136,8 @@ func ValidateStation(st Station) error {
 		return validateDavisStation(st)
 	case StationTypeEcowittGateway:
 		return validateEcowittStation(st)
+	case StationTypeWeatherLinkIP:
+		return validateWeatherLinkIPStation(st)
 	case StationTypeHTTPInterceptor:
 		return validateHTTPInterceptorStation(st)
 	case "":
@@ -151,6 +163,16 @@ func validateEcowittStation(st Station) error {
 	}
 	if st.PollIntervalSeconds > 0 && st.PollIntervalSeconds < DefaultEcowittPollIntervalSeconds {
 		return fmt.Errorf("ecowitt poll_interval_seconds must be >= %d", DefaultEcowittPollIntervalSeconds)
+	}
+	return nil
+}
+
+func validateWeatherLinkIPStation(st Station) error {
+	if strings.TrimSpace(st.Host) == "" {
+		return fmt.Errorf("station host is required")
+	}
+	if st.PollIntervalSeconds > 0 && st.PollIntervalSeconds < DefaultWeatherLinkIPPollIntervalSeconds {
+		return fmt.Errorf("weatherlink_ip poll_interval_seconds must be >= %d", DefaultWeatherLinkIPPollIntervalSeconds)
 	}
 	return nil
 }

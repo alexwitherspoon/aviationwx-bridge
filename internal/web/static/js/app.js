@@ -456,6 +456,7 @@ function updateStationsDisplay() {
             const lanOk = Boolean(rt.lan_ok);
             const isInterceptor = cfg.type === 'http_interceptor';
             const isEcowitt = cfg.type === 'ecowitt_gateway';
+            const isWeatherLinkIP = cfg.type === 'davis_weatherlink_ip';
             const needsTxid = cfg.type === 'davis_weatherlink_live' && (cfg.txid == null || cfg.txid === '');
             let lanLabel = 'Offline';
             let lanClass = 'error';
@@ -482,12 +483,14 @@ function updateStationsDisplay() {
                 ? 'Davis WeatherLink Live'
                 : (isInterceptor
                     ? 'HTTP Interceptor (WU)'
-                    : (isEcowitt ? 'Ecowitt / Ambient Gateway' : escapeHtml(cfg.type || 'Station')));
+                    : (isEcowitt ? 'Ecowitt / Ambient Gateway' : (isWeatherLinkIP ? 'Davis WeatherLinkIP' : escapeHtml(cfg.type || 'Station'))));
             const txidLabel = isInterceptor
                 ? (cfg.listen_path ? escapeHtml(cfg.listen_path) : 'WU path')
                 : (isEcowitt
                     ? 'LAN HTTP'
-                    : (cfg.txid != null ? `Transmitter ${escapeHtml(String(cfg.txid))}` : 'No transmitter'));
+                    : (isWeatherLinkIP
+                        ? 'TCP 22222'
+                        : (cfg.txid != null ? `Transmitter ${escapeHtml(String(cfg.txid))}` : 'No transmitter')));
             return `
             <div class="station-card" data-station-id="${escapeHtml(cfg.id)}">
                 <div class="station-card-header">
@@ -553,11 +556,12 @@ function editStation(id) {
 
 function getStationFormHtml(st = null) {
     const isEdit = st !== null;
-    const poll = st?.poll_interval_seconds || 10;
-    const txid = st?.txid != null ? String(st.txid) : '';
     const typ = st?.type || 'davis_weatherlink_live';
+    const poll = st?.poll_interval_seconds || (typ === 'davis_weatherlink_ip' ? 60 : 10);
+    const txid = st?.txid != null ? String(st.txid) : '';
     const isInterceptor = typ === 'http_interceptor';
     const isEcowitt = typ === 'ecowitt_gateway';
+    const isWeatherLinkIP = typ === 'davis_weatherlink_ip';
     const showHostPoll = !isInterceptor;
     const showTxid = typ === 'davis_weatherlink_live';
     const listenAddr = st?.listen_addr || '0.0.0.0:8090';
@@ -565,7 +569,9 @@ function getStationFormHtml(st = null) {
     const dialect = st?.dialect || 'wunderground';
     const hostHelp = isEcowitt
         ? 'Prefer a static IP. Discover probes GET /get_livedata_info on your LAN (/24-/30). Point the wind vane true north. Missing gateway time (common_list 0x18) skips weather upload.'
-        : 'Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.';
+        : (isWeatherLinkIP
+            ? 'Prefer a static IP. The bridge speaks the Vantage serial protocol over raw TCP port 22222 (no HTTP and no network discovery). Point the wind vane true north.'
+            : 'Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.');
     return `
         <form id="stationForm" onsubmit="saveStation(event, ${isEdit ? `'${st.id}'` : 'null'})">
             <div class="form-section">
@@ -586,6 +592,7 @@ function getStationFormHtml(st = null) {
                     <select id="stType" class="form-control" required onchange="onStationTypeChange()">
                         <option value="davis_weatherlink_live" ${typ === 'davis_weatherlink_live' ? 'selected' : ''}>Davis WeatherLink Live (LAN)</option>
                         <option value="ecowitt_gateway" ${typ === 'ecowitt_gateway' ? 'selected' : ''}>Ecowitt / Ambient Gateway (LAN)</option>
+                        <option value="davis_weatherlink_ip" ${typ === 'davis_weatherlink_ip' ? 'selected' : ''}>Davis WeatherLinkIP (legacy LAN)</option>
                         <option value="http_interceptor" ${typ === 'http_interceptor' ? 'selected' : ''}>HTTP Interceptor (Weather Underground)</option>
                     </select>
                 </div>
@@ -674,6 +681,7 @@ function onStationTypeChange() {
     const typ = document.getElementById('stType')?.value || 'davis_weatherlink_live';
     const isInterceptor = typ === 'http_interceptor';
     const isDavis = typ === 'davis_weatherlink_live';
+    const isWeatherLinkIP = typ === 'davis_weatherlink_ip';
     const davis = document.getElementById('stationDavisFields');
     const interceptor = document.getElementById('stationInterceptorFields');
     const txid = document.getElementById('stationTxidSection');
@@ -682,6 +690,7 @@ function onStationTypeChange() {
     const hostHelp = document.getElementById('stHostHelp');
     const listenAddr = document.getElementById('stListenAddr');
     const listenPath = document.getElementById('stListenPath');
+    const poll = document.getElementById('stPoll');
     if (davis) davis.hidden = isInterceptor;
     if (interceptor) interceptor.hidden = !isInterceptor;
     if (txid) txid.hidden = !isDavis;
@@ -689,10 +698,20 @@ function onStationTypeChange() {
     if (host) host.required = !isInterceptor;
     if (listenAddr) listenAddr.required = isInterceptor;
     if (listenPath) listenPath.required = isInterceptor;
+    if (poll) {
+        const min = isWeatherLinkIP ? 60 : 10;
+        poll.min = String(min);
+        const current = parseInt(poll.value, 10);
+        if (!Number.isFinite(current) || current < min) {
+            poll.value = String(min);
+        }
+    }
     if (hostHelp) {
         hostHelp.textContent = typ === 'ecowitt_gateway'
             ? 'Prefer a static IP. Discover probes GET /get_livedata_info on your LAN (/24-/30). Point the wind vane true north. Missing gateway time (common_list 0x18) skips weather upload.'
-            : 'Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.';
+            : (isWeatherLinkIP
+                ? 'Prefer a static IP. The bridge speaks the Vantage serial protocol over raw TCP port 22222 (no HTTP and no network discovery). Point the wind vane true north.'
+                : 'Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.');
     }
 }
 
@@ -716,7 +735,7 @@ function buildStationConfigFromForm() {
     }
     const host = document.getElementById('stHost')?.value?.trim();
     if (!host) return null;
-    const poll = parseInt(document.getElementById('stPoll')?.value, 10) || 10;
+    const poll = parseInt(document.getElementById('stPoll')?.value, 10) || (type === 'davis_weatherlink_ip' ? 60 : 10);
     body.host = host;
     body.poll_interval_seconds = poll;
     if (type === 'davis_weatherlink_live') {

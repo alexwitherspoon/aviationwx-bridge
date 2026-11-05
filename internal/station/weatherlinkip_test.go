@@ -65,15 +65,17 @@ func TestWeatherLinkIPPoll(t *testing.T) {
 		_, _ = io.ReadFull(conn, buf)
 		_, _ = conn.Write([]byte("\n\r"))
 
-		// GETTIME: read "GETTIME\n", write 8 bytes (6 time + 2 CRC).
+		// GETTIME: read "GETTIME\n", write ACK, then 8 bytes (6 time + 2 CRC).
 		cmd := make([]byte, 8)
 		_, _ = io.ReadFull(conn, cmd)
+		_, _ = conn.Write([]byte{weatherLinkIPACK})
 		timeCRC := vantageCRC16(timeBytes)
 		_, _ = conn.Write(append(append([]byte{}, timeBytes...), byte(timeCRC>>8), byte(timeCRC)))
 
-		// LOOP 1: read "LOOP 1\n", write 99 bytes (97 data + 2 CRC).
+		// LOOP 1: read "LOOP 1\n", write ACK, then 99 bytes (97 data + 2 CRC).
 		loopCmd := make([]byte, 7)
 		_, _ = io.ReadFull(conn, loopCmd)
+		_, _ = conn.Write([]byte{weatherLinkIPACK})
 		loopCRC := vantageCRC16(loopData)
 		_, _ = conn.Write(append(append([]byte{}, loopData...), byte(loopCRC>>8), byte(loopCRC)))
 	}()
@@ -91,5 +93,36 @@ func TestWeatherLinkIPPoll(t *testing.T) {
 	}
 	if obs.ProviderMeta["raw"] == nil {
 		t.Error("expected raw loop packet")
+	}
+}
+
+func TestWeatherLinkIPBadACK(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		// Wake: read '\n', write '\n\r'.
+		buf := make([]byte, 1)
+		_, _ = io.ReadFull(conn, buf)
+		_, _ = conn.Write([]byte("\n\r"))
+
+		// GETTIME: read "GETTIME\n", write a bogus ACK byte instead of 0x06.
+		cmd := make([]byte, 8)
+		_, _ = io.ReadFull(conn, cmd)
+		_, _ = conn.Write([]byte{0x00})
+	}()
+
+	st := config.Station{ID: "station-wlip", Type: config.StationTypeWeatherLinkIP, Host: ln.Addr().String()}
+	if _, err := NewWeatherLinkIP().Poll(context.Background(), st); err == nil {
+		t.Fatal("expected error on bad ACK")
 	}
 }

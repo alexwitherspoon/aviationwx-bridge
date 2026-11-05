@@ -17,6 +17,7 @@ const (
 	weatherLinkIPAPIMeta     = "vantage_serial_v1"
 	weatherLinkIPLoopSize    = 99
 	weatherLinkIPTimeSize    = 8
+	weatherLinkIPACK         = 0x06
 )
 
 // vantageCRCTable is the Davis CRC-CCITT (poly 0x1021) lookup table.
@@ -139,6 +140,9 @@ func weatherLinkIPGetTime(conn net.Conn) (time.Time, error) {
 	if _, err := conn.Write([]byte("GETTIME\n")); err != nil {
 		return time.Time{}, fmt.Errorf("weatherlink_ip gettime write: %w", err)
 	}
+	if err := readVantageACK(conn); err != nil {
+		return time.Time{}, fmt.Errorf("weatherlink_ip gettime ack: %w", err)
+	}
 	raw := make([]byte, weatherLinkIPTimeSize)
 	if _, err := io.ReadFull(conn, raw); err != nil {
 		return time.Time{}, fmt.Errorf("weatherlink_ip gettime read: %w", err)
@@ -158,6 +162,9 @@ func weatherLinkIPLoop(conn net.Conn) ([]byte, error) {
 	if _, err := conn.Write([]byte("LOOP 1\n")); err != nil {
 		return nil, fmt.Errorf("weatherlink_ip loop write: %w", err)
 	}
+	if err := readVantageACK(conn); err != nil {
+		return nil, fmt.Errorf("weatherlink_ip loop ack: %w", err)
+	}
 	raw := make([]byte, weatherLinkIPLoopSize)
 	if _, err := io.ReadFull(conn, raw); err != nil {
 		return nil, fmt.Errorf("weatherlink_ip loop read: %w", err)
@@ -166,6 +173,19 @@ func weatherLinkIPLoop(conn net.Conn) ([]byte, error) {
 		return nil, fmt.Errorf("weatherlink_ip loop CRC mismatch")
 	}
 	return raw, nil
+}
+
+// readVantageACK reads and validates the single-byte ACK (0x06) the logger
+// sends before each binary response.
+func readVantageACK(conn net.Conn) error {
+	buf := make([]byte, 1)
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		return fmt.Errorf("read ack: %w", err)
+	}
+	if buf[0] != weatherLinkIPACK {
+		return fmt.Errorf("unexpected ack %#x, want %#x", buf[0], weatherLinkIPACK)
+	}
+	return nil
 }
 
 // parseVantageTime parses the 6 time bytes of a GETTIME response.

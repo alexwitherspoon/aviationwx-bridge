@@ -681,6 +681,7 @@ function onStationTypeChange() {
     const typ = document.getElementById('stType')?.value || 'davis_weatherlink_live';
     const isInterceptor = typ === 'http_interceptor';
     const isDavis = typ === 'davis_weatherlink_live';
+    const isWeatherLinkIP = typ === 'davis_weatherlink_ip';
     const davis = document.getElementById('stationDavisFields');
     const interceptor = document.getElementById('stationInterceptorFields');
     const txid = document.getElementById('stationTxidSection');
@@ -689,6 +690,7 @@ function onStationTypeChange() {
     const hostHelp = document.getElementById('stHostHelp');
     const listenAddr = document.getElementById('stListenAddr');
     const listenPath = document.getElementById('stListenPath');
+    const poll = document.getElementById('stPoll');
     if (davis) davis.hidden = isInterceptor;
     if (interceptor) interceptor.hidden = !isInterceptor;
     if (txid) txid.hidden = !isDavis;
@@ -696,10 +698,20 @@ function onStationTypeChange() {
     if (host) host.required = !isInterceptor;
     if (listenAddr) listenAddr.required = isInterceptor;
     if (listenPath) listenPath.required = isInterceptor;
+    if (poll) {
+        const min = isWeatherLinkIP ? 60 : 10;
+        poll.min = String(min);
+        const current = parseInt(poll.value, 10);
+        if (!Number.isFinite(current) || current < min) {
+            poll.value = String(min);
+        }
+    }
     if (hostHelp) {
         hostHelp.textContent = typ === 'ecowitt_gateway'
             ? 'Prefer a static IP. Discover probes GET /get_livedata_info on your LAN (/24-/30). Point the wind vane true north. Missing gateway time (common_list 0x18) skips weather upload.'
-            : 'Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.';
+            : (isWeatherLinkIP
+                ? 'Prefer a static IP. The bridge speaks the Vantage serial protocol over raw TCP port 22222 (no HTTP and no network discovery). Point the wind vane true north.'
+                : 'Prefer a static IP or reserved hostname. Enter the address manually, or use Discover to find Davis stations on your network (IPv4 scan). Point the wind vane true north.');
     }
 }
 
@@ -723,7 +735,7 @@ function buildStationConfigFromForm() {
     }
     const host = document.getElementById('stHost')?.value?.trim();
     if (!host) return null;
-    const poll = parseInt(document.getElementById('stPoll')?.value, 10) || 10;
+    const poll = parseInt(document.getElementById('stPoll')?.value, 10) || (type === 'davis_weatherlink_ip' ? 60 : 10);
     body.host = host;
     body.poll_interval_seconds = poll;
     if (type === 'davis_weatherlink_live') {

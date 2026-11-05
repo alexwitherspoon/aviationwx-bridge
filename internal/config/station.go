@@ -177,8 +177,16 @@ func validateTempestUDPStation(st Station) error {
 	if addr == "" {
 		addr = DefaultTempestUDPListenAddr
 	}
-	if _, _, err := net.SplitHostPort(addr); err != nil {
+	_, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
 		return fmt.Errorf("listen_addr must be host:port (got %q)", st.ListenAddr)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return fmt.Errorf("listen_addr port must be an integer (got %q)", portStr)
+	}
+	if port < 0 || port > 65535 {
+		return fmt.Errorf("listen_addr port must be 0-65535 (got %d)", port)
 	}
 	return nil
 }

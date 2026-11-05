@@ -745,8 +745,7 @@ function buildStationConfigFromForm() {
         const listenAddr = document.getElementById('stTempestListenAddr')?.value?.trim();
         if (!listenAddr) return null;
         body.listen_addr = listenAddr;
-        const serial = document.getElementById('stSerialNumber')?.value?.trim();
-        if (serial) body.serial_number = serial;
+        body.serial_number = document.getElementById('stSerialNumber')?.value?.trim() || '';
         return body;
     }
     const host = document.getElementById('stHost')?.value?.trim();

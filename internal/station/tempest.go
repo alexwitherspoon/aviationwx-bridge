@@ -3,6 +3,7 @@ package station
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -13,6 +14,10 @@ import (
 )
 
 const tempestAPIMeta = "weatherflow_tempest_udp_v1"
+
+// errTempestNoObsTime marks a Tempest datagram with no observation epoch
+// (device_status / hub_status); it is a status heartbeat, not a fault.
+var errTempestNoObsTime = errors.New("tempest datagram has no observation time")
 
 // tempestMaxDatagram bounds a single UDP datagram; Tempest JSON is well under 1 KB.
 const tempestMaxDatagram = 8 << 10
@@ -31,7 +36,7 @@ func buildTempestObservation(cfg config.Station, raw json.RawMessage) (*Observat
 	}
 	epoch, ok := tempestEpoch(raw)
 	if !ok {
-		return nil, fmt.Errorf("tempest datagram has no observation time")
+		return nil, errTempestNoObsTime
 	}
 	return &Observation{
 		SourceID:   cfg.ID,
@@ -199,6 +204,9 @@ func (h *TempestHub) handleDatagram(b []byte) {
 	}
 	obs, err := buildTempestObservation(st, b)
 	if err != nil {
+		if errors.Is(err, errTempestNoObsTime) {
+			return // status-only datagram: not an observation, not a fault
+		}
 		h.mgr.setStatus(st.ID, func(s *StationStatus) {
 			s.Degraded = true
 			s.LastPollError = err.Error()
@@ -292,6 +300,11 @@ func (m *Manager) TestTempestListen(ctx context.Context, st config.Station) (*Ob
 	}
 	conn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
+		if m.tempestHub != nil {
+			if la := m.tempestHub.localAddr(); la != nil && la.Port == udpAddr.Port {
+				return nil, fmt.Errorf("listen address is in use by the running Tempest listener; check Recent payloads, or pause the station to test")
+			}
+		}
 		return nil, fmt.Errorf("tempest test listen: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
@@ -303,13 +316,27 @@ func (m *Manager) TestTempestListen(ctx context.Context, st config.Station) (*Ob
 	ch := make(chan result, 1)
 	go func() {
 		buf := make([]byte, tempestMaxDatagram)
-		n, _, err := conn.ReadFromUDP(buf)
-		if err != nil {
-			ch <- result{nil, err}
+		for {
+			n, _, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				ch <- result{nil, err}
+				return
+			}
+			if want := st.SerialNumber; want != "" {
+				var meta struct {
+					Serial string `json:"serial_number"`
+				}
+				if json.Unmarshal(buf[:n], &meta) != nil || meta.Serial != want {
+					continue
+				}
+			}
+			obs, err := buildTempestObservation(st, buf[:n])
+			if errors.Is(err, errTempestNoObsTime) {
+				continue
+			}
+			ch <- result{obs, err}
 			return
 		}
-		obs, err := buildTempestObservation(st, buf[:n])
-		ch <- result{obs, err}
 	}()
 
 	select {

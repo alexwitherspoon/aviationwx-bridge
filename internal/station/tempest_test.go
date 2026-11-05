@@ -1,6 +1,7 @@
 package station
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -69,6 +70,14 @@ func TestBuildTempestObservation(t *testing.T) {
 				t.Error("expected raw preserved")
 			}
 		})
+	}
+}
+
+func TestTempestStatusDatagramSentinel(t *testing.T) {
+	cfg := config.Station{ID: "s", Type: config.StationTypeTempestUDP}
+	_, err := buildTempestObservation(cfg, []byte(`{"serial_number":"AR-00004049","type":"device_status","hub_sn":"HB-00000001","timestamp":1510855923}`))
+	if !errors.Is(err, errTempestNoObsTime) {
+		t.Fatalf("err = %v, want errTempestNoObsTime", err)
 	}
 }
 

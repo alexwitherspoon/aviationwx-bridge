@@ -8,6 +8,44 @@ import (
 	"github.com/alexwitherspoon/aviationwx-bridge/internal/config"
 )
 
+func TestTempestStatusDatagramDoesNotDegrade(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := config.NewService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Catch-all station (no serial filter) receives every datagram.
+	if _, err := svc.AddStation(config.Station{
+		ID:         "station-tempest",
+		Name:       "Tempest",
+		Type:       config.StationTypeTempestUDP,
+		Enabled:    true,
+		ListenAddr: "127.0.0.1:0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakePoster{configured: true}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: poster})
+	mgr.SyncFromConfig()
+	defer mgr.Stop()
+
+	if mgr.tempestHub == nil {
+		t.Fatal("tempest hub not started")
+	}
+	mgr.tempestHub.handleDatagram([]byte(`{"serial_number":"AR-00004049","type":"device_status","hub_sn":"HB-00000001","timestamp":1510855923,"uptime":2189,"voltage":3.50}`))
+
+	for _, s := range mgr.StatusSnapshot() {
+		if s.ID != "station-tempest" {
+			continue
+		}
+		if s.Degraded {
+			t.Fatalf("station degraded by status-only datagram: %q", s.LastPollError)
+		}
+		return
+	}
+	t.Fatal("station-tempest missing from status")
+}
+
 func TestTempestUDPListenerPostsObservation(t *testing.T) {
 	dir := t.TempDir()
 	svc, err := config.NewService(dir)

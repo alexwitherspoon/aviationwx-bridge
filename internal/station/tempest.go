@@ -298,10 +298,14 @@ func (m *Manager) TestTempestListen(ctx context.Context, st config.Station) (*Ob
 	if err != nil {
 		return nil, fmt.Errorf("tempest resolve listen addr: %w", err)
 	}
+	m.mu.Lock()
+	hub := m.tempestHub
+	m.mu.Unlock()
+
 	conn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
-		if m.tempestHub != nil {
-			if la := m.tempestHub.localAddr(); la != nil && la.Port == udpAddr.Port {
+		if hub != nil {
+			if la := hub.localAddr(); la != nil && la.Port == udpAddr.Port {
 				return nil, fmt.Errorf("listen address is in use by the running Tempest listener; check Recent payloads, or pause the station to test")
 			}
 		}

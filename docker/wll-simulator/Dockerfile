@@ -4,7 +4,7 @@ RUN printf 'module wllsim\n\ngo 1.27.3\n' > go.mod
 COPY docker/wll-simulator/main.go ./main.go
 RUN CGO_ENABLED=0 go build -o /wll-simulator .
 
-FROM alpine:3.24.3
+FROM alpine:3.24.4
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /wll-simulator /usr/local/bin/wll-simulator
 EXPOSE 8080

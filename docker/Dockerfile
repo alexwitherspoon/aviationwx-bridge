@@ -32,7 +32,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     ./cmd/bridge
 
 # Stage 2: Runtime
-FROM alpine:3.24.3
+FROM alpine:3.24.4
 
 # Install runtime dependencies
 # - ffmpeg: RTSP capture

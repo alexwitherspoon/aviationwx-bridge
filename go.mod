@@ -9,8 +9,8 @@ require (
 	github.com/korylprince/go-onvif v0.1.5
 	github.com/mochi-mqtt/server/v2 v2.7.9
 	github.com/pkg/sftp v1.13.12
-	golang.org/x/crypto v0.58.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/crypto v0.59.0
+	golang.org/x/sys v0.50.0
 )
 
 require (
@@ -18,12 +18,10 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/icholy/digest v1.2.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
-	github.com/miekg/dns v1.1.72 // indirect
+	github.com/miekg/dns v1.1.73 // indirect
 	github.com/rs/xid v1.4.0 // indirect
-	golang.org/x/mod v0.31.0 // indirect
-	golang.org/x/net v0.60.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/tools v0.40.0 // indirect
+	golang.org/x/net v0.63.0 // indirect
+	golang.org/x/sync v0.25.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )

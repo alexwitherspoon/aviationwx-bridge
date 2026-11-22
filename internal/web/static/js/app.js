@@ -634,7 +634,7 @@ function getStationFormHtml(st = null) {
                                value="${escapeHtml(brokerUrl)}"
                                placeholder="tcp://192.168.1.50:1883"
                                ${isMqtt ? 'required' : ''}>
-                        <p class="form-help">LAN MQTT broker (tcp://host:port; default port 1883).</p>
+                        <p class="form-help">MQTT broker tcp://host:port (port 1883 default) or tls://host:port (port 8883 default).</p>
                     </div>
                     <div class="form-group">
                         <label for="stTopic">Topic</label>

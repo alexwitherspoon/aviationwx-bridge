@@ -184,8 +184,8 @@ func validateMQTTStation(st Station) error {
 		return fmt.Errorf("broker_url is required")
 	}
 	u, err := url.Parse(broker)
-	if err != nil || u.Scheme != "tcp" || u.Host == "" {
-		return fmt.Errorf("broker_url must be a tcp:// URL with a host (got %q)", redactURLUserInfo(st.BrokerURL))
+	if err != nil || (u.Scheme != "tcp" && u.Scheme != "tls") || u.Host == "" {
+		return fmt.Errorf("broker_url must be a tcp:// or tls:// URL with a host (got %q)", redactURLUserInfo(st.BrokerURL))
 	}
 	if u.User != nil {
 		return fmt.Errorf("broker_url must not contain credentials; use the username and password fields")
@@ -196,11 +196,11 @@ func validateMQTTStation(st Station) error {
 	return nil
 }
 
-// normalizeMQTTBrokerURL appends the default port 1883 to a portless tcp://
-// URL. paho dials the URL host verbatim, so a missing port would fail to
-// connect.
+// normalizeMQTTBrokerURL appends the default port to a portless broker URL:
+// 1883 for tcp, 8883 for tls. paho dials the URL host verbatim, so a missing
+// port would fail to connect.
 func normalizeMQTTBrokerURL(raw string) string {
-	if !strings.HasPrefix(raw, "tcp://") {
+	if !strings.HasPrefix(raw, "tcp://") && !strings.HasPrefix(raw, "tls://") {
 		return raw
 	}
 	u, err := url.Parse(raw)
@@ -208,7 +208,11 @@ func normalizeMQTTBrokerURL(raw string) string {
 		return raw
 	}
 	if u.Port() == "" {
-		u.Host = net.JoinHostPort(u.Hostname(), "1883")
+		port := "1883"
+		if u.Scheme == "tls" {
+			port = "8883"
+		}
+		u.Host = net.JoinHostPort(u.Hostname(), port)
 	}
 	return u.String()
 }

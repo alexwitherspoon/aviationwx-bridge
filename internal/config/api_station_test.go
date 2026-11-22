@@ -190,6 +190,14 @@ func TestValidateMQTTStation(t *testing.T) {
 	if err := ValidateStation(st); err == nil {
 		t.Fatal("expected unsupported scheme error")
 	}
+	st.BrokerURL = "http://localhost:80"
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected non-mqtt scheme rejected")
+	}
+	st.BrokerURL = "tls://broker.local"
+	if err := ValidateStation(st); err != nil {
+		t.Fatalf("tls:// broker rejected: %v", err)
+	}
 	st.BrokerURL = "tcp://localhost"
 	st.Topic = ""
 	if err := ValidateStation(st); err == nil {
@@ -220,5 +228,17 @@ func TestNormalizeMQTTBrokerURL(t *testing.T) {
 	NormalizeStationDefaults(&st)
 	if st.BrokerURL != "tcp://broker.local:1884" {
 		t.Fatalf("broker_url = %q, want port preserved", st.BrokerURL)
+	}
+
+	// tls:// gets the MQTT-over-TLS default port 8883.
+	st.BrokerURL = "tls://broker.local"
+	NormalizeStationDefaults(&st)
+	if st.BrokerURL != "tls://broker.local:8883" {
+		t.Fatalf("broker_url = %q, want tls default port appended", st.BrokerURL)
+	}
+	st.BrokerURL = "tls://broker.local:8884"
+	NormalizeStationDefaults(&st)
+	if st.BrokerURL != "tls://broker.local:8884" {
+		t.Fatalf("broker_url = %q, want tls port preserved", st.BrokerURL)
 	}
 }

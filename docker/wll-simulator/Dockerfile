@@ -1,4 +1,4 @@
-FROM golang:1.27.3-alpine3.24 AS builder
+FROM golang:1.27.4-alpine3.24 AS builder
 WORKDIR /src
 RUN printf 'module wllsim\n\ngo 1.27.3\n' > go.mod
 COPY docker/wll-simulator/main.go ./main.go

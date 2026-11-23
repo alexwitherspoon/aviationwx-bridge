@@ -208,6 +208,28 @@ func TestValidateMQTTStation(t *testing.T) {
 	if err := ValidateStation(st); err == nil {
 		t.Fatal("expected broker_url credentials rejected")
 	}
+
+	// Wildcard filters can match several publishers under one station identity.
+	st.BrokerURL = "tcp://localhost:1883"
+	st.Topic = "weather/+"
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected plus wildcard topic rejected")
+	}
+	st.Topic = "weather/#"
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected hash wildcard topic rejected")
+	}
+
+	// An opaque URL keeps credentials in Opaque; the error must not echo them.
+	st.Topic = "weather/station"
+	st.BrokerURL = "tcp:user:secret@broker.local"
+	err := ValidateStation(st)
+	if err == nil {
+		t.Fatal("expected opaque broker_url rejected")
+	}
+	if strings.Contains(err.Error(), "secret") {
+		t.Fatalf("error echoes the opaque URL credential: %v", err)
+	}
 }
 
 func TestNormalizeMQTTBrokerURL(t *testing.T) {
@@ -240,5 +262,13 @@ func TestNormalizeMQTTBrokerURL(t *testing.T) {
 	NormalizeStationDefaults(&st)
 	if st.BrokerURL != "tls://broker.local:8884" {
 		t.Fatalf("broker_url = %q, want tls port preserved", st.BrokerURL)
+	}
+
+	// Uppercase scheme: url.Parse lowercases it, so the default port still
+	// applies instead of paho dialing a portless host.
+	st.BrokerURL = "TCP://broker.local"
+	NormalizeStationDefaults(&st)
+	if st.BrokerURL != "tcp://broker.local:1883" {
+		t.Fatalf("broker_url = %q, want uppercase scheme normalized with default port", st.BrokerURL)
 	}
 }

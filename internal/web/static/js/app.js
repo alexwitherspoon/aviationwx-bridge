@@ -642,7 +642,7 @@ function getStationFormHtml(st = null) {
                                value="${escapeHtml(topic)}"
                                placeholder="weather/station1"
                                ${isMqtt ? 'required' : ''}>
-                        <p class="form-help">Topic filter the station publishes JSON weather to.</p>
+                        <p class="form-help">Single topic the station publishes JSON weather to. Wildcard filters (+, #) are not allowed.</p>
                     </div>
                     <div class="form-group">
                         <label for="stUsername">Username (optional)</label>
@@ -2885,7 +2885,9 @@ function closeModal() {
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
-    return div.innerHTML;
+    // innerHTML leaves double quotes unescaped, but these values are written
+    // into quoted attributes; escape them or a saved value can break out.
+    return div.innerHTML.replace(/"/g, '&quot;');
 }
 
 // Live Logs

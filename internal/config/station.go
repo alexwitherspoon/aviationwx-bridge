@@ -190,21 +190,28 @@ func validateMQTTStation(st Station) error {
 	if u.User != nil {
 		return fmt.Errorf("broker_url must not contain credentials; use the username and password fields")
 	}
-	if strings.TrimSpace(st.Topic) == "" {
+	topic := strings.TrimSpace(st.Topic)
+	if topic == "" {
 		return fmt.Errorf("topic is required")
+	}
+	// A wildcard filter can match several publishers, and every match is
+	// posted under this one station identity. One topic per station.
+	if strings.ContainsAny(topic, "+#") {
+		return fmt.Errorf("topic must be a single topic; wildcard filters (+, #) match multiple publishers and are not allowed")
 	}
 	return nil
 }
 
 // normalizeMQTTBrokerURL appends the default port to a portless broker URL:
 // 1883 for tcp, 8883 for tls. paho dials the URL host verbatim, so a missing
-// port would fail to connect.
+// port would fail to connect. The scheme is read from the parsed URL, where
+// url.Parse has already lowercased it, so TCP:// normalizes like tcp://.
 func normalizeMQTTBrokerURL(raw string) string {
-	if !strings.HasPrefix(raw, "tcp://") && !strings.HasPrefix(raw, "tls://") {
-		return raw
-	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
+		return raw
+	}
+	if u.Scheme != "tcp" && u.Scheme != "tls" {
 		return raw
 	}
 	if u.Port() == "" {
@@ -219,11 +226,16 @@ func normalizeMQTTBrokerURL(raw string) string {
 
 // redactURLUserInfo strips userinfo from a URL so validation errors never
 // echo a credential-bearing broker_url. An unparseable URL is not echoed at
-// all: it could still carry embedded credentials.
+// all: it could still carry embedded credentials. Non-hierarchical URLs get
+// a fixed placeholder: url.Parse leaves their credentials in Opaque, which
+// cannot be stripped reliably.
 func redactURLUserInfo(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "(unparseable url)"
+	}
+	if u.Opaque != "" {
+		return u.Scheme + "://(opaque, redacted)"
 	}
 	u.User = nil
 	return u.String()

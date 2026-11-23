@@ -8,7 +8,7 @@ AviationWX.org Bridge is a lightweight daemon that:
 - Captures webcam snapshots from local network cameras (HTTP, ONVIF, RTSP)
 - Queues images locally with accurate observation timestamps
 - Uploads to `upload.aviationwx.org` via SFTP
-- Ingests nearby weather station observations (MQTT, WeatherFlow Tempest, Davis WeatherLink Live, legacy WeatherLinkIP, Ecowitt, WU-style HTTP) and uploads them
+- Ingests nearby weather station observations (MQTT, Davis WeatherLink Live, Ecowitt, WU-style HTTP) and uploads them
 - Uses tmpfs (RAM) for image buffering to avoid SD card wear
 - Provides a modern web console for configuration and monitoring
 
@@ -147,7 +147,7 @@ Access the web console at `http://<device-ip>:1229/` to configure:
 - Capture intervals (1 second to 30 minutes)
 - Local timezone (for EXIF interpretation)
 - Image processing (resize, quality)
-- Weather station sources (MQTT, Tempest, Davis, Ecowitt; optional)
+- Weather station sources (MQTT, Davis, Ecowitt; optional)
 - Queue management settings
 
 ### SFTP Credentials
@@ -193,7 +193,7 @@ Contact [contact@aviationwx.org](mailto:contact@aviationwx.org) to obtain upload
 - **NTP Health**: Automatic time validation and drift detection
 - **Auto Updates**: Supervisor applies GitHub releases on boot and daily, with rollback (Path A)
 - **Hot-Reload**: Camera, timezone, and SNTP config changes apply instantly (no restart)
-- **Weather Station Ingest**: MQTT, WeatherFlow Tempest (UDP), legacy Davis WeatherLinkIP, plus Davis WeatherLink Live and Ecowitt over LAN and WU-style HTTP interception
+- **Weather Station Ingest**: MQTT subscription plus Davis WeatherLink Live and Ecowitt over LAN and WU-style HTTP interception
 
 ---
 

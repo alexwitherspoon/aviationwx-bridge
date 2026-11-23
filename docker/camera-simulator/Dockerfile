@@ -1,5 +1,5 @@
 # Camera simulator for E2E harness: HTTP snapshots + mediamtx RTSP.
-FROM golang:1.27.3-alpine3.24 AS builder
+FROM golang:1.27.4-alpine3.24 AS builder
 WORKDIR /src
 RUN printf 'module sim\n\ngo 1.27.3\n' > go.mod
 COPY docker/camera-simulator/main.go ./main.go

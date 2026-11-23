@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,5 +125,9 @@ func TestWeatherLinkIPBadACK(t *testing.T) {
 	st := config.Station{ID: "station-wlip", Type: config.StationTypeWeatherLinkIP, Host: ln.Addr().String()}
 	if _, err := NewWeatherLinkIP().Poll(context.Background(), st); err == nil {
 		t.Fatal("expected error on bad ACK")
+	} else if !strings.Contains(err.Error(), "ack") {
+		// The error must name the ACK, so removing ACK validation (and hitting
+		// EOF on the payload read) cannot sneak past this test.
+		t.Fatalf("error does not identify the bad ACK: %v", err)
 	}
 }

@@ -562,6 +562,7 @@ function getStationFormHtml(st = null) {
     const isInterceptor = typ === 'http_interceptor';
     const isEcowitt = typ === 'ecowitt_gateway';
     const isWeatherLinkIP = typ === 'davis_weatherlink_ip';
+    const pollFloor = isWeatherLinkIP ? 60 : 10;
     const showHostPoll = !isInterceptor;
     const showTxid = typ === 'davis_weatherlink_live';
     const listenAddr = st?.listen_addr || '0.0.0.0:8090';
@@ -620,8 +621,8 @@ function getStationFormHtml(st = null) {
                     </div>
                     <div class="form-group">
                         <label for="stPoll">Poll interval (seconds)</label>
-                        <input type="number" id="stPoll" class="form-control" min="10" max="3600" value="${poll}">
-                        <p class="form-help">How often to read the station. Minimum 10 seconds.</p>
+                        <input type="number" id="stPoll" class="form-control" min="${pollFloor}" max="3600" value="${poll}">
+                        <p class="form-help">How often to read the station. Minimum ${pollFloor} seconds.</p>
                     </div>
                 </div>
                 <div id="stationInterceptorFields" ${isInterceptor ? '' : 'hidden'}>

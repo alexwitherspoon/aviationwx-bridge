@@ -128,9 +128,9 @@ func TestWeatherLinkIPBadACK(t *testing.T) {
 	st := config.Station{ID: "station-wlip", Type: config.StationTypeWeatherLinkIP, Host: ln.Addr().String()}
 	if _, err := NewWeatherLinkIP().Poll(context.Background(), st); err == nil {
 		t.Fatal("expected error on bad ACK")
-	} else if !strings.Contains(err.Error(), "unexpected ack") {
-		// The error must name the unexpected ACK value, so removing ACK
+	} else if !strings.Contains(err.Error(), "unexpected ack 0x0") {
+		// The error must name the exact bad byte (0x0), so removing ACK
 		// validation cannot pass by falling through to a payload EOF.
-		t.Fatalf("error does not identify the bad ACK: %v", err)
+		t.Fatalf("error does not identify the bad ACK byte: %v", err)
 	}
 }

@@ -120,14 +120,17 @@ func TestWeatherLinkIPBadACK(t *testing.T) {
 		cmd := make([]byte, 8)
 		_, _ = io.ReadFull(conn, cmd)
 		_, _ = conn.Write([]byte{0x00})
+		// Keep the connection open so the client's ACK read reliably gets the
+		// 0x00 byte instead of an EOF, and the error names the bad value.
+		time.Sleep(100 * time.Millisecond)
 	}()
 
 	st := config.Station{ID: "station-wlip", Type: config.StationTypeWeatherLinkIP, Host: ln.Addr().String()}
 	if _, err := NewWeatherLinkIP().Poll(context.Background(), st); err == nil {
 		t.Fatal("expected error on bad ACK")
-	} else if !strings.Contains(err.Error(), "ack") {
-		// The error must name the ACK, so removing ACK validation (and hitting
-		// EOF on the payload read) cannot sneak past this test.
+	} else if !strings.Contains(err.Error(), "unexpected ack") {
+		// The error must name the unexpected ACK value, so removing ACK
+		// validation cannot pass by falling through to a payload EOF.
 		t.Fatalf("error does not identify the bad ACK: %v", err)
 	}
 }

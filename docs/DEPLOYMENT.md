@@ -55,6 +55,8 @@ The supervised install needs a Linux host with Docker and systemd (Raspberry Pi 
 
 AviationWX.org Bridge is a **local LAN utility**: the web console and health endpoints are for trusted local operators and on-device scripts, not for the public internet. **Do not** expose port `1229` to the WAN (avoid router port forwarding and public binding). Use normal firewall or router rules so only your intended LAN (or VPN) can reach the device, consistent with any other admin UI on a small embedded host.
 
+Weather station ingest is the same trust boundary. Keep the ingest-only ports LAN-only: the Tempest UDP listener (default `0.0.0.0:50222`) and the HTTP interceptor listener (default `0.0.0.0:8090`) accept unauthenticated traffic by design, so anyone who can reach them can inject observations that get uploaded as the site's weather. MQTT brokers, Davis consoles, and WeatherLinkIP loggers are reached over the LAN from the bridge (outbound), so keep those devices and broker on the trusted network too. See [CONFIG_SCHEMA.md](CONFIG_SCHEMA.md) for per-station listen addresses and transport options.
+
 ### Automatic Updates
 
 The supervisor checks for updates **on every boot** (`aviationwx-boot-update.service`) and **once per day** (`aviationwx-daily-update.timer`: midnight local time, with up to 30 minutes jitter).

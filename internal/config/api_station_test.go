@@ -165,3 +165,23 @@ func TestValidateEcowittStation(t *testing.T) {
 		t.Fatal("expected poll floor error")
 	}
 }
+
+func TestValidateWeatherLinkIPStation(t *testing.T) {
+	st := Station{
+		ID:   "station-wlip",
+		Name: "WeatherLinkIP",
+		Type: StationTypeWeatherLinkIP,
+		Host: "192.168.1.70",
+	}
+	NormalizeStationDefaults(&st)
+	if st.PollIntervalSeconds != DefaultWeatherLinkIPPollIntervalSeconds {
+		t.Fatalf("poll_interval_seconds = %d, want default %d", st.PollIntervalSeconds, DefaultWeatherLinkIPPollIntervalSeconds)
+	}
+	if err := ValidateStation(st); err != nil {
+		t.Fatal(err)
+	}
+	st.Host = ""
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected host required error")
+	}
+}

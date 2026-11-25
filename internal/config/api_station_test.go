@@ -165,3 +165,110 @@ func TestValidateEcowittStation(t *testing.T) {
 		t.Fatal("expected poll floor error")
 	}
 }
+
+func TestValidateMQTTStation(t *testing.T) {
+	st := Station{
+		ID:        "station-mqtt",
+		Name:      "MQTT",
+		Type:      StationTypeMQTT,
+		BrokerURL: "tcp://localhost:1883",
+		Topic:     "weather/station",
+	}
+	NormalizeStationDefaults(&st)
+	if err := ValidateStation(st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Username != "" || st.Password != "" {
+		t.Fatal("unexpected creds from defaults")
+	}
+
+	st.BrokerURL = ""
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected broker_url required error")
+	}
+	st.BrokerURL = "ssl://localhost:8883"
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected unsupported scheme error")
+	}
+	st.BrokerURL = "http://localhost:80"
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected non-mqtt scheme rejected")
+	}
+	st.BrokerURL = "tls://broker.local"
+	if err := ValidateStation(st); err != nil {
+		t.Fatalf("tls:// broker rejected: %v", err)
+	}
+	st.BrokerURL = "tcp://localhost"
+	st.Topic = ""
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected topic required error")
+	}
+	st.Topic = "weather/station"
+	st.BrokerURL = "tcp://user:secret@localhost:1883"
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected broker_url credentials rejected")
+	}
+
+	// Wildcard filters can match several publishers under one station identity.
+	st.BrokerURL = "tcp://localhost:1883"
+	st.Topic = "weather/+"
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected plus wildcard topic rejected")
+	}
+	st.Topic = "weather/#"
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected hash wildcard topic rejected")
+	}
+
+	// An opaque URL keeps credentials in Opaque; the error must not echo them.
+	st.Topic = "weather/station"
+	st.BrokerURL = "tcp:user:secret@broker.local"
+	err := ValidateStation(st)
+	if err == nil {
+		t.Fatal("expected opaque broker_url rejected")
+	}
+	if strings.Contains(err.Error(), "secret") {
+		t.Fatalf("error echoes the opaque URL credential: %v", err)
+	}
+}
+
+func TestNormalizeMQTTBrokerURL(t *testing.T) {
+	st := Station{
+		ID:        "s",
+		Name:      "n",
+		Type:      StationTypeMQTT,
+		BrokerURL: "tcp://broker.local",
+		Topic:     "t",
+	}
+	NormalizeStationDefaults(&st)
+	if st.BrokerURL != "tcp://broker.local:1883" {
+		t.Fatalf("broker_url = %q, want default port appended", st.BrokerURL)
+	}
+
+	// Port present is left untouched.
+	st.BrokerURL = "tcp://broker.local:1884"
+	NormalizeStationDefaults(&st)
+	if st.BrokerURL != "tcp://broker.local:1884" {
+		t.Fatalf("broker_url = %q, want port preserved", st.BrokerURL)
+	}
+
+	// tls:// gets the MQTT-over-TLS default port 8883.
+	st.BrokerURL = "tls://broker.local"
+	NormalizeStationDefaults(&st)
+	if st.BrokerURL != "tls://broker.local:8883" {
+		t.Fatalf("broker_url = %q, want tls default port appended", st.BrokerURL)
+	}
+	st.BrokerURL = "tls://broker.local:8884"
+	NormalizeStationDefaults(&st)
+	if st.BrokerURL != "tls://broker.local:8884" {
+		t.Fatalf("broker_url = %q, want tls port preserved", st.BrokerURL)
+	}
+
+	// Uppercase scheme: url.Parse lowercases it, so the default port still
+	// applies instead of paho dialing a portless host.
+	st.BrokerURL = "TCP://broker.local"
+	NormalizeStationDefaults(&st)
+	if st.BrokerURL != "tcp://broker.local:1883" {
+		t.Fatalf("broker_url = %q, want uppercase scheme normalized with default port", st.BrokerURL)
+	}
+}

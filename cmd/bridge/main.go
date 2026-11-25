@@ -1005,6 +1005,9 @@ func (b *Bridge) testStationPoll(st config.Station) (map[string]interface{}, err
 	if st.Type == config.StationTypeHTTPInterceptor {
 		return b.testStationInterceptor(st)
 	}
+	if st.Type == config.StationTypeMQTT {
+		return b.testStationMQTT(st)
+	}
 	if strings.TrimSpace(st.Host) == "" {
 		return nil, fmt.Errorf("station host is required")
 	}
@@ -1022,6 +1025,23 @@ func (b *Bridge) testStationPoll(st config.Station) (map[string]interface{}, err
 	}
 	// Missing station ts leaves ObservedAt zero; omit so the console shows
 	// "no station timestamp" instead of year-1 RFC3339.
+	if !obs.ObservedAt.IsZero() {
+		out["observed_at"] = obs.ObservedAt.UTC().Format(time.RFC3339)
+	}
+	return out, nil
+}
+
+func (b *Bridge) testStationMQTT(st config.Station) (map[string]interface{}, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	obs, err := b.stationManager.TestMQTTSubscribe(ctx, st)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]interface{}{
+		"provider":      obs.Provider,
+		"provider_meta": obs.ProviderMeta,
+	}
 	if !obs.ObservedAt.IsZero() {
 		out["observed_at"] = obs.ObservedAt.UTC().Format(time.RFC3339)
 	}

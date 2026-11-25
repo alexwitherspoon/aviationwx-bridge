@@ -44,7 +44,7 @@ func (s *Server) addStation(w http.ResponseWriter, r *http.Request) {
 		st.Type = config.StationTypeDavisWeatherLinkLive
 	}
 	switch st.Type {
-	case config.StationTypeDavisWeatherLinkLive, config.StationTypeHTTPInterceptor, config.StationTypeEcowittGateway:
+	case config.StationTypeDavisWeatherLinkLive, config.StationTypeHTTPInterceptor, config.StationTypeEcowittGateway, config.StationTypeMQTT:
 		// ok
 	default:
 		http.Error(w, fmt.Sprintf("unsupported station type %q", st.Type), http.StatusBadRequest)
@@ -185,6 +185,38 @@ func (s *Server) updateStation(w http.ResponseWriter, r *http.Request, stationID
 			}
 			st.Dialect = dialect
 		}
+		if v, ok := raw["broker_url"]; ok {
+			var u string
+			if err := json.Unmarshal(v, &u); err != nil {
+				return fmt.Errorf("broker_url: %w", err)
+			}
+			st.BrokerURL = u
+		}
+		if v, ok := raw["topic"]; ok {
+			var topic string
+			if err := json.Unmarshal(v, &topic); err != nil {
+				return fmt.Errorf("topic: %w", err)
+			}
+			st.Topic = topic
+		}
+		if v, ok := raw["username"]; ok {
+			var user string
+			if err := json.Unmarshal(v, &user); err != nil {
+				return fmt.Errorf("username: %w", err)
+			}
+			st.Username = user
+		}
+		// password is write-only: omitting or sending empty keeps the current value,
+		// a non-empty value overwrites. The stored value is never returned via API.
+		if v, ok := raw["password"]; ok {
+			var pw string
+			if err := json.Unmarshal(v, &pw); err != nil {
+				return fmt.Errorf("password: %w", err)
+			}
+			if pw != "" {
+				st.Password = pw
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -217,6 +249,12 @@ func stationToMap(st config.Station) map[string]interface{} {
 		m["listen_addr"] = st.ListenAddr
 		m["listen_path"] = st.ListenPath
 		m["dialect"] = st.Dialect
+	case config.StationTypeMQTT:
+		m["broker_url"] = st.BrokerURL
+		m["topic"] = st.Topic
+		m["username"] = st.Username
+		// password is never returned; only a set-flag so the UI can show state.
+		m["password_set"] = st.Password != ""
 	default:
 		m["host"] = st.Host
 		m["poll_interval_seconds"] = st.PollIntervalSeconds

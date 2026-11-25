@@ -19,13 +19,24 @@ const tempestAPIMeta = "weatherflow_tempest_udp_v1"
 // (device_status / hub_status); it is a status heartbeat, not a fault.
 var errTempestNoObsTime = errors.New("tempest datagram has no observation time")
 
+// tempestForwardedType is the only datagram the bridge forwards. obs_st is
+// the station's full report (pressure, temperature, humidity, wind), one per
+// report interval. obs_air, obs_sky, rapid_wind, and evt_* are partial
+// records: the core keeps one latest record per source, so forwarding a
+// partial record would displace the full obs_st and drop temperature,
+// humidity, and pressure from the published snapshot until the next report.
+const tempestForwardedType = "obs_st"
+
 // tempestMaxDatagram bounds a single UDP datagram; Tempest JSON is well under 1 KB.
 const tempestMaxDatagram = 8 << 10
 
 // buildTempestObservation maps a WeatherFlow Tempest UDP datagram into an
 // Observation. observed_at is the packet's own observation epoch (index 0 of
 // obs/ob/evt), never the bridge clock; datagrams without an observation time
-// (device_status / hub_status) are rejected rather than posted.
+// (device_status / hub_status) are rejected rather than posted. It parses
+// every epoch-bearing type; the live path only forwards
+// tempestForwardedType, while the console Test capture accepts the fastest
+// datagram so a link check does not wait a full report interval.
 func buildTempestObservation(cfg config.Station, raw json.RawMessage) (*Observation, error) {
 	var rawMap map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
@@ -194,8 +205,14 @@ func (h *TempestHub) readLoop() {
 func (h *TempestHub) handleDatagram(b []byte) {
 	var meta struct {
 		Serial string `json:"serial_number"`
+		Type   string `json:"type"`
 	}
 	if err := json.Unmarshal(b, &meta); err != nil {
+		return
+	}
+	if meta.Type != tempestForwardedType {
+		// Partial record (obs_air, obs_sky, rapid_wind, evt_*): not
+		// forwarded, not a fault. See tempestForwardedType.
 		return
 	}
 	st, ok := h.stationFor(meta.Serial)
@@ -282,9 +299,11 @@ func (m *Manager) handleTempestObservation(st config.Station, obs *Observation) 
 // datagram.
 const tempestTestCaptureTimeout = 5 * time.Second
 
-// TestTempestListen binds a temporary UDP socket and returns the first received
-// observation, or an error if none arrives within the capture timeout. It is a
-// one-shot console Test, not a live listener.
+// TestTempestListen binds a temporary UDP socket and returns the first
+// received epoch-bearing datagram, or an error if none arrives within the
+// capture timeout. It is a one-shot link check, not a live listener: any
+// datagram proves the hub is broadcasting, so it does not wait for the full
+// obs_st report (which ships once per report interval).
 func (m *Manager) TestTempestListen(ctx context.Context, st config.Station) (*Observation, error) {
 	config.NormalizeStationDefaults(&st)
 	if st.Type != config.StationTypeTempestUDP {

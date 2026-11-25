@@ -44,6 +44,13 @@ const mqttConnectRetryInterval = 5 * time.Second
 // mqttTestConnectTimeout bounds the console Test broker connect attempt.
 const mqttTestConnectTimeout = 5 * time.Second
 
+// mqttConnectWatchdog bounds how long an initial connect may stay silent
+// before the station is marked degraded. paho retries a failed initial
+// connect forever without invoking the connection-lost handler, so without
+// this a wrong password or an unreachable broker would sit in "starting"
+// with no error.
+const mqttConnectWatchdog = 30 * time.Second
+
 // mqttTestCaptureTimeout bounds how long the console Test waits for a message.
 const mqttTestCaptureTimeout = 3 * time.Second
 
@@ -191,6 +198,13 @@ func (s *MQTTSource) deliverLoop() {
 		case <-s.done:
 			return
 		case m := <-s.msgCh:
+			// Stop may have closed done while the message sat in the queue;
+			// do not post an observation for a source that is going away.
+			select {
+			case <-s.done:
+				return
+			default:
+			}
 			s.handle(m.topic, m.payload, m.receivedAt)
 		}
 	}
@@ -233,6 +247,23 @@ func (s *MQTTSource) Start() error {
 	s.mu.Unlock()
 
 	tok := client.Connect()
+
+	// Watchdog for the silent-failure gap: with ConnectRetry on, a failed
+	// initial connect (unreachable broker, rejected credentials) retries in
+	// the background without touching the connection-lost handler. Surface
+	// it as a degradation; the connect handler clears it when the broker
+	// answers.
+	go func() {
+		time.Sleep(mqttConnectWatchdog)
+		s.mu.Lock()
+		stopped := s.stopped
+		s.mu.Unlock()
+		if stopped || client.IsConnectionOpen() {
+			return
+		}
+		s.reportStatus(false, "not connected; retrying in background")
+	}()
+
 	tok.Wait()
 
 	// Stop may have run while connect was in flight; disconnect rather than
@@ -303,15 +334,30 @@ func waitToken(ctx context.Context, tok paho.Token) error {
 // TestMQTTSubscribe connects to the configured broker, subscribes, and returns
 // the first received observation, or an error if none arrives before the
 // capture timeout. It is a one-shot console Test, not a live source.
+// savedPasswordApplies reports whether a Test request targets the same
+// broker and credential identity as the saved station. Both sides are
+// normalized first so default ports and scheme case compare equal.
+func savedPasswordApplies(st, saved config.Station) bool {
+	requested := st
+	config.NormalizeStationDefaults(&requested)
+	stored := saved
+	config.NormalizeStationDefaults(&stored)
+	return requested.BrokerURL == stored.BrokerURL && requested.Username == stored.Username
+}
+
 func (m *Manager) TestMQTTSubscribe(ctx context.Context, st config.Station) (*Observation, error) {
 	config.NormalizeStationDefaults(&st)
 	if st.Type != config.StationTypeMQTT {
 		return nil, fmt.Errorf("station type is not mqtt")
 	}
-	// The console form never returns a stored password, so resolve it from the
-	// saved station when the request carries an id and omits the secret.
+	// The console form never returns a stored password, so resolve it from
+	// the saved station when the request carries an id and omits the secret.
+	// The secret is reused only for the broker and username it belongs to;
+	// a request aimed at a different broker runs without it and fails at
+	// connect time rather than sending the saved password to a host the
+	// caller chose.
 	if st.ID != "" && st.Password == "" {
-		if saved, err := m.cfgService.GetStation(st.ID); err == nil {
+		if saved, err := m.cfgService.GetStation(st.ID); err == nil && savedPasswordApplies(st, *saved) {
 			st.Password = saved.Password
 		}
 	}
@@ -433,12 +479,12 @@ func (m *Manager) mqttSourceStatus(st config.Station) func(lanOK bool, msg strin
 		m.setStatus(st.ID, func(s *StationStatus) {
 			s.LANOK = lanOK
 			if lanOK {
-				// Back online: clear only the connectivity error we set; payload
-				// errors stay until the next good delivery.
-				if strings.HasPrefix(s.LastPollError, "mqtt: ") {
+				// Back online: clear only a connectivity degradation. A payload
+				// error stays until the next good delivery, which clears it.
+				if s.LastPollError == "" || strings.HasPrefix(s.LastPollError, "mqtt: ") {
 					s.LastPollError = ""
+					s.Degraded = false
 				}
-				s.Degraded = false
 				return
 			}
 			s.Degraded = true

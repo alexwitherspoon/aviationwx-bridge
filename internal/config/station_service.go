@@ -140,6 +140,11 @@ func (s *Service) saveStationFile(st Station) error {
 		if err := copyFile(path, backupPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not backup station config: %v\n", err)
 		}
+		// Tighten a pre-existing file that predates the 0600 default before
+		// new credentials are written into it.
+		if err := os.Chmod(path, 0600); err != nil {
+			return fmt.Errorf("set station config permissions: %w", err)
+		}
 	}
 
 	data, err := json.MarshalIndent(st, "", "  ")
@@ -148,11 +153,6 @@ func (s *Service) saveStationFile(st Station) error {
 	}
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write station config: %w", err)
-	}
-	// WriteFile applies the mode only on create; tighten a pre-existing file
-	// that predates the 0600 default.
-	if err := os.Chmod(path, 0600); err != nil {
-		return fmt.Errorf("set station config permissions: %w", err)
 	}
 
 	stationsDir := filepath.Join(s.baseDir, "stations")

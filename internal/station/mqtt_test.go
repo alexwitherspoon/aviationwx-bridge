@@ -123,3 +123,84 @@ func TestBuildMQTTObservationRejectsOversizedPayload(t *testing.T) {
 		t.Fatal("expected oversized payload error")
 	}
 }
+
+func TestSavedPasswordApplies(t *testing.T) {
+	saved := config.Station{ID: "s", Type: config.StationTypeMQTT, BrokerURL: "tcp://broker.local", Username: "op"}
+
+	// Same broker, port normalized on both sides.
+	st := config.Station{ID: "s", Type: config.StationTypeMQTT, BrokerURL: "tcp://broker.local:1883", Username: "op"}
+	if !savedPasswordApplies(st, saved) {
+		t.Fatal("expected the same broker with a default port to match")
+	}
+
+	// A different broker must not receive the saved secret.
+	st.BrokerURL = "tcp://other.local:1883"
+	if savedPasswordApplies(st, saved) {
+		t.Fatal("expected a different broker to not match")
+	}
+
+	// Same broker, different credential identity.
+	st.BrokerURL = "tcp://broker.local:1883"
+	st.Username = "other"
+	if savedPasswordApplies(st, saved) {
+		t.Fatal("expected a different username to not match")
+	}
+}
+
+func TestMQTTSourceStatusKeepsPayloadDegradation(t *testing.T) {
+	svc, err := config.NewService(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := svc.AddStation(config.Station{
+		ID:        "st-mqtt",
+		Name:      "MQTT",
+		Type:      config.StationTypeMQTT,
+		BrokerURL: "tcp://localhost:1883",
+		Topic:     "weather/t",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(ManagerConfig{ConfigService: svc, Poster: &fakePoster{configured: true}})
+	cb := mgr.mqttSourceStatus(st)
+
+	status := func() StationStatus {
+		for _, s := range mgr.StatusSnapshot() {
+			if s.ID == st.ID {
+				return s
+			}
+		}
+		t.Fatal("station status missing")
+		return StationStatus{}
+	}
+
+	// A payload error degrades the station; a reconnect must not clear it,
+	// because the last data state is still a malformed publish.
+	mgr.setStatus(st.ID, func(s *StationStatus) {
+		s.ID = st.ID
+		s.LANOK = true
+		s.Degraded = true
+		s.LastPollError = "payload: not a JSON object"
+	})
+	cb(true, "")
+	s := status()
+	if !s.Degraded {
+		t.Fatal("reconnect cleared a payload degradation")
+	}
+	if s.LastPollError != "payload: not a JSON object" {
+		t.Fatalf("reconnect cleared the payload error: %q", s.LastPollError)
+	}
+
+	// A connectivity degradation clears on reconnect.
+	mgr.setStatus(st.ID, func(s *StationStatus) {
+		s.ID = st.ID
+		s.Degraded = true
+		s.LastPollError = "mqtt: broker connection lost"
+	})
+	cb(true, "")
+	s = status()
+	if s.Degraded || s.LastPollError != "" {
+		t.Fatalf("reconnect left a connectivity degradation: degraded=%v err=%q", s.Degraded, s.LastPollError)
+	}
+}

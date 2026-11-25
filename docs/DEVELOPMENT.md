@@ -82,7 +82,7 @@ E2E Go tests live under `test/e2e/` with `//go:build e2e` and are excluded from 
 
 ## Config
 
-Create `docker/data/` with `global.json` and `cameras/*.json`. See CONFIG_SCHEMA.md.
+Create `docker/data/` with `global.json` and `cameras/*.json`; weather stations live in `stations/*.json` (optional). See CONFIG_SCHEMA.md.
 
 ## Dependency updates (Dependabot)
 

@@ -165,3 +165,32 @@ func TestValidateEcowittStation(t *testing.T) {
 		t.Fatal("expected poll floor error")
 	}
 }
+
+func TestValidateTempestUDPStation(t *testing.T) {
+	st := Station{
+		ID:   "station-tempest",
+		Name: "Tempest",
+		Type: StationTypeTempestUDP,
+	}
+	NormalizeStationDefaults(&st)
+	if st.ListenAddr != DefaultTempestUDPListenAddr {
+		t.Fatalf("listen_addr = %q, want default %q", st.ListenAddr, DefaultTempestUDPListenAddr)
+	}
+	if err := ValidateStation(st); err != nil {
+		t.Fatal(err)
+	}
+	st.ListenAddr = "not-an-addr"
+	if err := ValidateStation(st); err == nil {
+		t.Fatal("expected invalid listen_addr error")
+	}
+	for _, bad := range []string{"0.0.0.0:", "0.0.0.0:abc", "0.0.0.0:-1", "0.0.0.0:65536"} {
+		st.ListenAddr = bad
+		if err := ValidateStation(st); err == nil {
+			t.Fatalf("listen_addr %q: expected invalid port error", bad)
+		}
+	}
+	st.ListenAddr = "127.0.0.1:0" // ephemeral, used by the UDP listener test
+	if err := ValidateStation(st); err != nil {
+		t.Fatalf("listen_addr 127.0.0.1:0: %v", err)
+	}
+}

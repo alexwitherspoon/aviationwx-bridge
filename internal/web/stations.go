@@ -44,7 +44,7 @@ func (s *Server) addStation(w http.ResponseWriter, r *http.Request) {
 		st.Type = config.StationTypeDavisWeatherLinkLive
 	}
 	switch st.Type {
-	case config.StationTypeDavisWeatherLinkLive, config.StationTypeHTTPInterceptor, config.StationTypeEcowittGateway:
+	case config.StationTypeDavisWeatherLinkLive, config.StationTypeHTTPInterceptor, config.StationTypeEcowittGateway, config.StationTypeTempestUDP:
 		// ok
 	default:
 		http.Error(w, fmt.Sprintf("unsupported station type %q", st.Type), http.StatusBadRequest)
@@ -185,6 +185,13 @@ func (s *Server) updateStation(w http.ResponseWriter, r *http.Request, stationID
 			}
 			st.Dialect = dialect
 		}
+		if v, ok := raw["serial_number"]; ok {
+			var serial string
+			if err := json.Unmarshal(v, &serial); err != nil {
+				return fmt.Errorf("serial_number: %w", err)
+			}
+			st.SerialNumber = serial
+		}
 		return nil
 	})
 	if err != nil {
@@ -217,6 +224,9 @@ func stationToMap(st config.Station) map[string]interface{} {
 		m["listen_addr"] = st.ListenAddr
 		m["listen_path"] = st.ListenPath
 		m["dialect"] = st.Dialect
+	case config.StationTypeTempestUDP:
+		m["listen_addr"] = st.ListenAddr
+		m["serial_number"] = st.SerialNumber
 	default:
 		m["host"] = st.Host
 		m["poll_interval_seconds"] = st.PollIntervalSeconds
